@@ -66,6 +66,11 @@ impl DataDir {
     pub fn lock_path(&self) -> PathBuf {
         self.root.join("run.lock")
     }
+    /// Private working area of the VS Code replay (tier 2).
+    pub fn vscode_dir(&self) -> PathBuf {
+        self.root.join("vscode")
+    }
+
     pub fn kwin_dir(&self) -> PathBuf {
         self.root.join("kwin")
     }

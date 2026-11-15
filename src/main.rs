@@ -29,6 +29,11 @@ enum Command {
         /// input devices (no root or desktop needed).
         #[arg(long, value_name = "RATE", hide = true)]
         synthetic: Option<f64>,
+        /// Reconstruct VS Code sessions by replaying their keystrokes into a
+        /// sandboxed, invisible VS Code (no network, capped CPU/memory).
+        /// Falls back to generic reconstruction when it cannot.
+        #[arg(long)]
+        vscode_replay: bool,
     },
     /// Query what has been captured. Safe to run while `brain run` is running.
     Query {
@@ -80,9 +85,13 @@ fn main() -> ExitCode {
 fn dispatch(cli: Cli) -> Result<()> {
     let data_dir = DataDir::new(cli.data_dir);
     match cli.command {
-        Command::Run { synthetic } => {
+        Command::Run {
+            synthetic,
+            vscode_replay,
+        } => {
             let opts = brain::capture::RunOptions {
                 synthetic_rate: synthetic,
+                vscode_replay,
             };
             brain::capture::run(&data_dir, &opts)
         }

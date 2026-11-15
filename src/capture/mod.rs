@@ -18,6 +18,8 @@ use crate::datadir::DataDir;
 use crate::event::SystemState;
 use crate::eventlog::LogWriter;
 use crate::ingest::Ingester;
+use crate::reconstruct::tier2::{Tier2Result, Tier2Worker, VsCodeSnapshots};
+use crate::sessions::Tier2Snapshotter;
 use crate::store;
 use anyhow::{Context, Result};
 use input::{Control, ControlHandle, InputLoop};
@@ -37,6 +39,9 @@ pub struct RunOptions {
     /// Test hook: type a built-in corpus at this many keys per second instead
     /// of reading input devices (see [`synthetic`]). Desktop integration is off.
     pub synthetic_rate: Option<f64>,
+    /// Reconstruct VS Code sessions by replaying them into a sandboxed VS
+    /// Code (tier 2). Off by default.
+    pub vscode_replay: bool,
 }
 
 pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
@@ -50,17 +55,35 @@ pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
     data_dir.create()?;
     let _lock = data_dir.lock_exclusive()?;
     let log = LogWriter::open(&data_dir.log_path())?;
-    let ingester = Ingester::new(
-        store::open_writer(&data_dir.db_path())?,
-        &data_dir.log_path(),
-    )?;
+    let conn = store::open_writer(&data_dir.db_path())?;
+    let tier2: Option<Box<dyn Tier2Snapshotter>> = if opts.vscode_replay {
+        let snaps = VsCodeSnapshots::new(data_dir.vscode_dir().join("snapshots"))?;
+        snaps.prune(&conn)?;
+        Some(Box::new(snaps))
+    } else {
+        None
+    };
+    let ingester = Ingester::with_tier2(conn, &data_dir.log_path(), tier2)?;
+    let tier2_worker = if opts.vscode_replay {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = Tier2Worker::spawn(
+            data_dir.db_path(),
+            data_dir.log_path(),
+            data_dir.vscode_dir(),
+            tx,
+        )?;
+        eprintln!("brain: VS Code replay (tier 2) is on");
+        Some((worker, rx))
+    } else {
+        None
+    };
 
     let source = match opts.synthetic_rate {
         Some(rate) => start_synthetic(log, rate)?,
         None => start_capture(data_dir, log)?,
     };
     let recorder = source.recorder().clone();
-    let ingest = IngestThread::spawn(ingester, recorder.clone())?;
+    let ingest = IngestThread::spawn(ingester, recorder.clone(), tier2_worker)?;
 
     let sig = wait_for_signal(&signals)?;
     eprintln!("brain: received signal {sig}, stopping");
@@ -231,7 +254,11 @@ struct IngestThread {
 }
 
 impl IngestThread {
-    fn spawn(mut ingester: Ingester, recorder: Arc<Recorder>) -> Result<Self> {
+    fn spawn(
+        mut ingester: Ingester,
+        recorder: Arc<Recorder>,
+        tier2: Option<(Tier2Worker, std::sync::mpsc::Receiver<Tier2Result>)>,
+    ) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let thread = std::thread::Builder::new()
@@ -244,13 +271,29 @@ impl IngestThread {
                     if let Err(e) = recorder.sync() {
                         eprintln!("brain: warning: {e:#}");
                     }
+                    if let Some((_, results)) = &tier2 {
+                        while let Ok((id, r)) = results.try_recv() {
+                            ingester.add_tier2_result(id, r);
+                        }
+                    }
                     if let Err(e) = ingester.catch_up(1_000) {
                         eprintln!("brain: warning: ingest failed (will retry): {e:#}");
+                    }
+                    let jobs = ingester.take_tier2_jobs();
+                    if let Some((worker, _)) = &tier2 {
+                        for id in jobs {
+                            worker.submit(id);
+                        }
                     }
                     if stopping {
                         break;
                     }
                     std::thread::park_timeout(INGEST_INTERVAL);
+                }
+                // In-flight and queued replays stay pending in the database
+                // and are retried on the next start.
+                if let Some((worker, _)) = tier2 {
+                    worker.stop();
                 }
             })?;
         Ok(Self { stop, thread })

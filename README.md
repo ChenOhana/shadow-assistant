@@ -9,8 +9,10 @@ brain query search "<words>"   # (stage 2) full-text search over writing session
 brain query text --app A       # (stage 2) the raw typed stream of an app
 ```
 
-> **Status: stage 1 of 4 (capture).** `brain run` captures and stores;
-> `brain query` is not implemented yet.
+> **Status: capture, sessions, reconstruction and indexing are done;
+> `brain query` is next.** `brain run` captures, groups what you type into
+> writing sessions, reconstructs each session's text and indexes it for
+> full-text search. You can inspect the result in `brain.db` (see below).
 
 ## Supported OS
 
@@ -56,6 +58,9 @@ target/release/brain run --data-dir ~/brain-data
 start repairs a torn last line, if there is one, and resumes ingest exactly
 where it stopped.
 
+Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
+invisible copy of VS Code (tier 2, below). It is off by default.
+
 Data directory (mode 0700):
 
 | File           | What                                                   |
@@ -64,6 +69,7 @@ Data directory (mode 0700):
 | `brain.db`     | SQLite (WAL) index derived from the log                |
 | `run.lock`     | held by the running `brain run` (one per data dir)     |
 | `kwin/`        | generated KWin focus-tracking script                   |
+| `vscode/`      | VS Code replay sandbox and file snapshots (tier 2 only) |
 
 Example log lines:
 
@@ -72,9 +78,47 @@ Example log lines:
 {"ts":"2026-11-15T17:20:02.348Z","app":"org.kde.konsole","type":"key","key":"H","mods":["shift"],"window":"~ : bash — Konsole"}
 ```
 
+## Sessions and reconstruction
+
+Ingest (inside `brain run`, about once a second) turns the log into
+**writing sessions**, stored in the `sessions` table with an FTS5 index.
+
+* A session is one `(app, window title)`. It closes after **30 s without
+  typing in that window**, or right away when a single-line field is
+  submitted (Enter at a shell prompt, in a chat box or a browser's address
+  bar), cancelled (Ctrl+C at a prompt), or left for another field of the
+  same window (Tab, Ctrl+L in a browser). Switching to another app and back
+  within 30 s continues the same session. Stopping or restarting `brain run`
+  closes all sessions.
+* While a session is open, its text so far is already in the index, so a
+  search finds what you are typing right now.
+* **Tier 0**: keys are replayed into a virtual text field with a cursor,
+  selection, word-wise movement and deletion, and undo/redo. When the cursor
+  position is unknown (after a mouse click), it is assumed to be at the end.
+* **Tier 1**: a small table of app classes decides what keys mean. In
+  terminals: readline shortcuts (Ctrl+A/E/U/K/W) and Up/Down history recall
+  from the commands `brain` saw you run. In browsers: Tab and Ctrl+L/K/T/W
+  move to another field. Enter submits single-line fields and inserts a
+  newline elsewhere. Editors and unknown apps keep their document across
+  sessions. Single-line fields start empty each time.
+* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its
+  keystrokes are replayed into a headless VS Code with your settings, in a
+  network-less sandbox with capped CPU and memory. The session text then
+  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
+  The session stores the changed lines. If replay is impossible or fails,
+  the tier 0/1 text stays.
+
+Inspect the result:
+
+```sh
+sqlite3 ~/brain-data/brain.db \
+  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
+```
+
 ## Tests
 
 ```sh
 cargo test                                   # unit + integration tests
-cargo test --release --test crash_safety     # 25 random kill -9s under load
+cargo test --release --test crash_safety     # 25 random kill -9s under load;
+                                             # sessions must equal a rebuild from the log
 ```
