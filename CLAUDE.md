@@ -38,7 +38,10 @@ hardware.
   on Enter in single-line contexts; focus loss alone never closes a session.
 - Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
   2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
-  falling back to tier 0.
+  falling back to tier 0. Sessions, reconstruction and indexing are built
+  before `brain query` (owner's call, changing the original stage order).
+- Sessions and their text must stay a pure function of the log: the crash
+  test compares the live index with a fresh rebuild.
 - Work proceeds in 4 stages (capture, query, reconstruction, E2E tests).
   After each stage: build, run, test it yourself, report, then **stop and
   wait for explicit approval** before the next stage.
@@ -57,6 +60,9 @@ src/capture/synthetic.rs synthetic input source for tests/benchmarks
 src/eventlog.rs          append-only JSONL log: torn-tail repair, line reader
 src/store.rs             SQLite schema (WAL, FTS5), migrations, helpers
 src/ingest.rs            log → SQLite, offset advanced in the same transaction
+src/sessions.rs          session rules, open/close, live text, crash recovery
+src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
+                         tier2.rs + vscode/ tier 2 (VS Code replay, opt-in)
 src/event.rs, timefmt.rs event format, timestamp parsing/formatting
 tests/                   integration tests that drive the real binary
 ```
@@ -75,3 +81,7 @@ tests/                   integration tests that drive the real binary
   Commit at meaningful checkpoints.
 - Prefer verifying behaviour by running the binary over reasoning about it;
   report exactly what was tested and what was not.
+- Tests that need VS Code are `#[ignore]`: `cargo test --release --test
+  vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
+- Never change desktop session state you did not set up (lock/unlock,
+  suspend); check it first and restore it.
