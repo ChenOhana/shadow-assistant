@@ -353,6 +353,7 @@ pub fn watch_layouts(conn: &Connection, system: Option<Connection>, control: Con
         None,
         move |msg| {
             if let Ok(i) = msg.body().deserialize::<u32>() {
+                eprintln!("brain: keyboard layout switched to #{i}");
                 c.send(Control::SetLayout(i));
             }
         },
@@ -366,6 +367,7 @@ pub fn watch_layouts(conn: &Connection, system: Option<Connection>, control: Con
         None,
         move |_| {
             let spec = resolve_layout(system.as_ref());
+            eprintln!("brain: keyboard layout list changed, now {}", spec.layout);
             match Keyboard::new(&spec) {
                 Ok(kb) => {
                     control.send(Control::SetKeyboard(Box::new(kb)));

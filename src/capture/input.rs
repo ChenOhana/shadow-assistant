@@ -28,6 +28,11 @@ const INPUT_DIR: &str = "/dev/input";
 /// A touchpad touch shorter than this counts as a tap (a click, when
 /// tap-to-click is on). Longer touches are pointer motion or scrolling.
 const TAP_MAX_MS: Millis = 250;
+/// ...and so does a short touch that moved less than this (a quick swipe of
+/// the pointer is not a tap). In millimetres, or in thousandths of the axis
+/// range when the device reports no resolution.
+const TAP_MAX_TRAVEL_MM: i32 = 3;
+const TAP_MAX_TRAVEL_PERMILLE: i64 = 30;
 
 // evdev codes not exported as consts we can match on.
 const SYN_DROPPED: u16 = 3;
@@ -75,7 +80,8 @@ struct Device {
     path: PathBuf,
     dev: RawDevice,
     kind: Kind,
-    touch_down_at: Option<Millis>,
+    /// Time and (ABS_X, ABS_Y) position of the current touchpad touch.
+    touch_down_at: Option<(Millis, Option<(AbsInfo, AbsInfo)>)>,
 }
 
 pub struct InputLoop {
@@ -349,10 +355,11 @@ fn handle_button(d: &mut Device, code: u16, value: i32, ts: Millis, rec: &Record
             }
         } else if d.kind.touchpad {
             match value {
-                1 => d.touch_down_at = Some(ts),
+                1 => d.touch_down_at = Some((ts, touch_position(&d.dev))),
                 0 => {
-                    if let Some(down) = d.touch_down_at.take()
+                    if let Some((down, start)) = d.touch_down_at.take()
                         && ts - down <= TAP_MAX_MS
+                        && !moved(start, touch_position(&d.dev))
                     {
                         rec.click(ts, "tap");
                     }
@@ -361,6 +368,55 @@ fn handle_button(d: &mut Device, code: u16, value: i32, ts: Millis, rec: &Record
             }
         }
     }
+}
+
+/// `struct input_absinfo` from <linux/input.h>.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+struct AbsInfo {
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+    fuzz: i32,
+    flat: i32,
+    resolution: i32,
+}
+
+/// Current ABS_X/ABS_Y of a touchpad. Pointer motion is masked out of our
+/// event stream (EVIOCSMASK), but the kernel still tracks the axis state,
+/// which EVIOCGABS reads on demand: two ioctls per touch, not per movement.
+fn touch_position(dev: &RawDevice) -> Option<(AbsInfo, AbsInfo)> {
+    fn get(fd: i32, axis: u32) -> Option<AbsInfo> {
+        // EVIOCGABS(axis) = _IOR('E', 0x40 + axis, struct input_absinfo)
+        let req: libc::c_ulong = (2 << 30)
+            | ((std::mem::size_of::<AbsInfo>() as libc::c_ulong) << 16)
+            | ((b'E' as libc::c_ulong) << 8)
+            | (0x40 + axis as libc::c_ulong);
+        let mut info = AbsInfo::default();
+        // SAFETY: `info` is a valid, writable input_absinfo for the kernel to fill.
+        let r = unsafe { libc::ioctl(fd, req as _, &mut info) };
+        (r == 0).then_some(info)
+    }
+    let fd = dev.as_raw_fd();
+    Some((get(fd, 0)?, get(fd, 1)?))
+}
+
+/// Whether a touch travelled too far to be a tap. Unknown positions count as
+/// not moved (the duration check alone then decides, as before).
+fn moved(start: Option<(AbsInfo, AbsInfo)>, end: Option<(AbsInfo, AbsInfo)>) -> bool {
+    let (Some((sx, sy)), Some((ex, ey))) = (start, end) else {
+        return false;
+    };
+    let too_far = |a: AbsInfo, b: AbsInfo| {
+        let d = (i64::from(b.value) - i64::from(a.value)).abs();
+        if a.resolution > 0 {
+            d > i64::from(TAP_MAX_TRAVEL_MM) * i64::from(a.resolution)
+        } else {
+            let range = (i64::from(a.maximum) - i64::from(a.minimum)).max(1);
+            d * 1000 > TAP_MAX_TRAVEL_PERMILLE * range
+        }
+    };
+    too_far(sx, ex) || too_far(sy, ey)
 }
 
 /// BTN_* codes (mouse, joystick, touch) as opposed to keyboard keys.
@@ -458,6 +514,24 @@ fn drain_fd(fd: RawFd) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tap_travel() {
+        let at = |v: i32, res: i32| AbsInfo {
+            value: v,
+            maximum: 1000,
+            resolution: res,
+            ..Default::default()
+        };
+        let p = |x, y, res| Some((at(x, res), at(y, res)));
+        // 10 units/mm: 30 units = 3 mm is still a tap, 31 is a swipe.
+        assert!(!moved(p(100, 100, 10), p(130, 100, 10)));
+        assert!(moved(p(100, 100, 10), p(100, 131, 10)));
+        // No resolution: 3% of the 1000-unit range.
+        assert!(!moved(p(100, 100, 0), p(130, 100, 0)));
+        assert!(moved(p(100, 100, 0), p(131, 100, 0)));
+        assert!(!moved(None, p(900, 900, 10)));
+    }
 
     #[test]
     fn button_ranges() {
