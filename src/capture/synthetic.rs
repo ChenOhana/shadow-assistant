@@ -2,7 +2,9 @@
 //!
 //! It types a fixed corpus as raw evdev key transitions, at `RATE` key presses
 //! per second, through the same [`KeyProcessor`] → [`Recorder`] → log → ingest
-//! path as real input. Only the evdev device read is replaced. Crash-safety,
+//! path as real input. After every sentence it switches to a terminal, runs a
+//! shell command (Enter commits that session) and switches back (the editor
+//! session resumes), so sessions open, commit and resume all the time. Only the evdev device read is replaced. Crash-safety,
 //! consistency and resource tests can therefore run unattended, without root
 //! access to `/dev/uinput`.
 
@@ -15,6 +17,8 @@ use std::time::{Duration, Instant};
 
 pub const SYNTHETIC_APP: &str = "synthetic";
 pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
+pub const SYNTHETIC_TERMINAL: &str = "org.kde.konsole";
+const COMMANDS: [&str; 3] = ["git status", "cargo test", "ls -la"];
 
 const CORPUS: &str = "the migration is blocked on the schema change. \
     Dana asked whether we can ship search on Friday; I said yes if the index rebuild \
@@ -22,6 +26,7 @@ const CORPUS: &str = "the migration is blocked on the schema change. \
 
 const KEY_LEFTSHIFT: u16 = 42;
 const KEY_BACKSPACE: u16 = 14;
+const KEY_ENTER: u16 = 28;
 
 /// evdev keycode and whether Shift is needed, for the US layout.
 pub fn us_keycode(c: char) -> Option<(u16, bool)> {
@@ -47,6 +52,11 @@ pub fn us_keycode(c: char) -> Option<(u16, bool)> {
     })
 }
 
+enum Step {
+    Key(u16, bool),
+    Focus(&'static str, &'static str),
+}
+
 /// Types the corpus until `stop` is set. Every 50th word gets a typo that is
 /// immediately corrected with Backspace, to exercise editing keys.
 pub fn run(mut keys: KeyProcessor, recorder: Arc<Recorder>, rate_hz: f64, stop: Arc<AtomicBool>) {
@@ -55,6 +65,7 @@ pub fn run(mut keys: KeyProcessor, recorder: Arc<Recorder>, rate_hz: f64, stop: 
     let start = Instant::now();
     let mut presses: u64 = 0;
     let mut words: u64 = 0;
+    let mut sentences: usize = 0;
     let mut emit = |k: KeyOut| recorder.key(k.ts, k.key, k.mods, k.repeat);
     'outer: loop {
         for c in CORPUS.chars() {
@@ -69,7 +80,29 @@ pub fn run(mut keys: KeyProcessor, recorder: Arc<Recorder>, rate_hz: f64, stop: 
                     strokes.insert(1, (KEY_BACKSPACE, false));
                 }
             }
-            for (code, shift) in strokes {
+            // After a sentence: a shell command in the terminal, then back.
+            let detour = c == '.';
+            let mut steps: Vec<Step> = strokes.into_iter().map(|(c, s)| Step::Key(c, s)).collect();
+            if detour {
+                let cmd = COMMANDS[sentences % COMMANDS.len()];
+                sentences += 1;
+                steps.push(Step::Focus(SYNTHETIC_TERMINAL, "~"));
+                steps.extend(
+                    cmd.chars()
+                        .filter_map(us_keycode)
+                        .map(|(c, s)| Step::Key(c, s)),
+                );
+                steps.push(Step::Key(KEY_ENTER, false));
+                steps.push(Step::Focus(SYNTHETIC_APP, SYNTHETIC_WINDOW));
+            }
+            for step in steps {
+                let (code, shift) = match step {
+                    Step::Key(code, shift) => (code, shift),
+                    Step::Focus(app, window) => {
+                        recorder.set_focus(app, window);
+                        continue;
+                    }
+                };
                 if stop.load(Ordering::Relaxed) {
                     break 'outer;
                 }
@@ -100,7 +133,7 @@ mod tests {
 
     #[test]
     fn corpus_is_fully_typeable() {
-        for c in CORPUS.chars() {
+        for c in CORPUS.chars().chain(COMMANDS.concat().chars()) {
             assert!(us_keycode(c).is_some(), "no keycode for {c:?}");
         }
     }
