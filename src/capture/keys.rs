@@ -178,11 +178,12 @@ impl KeyProcessor {
         while let Some((code, ts)) = self.repeater.pop_due(now) {
             // Clients resolve each repeat against the *current* state, so
             // pressing Shift while holding `a` turns the repeats into `A`.
-            if let Some(key) = key_name(self.kb.keysym(code)) {
+            let mods = self.kb.active_mods();
+            if let Some(key) = key_name(self.kb.shortcut_keysym(code, &mods)) {
                 out(KeyOut {
                     ts,
                     key,
-                    mods: self.kb.active_mods(),
+                    mods,
                     repeat: true,
                 });
             }
@@ -207,8 +208,8 @@ impl KeyProcessor {
                 if !held.insert(code) {
                     return; // duplicate press without release
                 }
-                let sym = self.kb.keysym(code);
                 let mods = self.kb.active_mods();
+                let sym = self.kb.shortcut_keysym(code, &mods);
                 self.kb.update_key(code, true);
                 if let Some(key) = key_name(sym) {
                     out(KeyOut {
@@ -280,6 +281,8 @@ mod tests {
     const KEY_BACKSPACE: u16 = 14;
     const KEY_LEFTSHIFT: u16 = 42;
     const KEY_LEFTALT: u16 = 56;
+    const KEY_LEFTCTRL: u16 = 29;
+    const KEY_V: u16 = 47;
 
     fn proc() -> KeyProcessor {
         let kb = Keyboard::new(&LayoutSpec {
@@ -427,6 +430,29 @@ mod tests {
             ],
         );
         assert_eq!(keys(&out), vec!["ש"]);
+    }
+
+    #[test]
+    fn shortcuts_resolve_on_the_latin_layout() {
+        // On the Hebrew layout, Ctrl+A is Ctrl+A (not Ctrl+ש) and Ctrl+V is
+        // Ctrl+V, the way applications see them; plain typing stays Hebrew.
+        let mut p = proc();
+        p.set_layout_index(1);
+        let out = run(
+            &mut p,
+            &[
+                (0, KEY_A, 1, 0),
+                (0, KEY_A, 0, 5),
+                (0, KEY_LEFTCTRL, 1, 10),
+                (0, KEY_A, 1, 20),
+                (0, KEY_A, 0, 25),
+                (0, KEY_V, 1, 30),
+                (0, KEY_V, 0, 35),
+                (0, KEY_LEFTCTRL, 0, 40),
+            ],
+        );
+        assert_eq!(keys(&out), vec!["ש", "a", "v"]);
+        assert_eq!(out[1].mods, vec![Mod::Ctrl]);
     }
 
     #[test]

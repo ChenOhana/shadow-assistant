@@ -60,6 +60,14 @@ unsafe extern "C" {
     ) -> c_int;
     fn xkb_state_serialize_mods(state: *mut c_void, components: c_int) -> u32;
     fn xkb_state_key_get_one_sym(state: *mut c_void, key: u32) -> xkb_keysym_t;
+    fn xkb_state_key_get_level(state: *mut c_void, key: u32, layout: u32) -> u32;
+    fn xkb_keymap_key_get_syms_by_level(
+        keymap: *mut c_void,
+        key: u32,
+        layout: u32,
+        level: u32,
+        syms_out: *mut *const xkb_keysym_t,
+    ) -> c_int;
     fn xkb_state_mod_name_is_active(state: *mut c_void, name: *const c_char, kind: c_int) -> c_int;
     fn xkb_keysym_to_utf32(keysym: xkb_keysym_t) -> u32;
     fn xkb_keysym_get_name(keysym: xkb_keysym_t, buffer: *mut c_char, size: usize) -> c_int;
@@ -159,6 +167,45 @@ impl Keyboard {
     pub fn keysym(&self, evdev_code: u16) -> u32 {
         // SAFETY: state is valid.
         unsafe { xkb_state_key_get_one_sym(self.state.as_ptr(), evdev_code as u32 + EVDEV_OFFSET) }
+    }
+
+    /// The keysym an application matches shortcuts against. With Ctrl, Alt or
+    /// Super held, toolkits (Qt, GTK, Chromium) resolve a key that produces a
+    /// non-Latin symbol in the active layout (Hebrew `ש` on the A key) through
+    /// the first layout where it is Latin, so Ctrl+ש is Ctrl+A. Without those
+    /// modifiers this is just [`Keyboard::keysym`].
+    pub fn shortcut_keysym(&self, evdev_code: u16, mods: &[Mod]) -> u32 {
+        let sym = self.keysym(evdev_code);
+        let shortcut = mods
+            .iter()
+            .any(|m| matches!(m, Mod::Ctrl | Mod::Alt | Mod::Super));
+        // Keysyms below 0x100 are Latin-1, equal to their code points.
+        if !shortcut || sym < 0x100 || key_name(sym).is_none_or(|n| n.chars().count() != 1) {
+            return sym;
+        }
+        let key = evdev_code as u32 + EVDEV_OFFSET;
+        for layout in 0..self.num_layouts() {
+            // SAFETY: state and keymap are valid; xkb owns the returned array,
+            // which stays valid as long as the keymap.
+            let latin = unsafe {
+                let level = xkb_state_key_get_level(self.state.as_ptr(), key, layout);
+                let mut syms: *const xkb_keysym_t = std::ptr::null();
+                let n = xkb_keymap_key_get_syms_by_level(
+                    self.keymap.as_ptr(),
+                    key,
+                    layout,
+                    level,
+                    &mut syms,
+                );
+                (n == 1 && !syms.is_null()).then(|| *syms)
+            };
+            if let Some(l) = latin
+                && (0x20..0x100).contains(&l)
+            {
+                return l;
+            }
+        }
+        sym
     }
 
     pub fn key_repeats(&self, evdev_code: u16) -> bool {
