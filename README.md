@@ -24,6 +24,9 @@ desktops, keys are recorded under the app `unknown`.
 # Rust toolchain (https://rustup.rs), then:
 cargo build --release
 # binary: target/release/brain
+
+# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+make
 ```
 
 SQLite is bundled. libxkbcommon is loaded from the runtime library
