@@ -148,9 +148,79 @@ fn kill_dash_nine_never_corrupts() {
     expected.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
     assert_eq!(actual, expected);
 
+    // Sessions and documents are a pure function of the log: rebuilding the
+    // index from the log alone gives exactly the rows the crashing runs built.
+    let fresh = tmp.path().join("rebuild.db");
+    let mut ing =
+        brain::ingest::Ingester::new(brain::store::open_writer(&fresh).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    let rebuilt = Connection::open(&fresh).unwrap();
+    let live_sessions = session_rows(&c);
+    assert_eq!(live_sessions, session_rows(&rebuilt));
+    assert_eq!(context_rows(&c), context_rows(&rebuilt));
+    // The synthetic source types continuously, so each run is one session,
+    // closed by the next run's start (after a kill) or by the final stop.
+    assert!(
+        live_sessions.len() >= 20,
+        "got {} sessions",
+        live_sessions.len()
+    );
+    assert!(live_sessions.iter().all(|r| r.4 == "closed"));
+    assert!(live_sessions.iter().any(|r| {
+        r.6.contains("the migration is blocked on the schema change.")
+    }));
+
     eprintln!(
-        "{} events, {} torn tails repaired across 25 kills",
+        "{} events, {} sessions, {} torn tails repaired across 25 kills",
         events.len(),
+        live_sessions.len(),
         torn_tails
     );
+}
+
+type SessionRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    i64,
+    Option<i64>,
+);
+
+fn session_rows(c: &Connection) -> Vec<SessionRow> {
+    let mut st = c
+        .prepare(
+            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
+                    start_offset, end_offset FROM sessions ORDER BY id",
+        )
+        .unwrap();
+    st.query_map([], |r| {
+        Ok((
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+            r.get(6)?,
+            r.get(7)?,
+            r.get(8)?,
+        ))
+    })
+    .unwrap()
+    .collect::<Result<_, _>>()
+    .unwrap()
+}
+
+fn context_rows(c: &Connection) -> Vec<(String, String, String, i64)> {
+    let mut st = c
+        .prepare("SELECT app, window, text, cursor FROM context_state ORDER BY app, window")
+        .unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
 }
