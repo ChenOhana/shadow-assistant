@@ -3,6 +3,7 @@
 //! Pipeline: [`capture`] (keystrokes + focus → append-only [`eventlog`]) →
 //! [`ingest`] (log → SQLite [`store`]) → query.
 
+pub mod capture;
 pub mod datadir;
 pub mod event;
 pub mod eventlog;
