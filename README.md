@@ -126,6 +126,12 @@ sqlite3 ~/brain-data/brain.db \
   continues from where the *keyboard* last left the cursor. Cursor moves
   with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
   Ctrl+A) are followed.
+* **Search matches substrings.** The index uses SQLite FTS5's trigram
+  tokenizer: a query word matches anywhere inside a word, ignoring case and
+  accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
+  finds "Café"). This replaces the design's English-only porter stemmer,
+  which cannot find Hebrew words with attached prefixes. Query words
+  shorter than 3 characters cannot use the trigram index.
 * **Cursor at session start.** When a session starts on text `brain` did
   not see being typed (VS Code replay, or a document after `brain run`
   restarted), the cursor is assumed to be at the end.

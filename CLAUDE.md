@@ -40,6 +40,8 @@ hardware.
   2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
   falling back to tier 0. Sessions, reconstruction and indexing are built
   before `brain query` (owner's call, changing the original stage order).
+- Search is substring matching (FTS5 trigram, case- and accent-insensitive),
+  not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
 - Sessions and their text must stay a pure function of the log: the crash
   test compares the live index with a fresh rebuild.
 - Work proceeds in 4 stages (capture, query, reconstruction, E2E tests).

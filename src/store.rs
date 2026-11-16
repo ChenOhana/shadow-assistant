@@ -17,7 +17,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bumped whenever the schema changes; see [`init_schema`].
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA: &str = r#"
 -- One row per writing session. While a session is open its text is the live
@@ -41,9 +41,13 @@ CREATE INDEX idx_sessions_app_time ON sessions(app, started_at);
 CREATE INDEX idx_sessions_status ON sessions(status);
 CREATE INDEX idx_sessions_history ON sessions(app, end_reason, end_offset);
 
+-- Substring search: the trigram tokenizer indexes every 3-character
+-- sequence, so a query word matches anywhere inside a word ("run" finds
+-- running and rerun, "בית" finds בבית), case- and accent-insensitively.
+-- Query words shorter than 3 characters cannot use this index.
 CREATE VIRTUAL TABLE sessions_fts USING fts5(
   reconstructed_text, content='sessions', content_rowid='id',
-  tokenize='porter unicode61'
+  tokenize='trigram case_sensitive 0 remove_diacritics 1'
 );
 CREATE TRIGGER sessions_ai AFTER INSERT ON sessions BEGIN
   INSERT INTO sessions_fts(rowid, reconstructed_text) VALUES (new.id, new.reconstructed_text);
@@ -263,6 +267,45 @@ mod tests {
             .unwrap();
         let e = open_writer(&p).unwrap_err().to_string();
         assert!(e.contains("delete it"), "{e}");
+    }
+
+    #[test]
+    fn search_matches_substrings_in_any_script() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = open_writer(&tmp.path().join("b.db")).unwrap();
+        for (i, t) in [
+            "I was Running late",
+            "rerun the job",
+            "ran away",
+            "גרתי בבית הישן",
+            "Café",
+        ]
+        .iter()
+        .enumerate()
+        {
+            c.execute(
+                "INSERT INTO sessions (app, window, started_at, reconstructed_text, start_offset)
+                 VALUES ('a', 'w', '2026-01-01T00:00:00.000Z', ?1, ?2)",
+                rusqlite::params![t, i as i64],
+            )
+            .unwrap();
+        }
+        let hits = |q: &str| -> Vec<i64> {
+            let mut st = c
+                .prepare(
+                    "SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?1 ORDER BY rowid",
+                )
+                .unwrap();
+            st.query_map([q], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(hits("\"run\""), vec![1, 2], "inside words, any case");
+        assert_eq!(hits("\"בית\""), vec![4], "Hebrew with an attached prefix");
+        assert_eq!(hits("\"cafe\""), vec![5], "accents ignored");
+        assert_eq!(hits("\"run\" AND \"late\""), vec![1]);
+        assert!(hits("\"walk\"").is_empty());
     }
 
     #[test]
