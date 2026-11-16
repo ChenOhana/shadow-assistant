@@ -90,7 +90,6 @@ use std::time::{Duration, Instant, SystemTime};
 pub enum ReplayEvent {
     Key { key: String, mods: Vec<Mod> },
     Paste { text: String },
-    Click,
 }
 
 pub struct ReplayInput<'a> {

@@ -6,7 +6,7 @@
 //! ```
 //!
 //! Every event carries the app it belongs to. Events that relate to a text
-//! context (keys, clicks, pastes) also carry the window title, so each line is
+//! context (keys, pastes) also carry the window title, so each line is
 //! self-describing: a reader can start at any line (for example after a
 //! checkpoint seek) without replaying earlier focus events.
 
@@ -41,8 +41,6 @@ pub enum EventKind {
     },
     /// Focus moved to another window, or the focused window's title changed.
     Focus { window: String },
-    /// A mouse button or touchpad tap. The text cursor may have moved.
-    Click { button: String, window: String },
     /// Clipboard contents at the moment a paste shortcut was pressed. Written
     /// right after the key event that triggered it. `None` when the clipboard
     /// could not be read.
@@ -52,6 +50,11 @@ pub enum EventKind {
     },
     /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.
     System { state: SystemState },
+    /// An event type this version does not know (for example `click` lines
+    /// written by earlier builds, which logged mouse buttons). Read and
+    /// ignored, so such a line is not mistaken for corruption. Never written.
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -81,9 +84,8 @@ impl Event {
         match &self.kind {
             EventKind::Key { window, .. }
             | EventKind::Focus { window }
-            | EventKind::Click { window, .. }
             | EventKind::Paste { window, .. } => Some(window),
-            EventKind::System { .. } => None,
+            EventKind::System { .. } | EventKind::Other => None,
         }
     }
 
@@ -137,6 +139,16 @@ mod tests {
     }
 
     #[test]
+    fn unknown_types_are_read_as_other() {
+        let e: Event = serde_json::from_str(
+            r#"{"ts":"2026-11-15T20:45:13.515Z","app":"x","type":"click","button":"left","window":"w"}"#,
+        )
+        .unwrap();
+        assert_eq!(e.kind, EventKind::Other);
+        assert_eq!(e.window(), None);
+    }
+
+    #[test]
     fn all_kinds_round_trip() {
         let kinds = vec![
             EventKind::Key {
@@ -146,10 +158,6 @@ mod tests {
                 window: "w".into(),
             },
             EventKind::Focus { window: "w".into() },
-            EventKind::Click {
-                button: "left".into(),
-                window: "w".into(),
-            },
             EventKind::Paste {
                 text: Some("x\ny".into()),
                 window: "w".into(),

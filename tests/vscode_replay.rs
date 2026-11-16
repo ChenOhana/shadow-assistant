@@ -154,14 +154,14 @@ fn vscode_undo() {
 
 #[test]
 #[ignore]
-fn vscode_paste_and_click() {
+fn vscode_paste() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().unwrap();
     let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
     let ev = vec![
         key("Home"),
         key("X"),
-        ReplayEvent::Click, // cursor unknown → end of file
+        key("End"),
         ctrl("v"),
         ReplayEvent::Paste {
             text: " pasted\ttext".into(),

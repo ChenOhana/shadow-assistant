@@ -4,9 +4,10 @@
 //! optional selection (anchor + cursor), typing replaces the selection, word
 //! motions, logical lines for Up/Down/Home/End, and grouped undo/redo. What
 //! the app really did is unknowable from keystrokes alone (soft wrapping,
-//! autocomplete, where a click landed), so the model makes one consistent
-//! assumption wherever information is missing: **an unknown cursor position
-//! is the end of the buffer.**
+//! autocomplete), so the model makes one consistent assumption wherever
+//! information is missing: **an unknown cursor position is the end of the
+//! buffer.** Cursor moves made with the mouse are not captured at all: the
+//! model only follows the keyboard.
 
 /// Hard cap on buffer size. Beyond it the oldest text is dropped, which keeps
 /// `brain run` inside its memory budget even for a runaway session.
@@ -377,7 +378,7 @@ impl TextBuffer {
         self.cursor = self.text.len();
     }
 
-    /// The cursor position became unknown (a mouse click): assume the end.
+    /// The cursor position became unknown (`brain` was not running): assume the end.
     pub fn cursor_unknown(&mut self) {
         self.open_group = None;
         self.anchor = None;

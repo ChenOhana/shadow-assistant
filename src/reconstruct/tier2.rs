@@ -277,7 +277,6 @@ fn session_events(
             EventKind::Paste {
                 text: Some(text), ..
             } => out.push(ReplayEvent::Paste { text }),
-            EventKind::Click { .. } => out.push(ReplayEvent::Click),
             _ => {}
         }
     }

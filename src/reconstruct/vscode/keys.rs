@@ -31,7 +31,7 @@ pub(crate) enum Action {
     Key(CdpKey),
     /// Insert text as a paste would (`Input.insertText`).
     Insert(String),
-    /// The cursor position is unknown (session start, mouse click): focus the
+    /// The cursor position is unknown (session start): focus the
     /// editor and move to the end of the document, like tier 0.
     CursorToEnd,
 }
@@ -300,10 +300,6 @@ pub(crate) fn plan(events: &[ReplayEvent]) -> Vec<Action> {
                     out.push(Action::Insert(text.clone()));
                 }
             }
-            ReplayEvent::Click => {
-                drop_next_paste = false;
-                out.push(Action::CursorToEnd);
-            }
         }
     }
     out
@@ -378,18 +374,16 @@ mod tests {
     }
 
     #[test]
-    fn plan_starts_at_end_and_maps_clicks_and_pastes() {
+    fn plan_starts_at_end_and_maps_pastes() {
         let p = plan(&[
             k("a", &[]),
-            ReplayEvent::Click,
             k("v", &[Mod::Ctrl]),
             ReplayEvent::Paste { text: "xyz".into() },
         ]);
-        assert_eq!(p.len(), 4);
+        assert_eq!(p.len(), 3);
         assert_eq!(p[0], Action::CursorToEnd);
         assert!(matches!(&p[1], Action::Key(k) if k.key == "a"));
-        assert_eq!(p[2], Action::CursorToEnd);
-        assert_eq!(p[3], Action::Insert("xyz".into())); // the Ctrl+V key itself is skipped
+        assert_eq!(p[2], Action::Insert("xyz".into())); // the Ctrl+V key itself is skipped
     }
 
     #[test]

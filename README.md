@@ -93,8 +93,8 @@ Ingest (inside `brain run`, about once a second) turns the log into
 * While a session is open, its text so far is already in the index, so a
   search finds what you are typing right now.
 * **Tier 0**: keys are replayed into a virtual text field with a cursor,
-  selection, word-wise movement and deletion, and undo/redo. When the cursor
-  position is unknown (after a mouse click), it is assumed to be at the end.
+  selection, word-wise movement and deletion, and undo/redo. Only keyboard
+  cursor movement is followed (see "Decisions and edge cases").
 * **Tier 1**: a small table of app classes decides what keys mean. In
   terminals: readline shortcuts (Ctrl+A/E/U/K/W) and Up/Down history recall
   from the commands `brain` saw you run. In browsers: Tab and Ctrl+L/K/T/W
@@ -114,6 +114,22 @@ Inspect the result:
 sqlite3 ~/brain-data/brain.db \
   "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
 ```
+
+## Decisions and edge cases
+
+* **The mouse is not captured.** `brain` reads keyboards only. A mouse
+  click can move the text cursor, but its position on screen tells `brain`
+  nothing about where in the text the cursor went, so reconstruction cannot
+  use it. Tiers 0/1 (and tier 2) therefore **do not support text edited
+  after the cursor was moved with the mouse** (clicking into the middle of a
+  line to fix a typo, selecting with the mouse, drag and drop): typing
+  continues from where the *keyboard* last left the cursor. Cursor moves
+  with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
+  Ctrl+A) are followed. Earlier builds logged `click` events; such lines are
+  read and ignored.
+* **Cursor at session start.** When a session starts on text `brain` did
+  not see being typed (VS Code replay, or a document after `brain run`
+  restarted), the cursor is assumed to be at the end.
 
 ## Tests
 

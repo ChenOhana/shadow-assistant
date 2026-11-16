@@ -216,14 +216,6 @@ impl Sessions {
                     s.touch(ev.ts, next);
                 }
             }
-            EventKind::Click { window, .. } => {
-                let k = (ev.app.clone(), normalize_window(window));
-                if in_session(&k)
-                    && let Some(s) = self.open.get_mut(&k)
-                {
-                    s.editor.click();
-                }
-            }
             _ => {}
         }
         Ok(())
@@ -292,21 +284,7 @@ impl Sessions {
                 s.editor.paste(text);
                 s.touch(ev.ts, next);
             }
-            EventKind::Click { window, .. } => {
-                let k = (ev.app.clone(), normalize_window(window));
-                if let Some(s) = self.open.get_mut(&k) {
-                    s.editor.click();
-                } else {
-                    let n = tx
-                        .prepare_cached(
-                            "UPDATE context_state SET cursor_unknown = 1
-                             WHERE app = ?1 AND window = ?2 AND cursor_unknown = 0",
-                        )?
-                        .execute(params![k.0, k.1])?;
-                    self.wrote |= n > 0;
-                }
-            }
-            EventKind::Focus { .. } => {}
+            EventKind::Focus { .. } | EventKind::Other => {}
             EventKind::System { state } => match state {
                 SystemState::Start => {
                     // A start without a preceding stop means a crash; either
@@ -530,9 +508,10 @@ impl OpenSession {
 }
 
 /// Loads the modelled document of a context as of `ts`. A document not
-/// touched for [`CONTEXT_TTL_MS`] is forgotten. After a click (cursor
-/// unknown) the cursor goes to the end; with `write_back` that resolution is
-/// saved, so recovery later loads exactly what this session started from.
+/// touched for [`CONTEXT_TTL_MS`] is forgotten. After a restart of `brain run`
+/// (cursor unknown: the user may have typed meanwhile) the cursor goes to the
+/// end; with `write_back` that resolution is saved, so recovery later loads
+/// exactly what this session started from.
 fn load_context(
     conn: &Connection,
     app: &str,
@@ -819,19 +798,11 @@ mod tests {
     }
 
     #[test]
-    fn paste_and_click() {
+    fn paste() {
         let mut l = Log::new();
         let t = l.typ(T0, "notes", "n", "ab");
         l.key(t, "notes", "n", "Home", &[]);
-        // A click: cursor unknown, so typing continues at the end.
-        l.push(
-            t + 100,
-            "notes",
-            EventKind::Click {
-                button: "left".into(),
-                window: "n".into(),
-            },
-        );
+        l.key(t + 100, "notes", "n", "End", &[]);
         let t = l.typ(t + 200, "notes", "n", "c");
         l.key(t, "notes", "n", "v", &[Mod::Ctrl]);
         l.push(
@@ -870,6 +841,40 @@ mod tests {
         let mut ing = l.ingester("b.db");
         run(&mut ing, clock_late);
         assert_eq!(texts(ing.connection()), vec!["abc pasted", "yes"]);
+    }
+
+    #[test]
+    fn click_lines_from_older_builds_are_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("events.jsonl");
+        let mut text = String::new();
+        let mut line = Vec::new();
+        for (i, c) in ["a", "b"].iter().enumerate() {
+            Event {
+                ts: T0 + i as Millis * 100,
+                app: "notes".into(),
+                kind: EventKind::Key {
+                    key: (*c).into(),
+                    mods: vec![],
+                    repeat: false,
+                    window: "n".into(),
+                },
+            }
+            .to_line(&mut line);
+            text.push_str(std::str::from_utf8(&line).unwrap());
+            if i == 0 {
+                text.push_str(
+                    r#"{"ts":"2027-01-15T08:00:00.050Z","app":"notes","type":"click","button":"left","window":"n"}"#,
+                );
+                text.push('\n');
+            }
+        }
+        std::fs::write(&log, text).unwrap();
+        let mut ing =
+            Ingester::new(store::open_writer(&tmp.path().join("b.db")).unwrap(), &log).unwrap();
+        let s = ing.step_at(clock_late).unwrap();
+        assert_eq!((s.lines, s.invalid_lines), (3, 0));
+        assert_eq!(texts(ing.connection()), vec!["ab"]);
     }
 
     #[test]
@@ -946,14 +951,7 @@ mod tests {
         let mut t = l.typ(T0, "notes", "n", "hello wrold");
         l.key(t, "notes", "n", "Left", &[Mod::Ctrl]);
         t = l.typ(t + 100, "notes", "n", "\u{8}");
-        l.push(
-            t,
-            "notes",
-            EventKind::Click {
-                button: "left".into(),
-                window: "n".into(),
-            },
-        );
+        l.key(t, "notes", "n", "End", &[]);
         t = l.typ(t + 100, k, "~", "git status\n");
         l.key(t, k, "~", "Up", &[]);
         t = l.typ(t + 100, k, "~", " -s");

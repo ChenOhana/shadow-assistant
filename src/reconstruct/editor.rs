@@ -277,10 +277,6 @@ impl FieldEditor {
     pub fn paste(&mut self, text: &str) {
         self.buf.insert(text);
     }
-
-    pub fn click(&mut self) {
-        self.buf.cursor_unknown();
-    }
 }
 
 #[cfg(test)]

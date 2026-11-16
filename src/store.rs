@@ -66,7 +66,7 @@ CREATE TABLE context_state (
   text           TEXT NOT NULL,
   cursor         INTEGER NOT NULL,
   anchor         INTEGER,
-  cursor_unknown INTEGER NOT NULL DEFAULT 0,     -- a click happened since: cursor goes to the end
+  cursor_unknown INTEGER NOT NULL DEFAULT 0,     -- brain restarted since: cursor goes to the end
   updated_at     TEXT NOT NULL,
   PRIMARY KEY (app, window)
 );

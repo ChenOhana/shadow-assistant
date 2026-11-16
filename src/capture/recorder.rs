@@ -1,6 +1,6 @@
 //! The recorder: the one place where events are stamped with focus and appended to the log.
 //!
-//! Shared between the input thread (keys, clicks, pastes) and the D-Bus
+//! Shared between the input thread (keys, pastes) and the D-Bus
 //! threads (focus changes, lock/sleep markers). A mutex around the log writer
 //! serializes appends, so lines never interleave.
 
@@ -209,25 +209,6 @@ impl Recorder {
         }
     }
 
-    pub fn click(&self, ts: Millis, button: &str) {
-        let mut g = self.lock();
-        if g.paused {
-            return;
-        }
-        let Focus { app, window } = g.focus.clone();
-        self.append(
-            &mut g,
-            Event {
-                ts,
-                app,
-                kind: EventKind::Click {
-                    button: button.to_string(),
-                    window,
-                },
-            },
-        );
-    }
-
     /// fdatasync the log if anything was appended since the last call.
     pub fn sync(&self) -> Result<()> {
         self.lock().log.sync()
@@ -291,7 +272,7 @@ mod tests {
         rec.key(12, "s".into(), vec![], false); // lock-screen password: dropped
         rec.set_focus("org.kde.konsole", "bash"); // remembered, not written
         rec.set_paused(false);
-        rec.click(13, "left");
+        rec.key(13, "x".into(), vec![], false);
 
         let evs = events(&p);
         let kinds: Vec<String> = evs
@@ -302,7 +283,7 @@ mod tests {
                 EventKind::Paste { text, .. } => {
                     format!("{}:paste:{}", e.app, text.as_deref().unwrap_or("-"))
                 }
-                EventKind::Click { button, window } => format!("{}:click:{button}@{window}", e.app),
+                EventKind::Other => "other".into(),
                 EventKind::System { state } => format!("{}:{state:?}", e.app),
             })
             .collect();
@@ -316,7 +297,7 @@ mod tests {
                 "code:Lock",
                 "org.kde.konsole:Unlock",
                 "org.kde.konsole:focus@bash",
-                "org.kde.konsole:click:left@bash",
+                "org.kde.konsole:key:x@bash",
             ]
         );
     }

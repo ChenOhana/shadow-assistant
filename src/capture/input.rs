@@ -1,11 +1,15 @@
-//! The input thread: reads every keyboard and pointer device with one `poll(2)` loop.
+//! The input thread: reads every keyboard with one `poll(2)` loop.
+//!
+//! Mice and touchpads are not read: the mouse position is invisible to
+//! `brain`, so a click could only say "the cursor moved somewhere", which
+//! reconstruction cannot use (see README, "Decisions and edge cases").
 //!
 //! * **Passive.** Devices are opened read-only and never grabbed, so the
 //!   compositor receives every event exactly as before. `brain` cannot add
 //!   input lag, whatever it does.
 //! * **Cheap.** Each device gets an evdev event mask (`EVIOCSMASK`) so the
-//!   kernel only wakes us for key/button transitions. Pointer motion, scroll,
-//!   and `MSC_SCAN` never reach userspace. When nothing is pressed, the thread
+//!   kernel only wakes us for key transitions. LED, `MSC_SCAN` and other
+//!   events never reach userspace. When nothing is pressed, the thread
 //!   sleeps in `poll` with no timeout.
 //! * **Robust.** `/dev/input` is watched with inotify for hotplug. A vanished
 //!   device releases its held keys. On resume from sleep, every device is
@@ -25,14 +29,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
 const INPUT_DIR: &str = "/dev/input";
-/// A touchpad touch shorter than this counts as a tap (a click, when
-/// tap-to-click is on). Longer touches are pointer motion or scrolling.
-const TAP_MAX_MS: Millis = 250;
-/// ...and so does a short touch that moved less than this (a quick swipe of
-/// the pointer is not a tap). In millimetres, or in thousandths of the axis
-/// range when the device reports no resolution.
-const TAP_MAX_TRAVEL_MM: i32 = 3;
-const TAP_MAX_TRAVEL_PERMILLE: i64 = 30;
 
 // evdev codes not exported as consts we can match on.
 const SYN_DROPPED: u16 = 3;
@@ -65,23 +61,10 @@ impl ControlHandle {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Kind {
-    keyboard: bool,
-    pointer: bool,
-    /// Has BTN_TOOL_FINGER: a touchpad, where BTN_TOUCH means a finger is down.
-    touchpad: bool,
-    /// BTN_TOUCH without BTN_TOOL_FINGER: a touchscreen, where a touch is a click.
-    touchscreen: bool,
-}
-
 struct Device {
     id: u32,
     path: PathBuf,
     dev: RawDevice,
-    kind: Kind,
-    /// Time and (ABS_X, ABS_Y) position of the current touchpad touch.
-    touch_down_at: Option<(Millis, Option<(AbsInfo, AbsInfo)>)>,
 }
 
 pub struct InputLoop {
@@ -146,7 +129,7 @@ impl InputLoop {
     /// be read, which almost always means missing permissions.
     pub fn open_initial(&mut self) -> Result<()> {
         self.scan();
-        if !self.devices.iter().any(|d| d.kind.keyboard) {
+        if self.devices.is_empty() {
             if !self.denied.is_empty() {
                 bail!(
                     "permission denied reading {INPUT_DIR}/event*: add your user to the `input` \
@@ -159,7 +142,7 @@ impl InputLoop {
     }
 
     pub fn keyboard_count(&self) -> usize {
-        self.devices.iter().filter(|d| d.kind.keyboard).count()
+        self.devices.len()
     }
 
     /// Opens any `/dev/input/event*` node not already open.
@@ -182,19 +165,13 @@ impl InputLoop {
                 continue;
             }
             match open_device(&path) {
-                Ok(Some((dev, kind))) => {
+                Ok(Some(dev)) => {
                     self.denied.remove(&path);
                     let id = self.next_id;
                     self.next_id += 1;
-                    self.devices.push(Device {
-                        id,
-                        path,
-                        dev,
-                        kind,
-                        touch_down_at: None,
-                    });
+                    self.devices.push(Device { id, path, dev });
                 }
-                Ok(None) => {} // not a keyboard or pointer
+                Ok(None) => {} // not a keyboard
                 Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                     self.denied.insert(path);
                 }
@@ -311,9 +288,9 @@ impl InputLoop {
                 }
                 let code = ev.code();
                 let value = ev.value();
-                if is_button(code) {
-                    handle_button(d, code, value, ts, &rec);
-                } else if d.kind.keyboard {
+                // A keyboard with a built-in touchpad also reports mouse
+                // buttons; those are not keys.
+                if !is_button(code) {
                     keys.key(d.id, code, value, ts, &mut |k| emit(&rec, k));
                 }
             }
@@ -337,123 +314,31 @@ fn emit(rec: &Recorder, k: KeyOut) {
     rec.key(k.ts, k.key, k.mods, k.repeat);
 }
 
-fn handle_button(d: &mut Device, code: u16, value: i32, ts: Millis, rec: &Recorder) {
-    let btn = KeyCode::new(code);
-    if btn == KeyCode::BTN_LEFT || btn == KeyCode::BTN_RIGHT || btn == KeyCode::BTN_MIDDLE {
-        if value == 1 && d.kind.pointer {
-            let name = match btn {
-                KeyCode::BTN_LEFT => "left",
-                KeyCode::BTN_RIGHT => "right",
-                _ => "middle",
-            };
-            rec.click(ts, name);
-        }
-    } else if btn == KeyCode::BTN_TOUCH {
-        if d.kind.touchscreen {
-            if value == 1 {
-                rec.click(ts, "touch");
-            }
-        } else if d.kind.touchpad {
-            match value {
-                1 => d.touch_down_at = Some((ts, touch_position(&d.dev))),
-                0 => {
-                    if let Some((down, start)) = d.touch_down_at.take()
-                        && ts - down <= TAP_MAX_MS
-                        && !moved(start, touch_position(&d.dev))
-                    {
-                        rec.click(ts, "tap");
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// `struct input_absinfo` from <linux/input.h>.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, Default)]
-struct AbsInfo {
-    value: i32,
-    minimum: i32,
-    maximum: i32,
-    fuzz: i32,
-    flat: i32,
-    resolution: i32,
-}
-
-/// Current ABS_X/ABS_Y of a touchpad. Pointer motion is masked out of our
-/// event stream (EVIOCSMASK), but the kernel still tracks the axis state,
-/// which EVIOCGABS reads on demand: two ioctls per touch, not per movement.
-fn touch_position(dev: &RawDevice) -> Option<(AbsInfo, AbsInfo)> {
-    fn get(fd: i32, axis: u32) -> Option<AbsInfo> {
-        // EVIOCGABS(axis) = _IOR('E', 0x40 + axis, struct input_absinfo)
-        let req: libc::c_ulong = (2 << 30)
-            | ((std::mem::size_of::<AbsInfo>() as libc::c_ulong) << 16)
-            | ((b'E' as libc::c_ulong) << 8)
-            | (0x40 + axis as libc::c_ulong);
-        let mut info = AbsInfo::default();
-        // SAFETY: `info` is a valid, writable input_absinfo for the kernel to fill.
-        let r = unsafe { libc::ioctl(fd, req as _, &mut info) };
-        (r == 0).then_some(info)
-    }
-    let fd = dev.as_raw_fd();
-    Some((get(fd, 0)?, get(fd, 1)?))
-}
-
-/// Whether a touch travelled too far to be a tap. Unknown positions count as
-/// not moved (the duration check alone then decides, as before).
-fn moved(start: Option<(AbsInfo, AbsInfo)>, end: Option<(AbsInfo, AbsInfo)>) -> bool {
-    let (Some((sx, sy)), Some((ex, ey))) = (start, end) else {
-        return false;
-    };
-    let too_far = |a: AbsInfo, b: AbsInfo| {
-        let d = (i64::from(b.value) - i64::from(a.value)).abs();
-        if a.resolution > 0 {
-            d > i64::from(TAP_MAX_TRAVEL_MM) * i64::from(a.resolution)
-        } else {
-            let range = (i64::from(a.maximum) - i64::from(a.minimum)).max(1);
-            d * 1000 > TAP_MAX_TRAVEL_PERMILLE * range
-        }
-    };
-    too_far(sx, ex) || too_far(sy, ey)
-}
-
 /// BTN_* codes (mouse, joystick, touch) as opposed to keyboard keys.
 fn is_button(code: u16) -> bool {
     (0x100..0x160).contains(&code) || code >= 0x2c0
 }
 
-fn classify(dev: &RawDevice) -> Kind {
+/// A keyboard: has the letter, space and enter keys (power buttons, lid
+/// switches and media remotes report EV_KEY too, but not these).
+fn is_keyboard(dev: &RawDevice) -> bool {
     let Some(keys) = dev.supported_keys() else {
-        return Kind::default();
+        return false;
     };
-    let keyboard = [
+    [
         KeyCode::KEY_A,
         KeyCode::KEY_Z,
         KeyCode::KEY_SPACE,
         KeyCode::KEY_ENTER,
     ]
     .iter()
-    .all(|k| keys.contains(*k));
-    let pointer = keys.contains(KeyCode::BTN_LEFT);
-    let has_touch = keys.contains(KeyCode::BTN_TOUCH);
-    let touchpad = has_touch && keys.contains(KeyCode::BTN_TOOL_FINGER);
-    let touchscreen =
-        has_touch && !touchpad && dev.supported_events().contains(EventType::ABSOLUTE);
-    Kind {
-        keyboard,
-        pointer,
-        touchpad,
-        touchscreen,
-    }
+    .all(|k| keys.contains(*k))
 }
 
-/// Opens a device if it is a keyboard or pointer. `Ok(None)` for other devices.
-fn open_device(path: &Path) -> std::io::Result<Option<(RawDevice, Kind)>> {
+/// Opens a device if it is a keyboard. `Ok(None)` for other devices.
+fn open_device(path: &Path) -> std::io::Result<Option<RawDevice>> {
     let dev = RawDevice::open(path)?;
-    let kind = classify(&dev);
-    if !(kind.keyboard || kind.pointer || kind.touchpad || kind.touchscreen) {
+    if !is_keyboard(&dev) {
         return Ok(None);
     }
     let fd = dev.as_raw_fd();
@@ -465,7 +350,7 @@ fn open_device(path: &Path) -> std::io::Result<Option<(RawDevice, Kind)>> {
         }
     }
     set_event_type_mask(fd);
-    Ok(Some((dev, kind)))
+    Ok(Some(dev))
 }
 
 /// Asks the kernel to deliver only EV_SYN and EV_KEY events to this client.
@@ -514,24 +399,6 @@ fn drain_fd(fd: RawFd) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tap_travel() {
-        let at = |v: i32, res: i32| AbsInfo {
-            value: v,
-            maximum: 1000,
-            resolution: res,
-            ..Default::default()
-        };
-        let p = |x, y, res| Some((at(x, res), at(y, res)));
-        // 10 units/mm: 30 units = 3 mm is still a tap, 31 is a swipe.
-        assert!(!moved(p(100, 100, 10), p(130, 100, 10)));
-        assert!(moved(p(100, 100, 10), p(100, 131, 10)));
-        // No resolution: 3% of the 1000-unit range.
-        assert!(!moved(p(100, 100, 0), p(130, 100, 0)));
-        assert!(moved(p(100, 100, 0), p(131, 100, 0)));
-        assert!(!moved(None, p(900, 900, 10)));
-    }
 
     #[test]
     fn button_ranges() {
