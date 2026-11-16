@@ -17,7 +17,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// Bumped whenever the schema changes; see [`init_schema`].
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"
 -- One row per writing session. While a session is open its text is the live
@@ -82,17 +82,14 @@ CREATE TABLE ingest_state (
 );
 INSERT INTO ingest_state (id, log_offset) VALUES (1, 0);
 
--- Seek points into the capture log. app = '*' rows are global (any app).
+-- Seek points into the capture log, at most one per 5 s of log time: the
+-- first event at or after `ts` starts at `byte_offset`. `query text` starts
+-- reading the log there instead of at the beginning.
 CREATE TABLE log_checkpoints (
-  app         TEXT NOT NULL,
-  ts          TEXT NOT NULL,
-  byte_offset INTEGER NOT NULL,
-  PRIMARY KEY (app, ts)
+  ts          TEXT PRIMARY KEY,
+  byte_offset INTEGER NOT NULL
 );
 "#;
-
-/// The app value used for global (all-app) checkpoints.
-pub const GLOBAL_CHECKPOINT_APP: &str = "*";
 
 /// Opens the database for the writer (`brain run`), creating it if new.
 pub fn open_writer(path: &Path) -> Result<Connection> {
@@ -175,30 +172,23 @@ pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
     Ok(())
 }
 
-pub fn insert_checkpoint(conn: &Connection, app: &str, ts: &str, offset: u64) -> Result<()> {
-    conn.prepare_cached(
-        "INSERT OR IGNORE INTO log_checkpoints (app, ts, byte_offset) VALUES (?1, ?2, ?3)",
-    )?
-    .execute(rusqlite::params![app, ts, offset as i64])?;
+pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
+    conn.prepare_cached("INSERT OR IGNORE INTO log_checkpoints (ts, byte_offset) VALUES (?1, ?2)")?
+        .execute(rusqlite::params![ts, offset as i64])?;
     Ok(())
 }
 
-/// Latest checkpoint timestamp per app, used to resume checkpoint spacing after a restart.
-pub fn latest_checkpoints(conn: &Connection) -> Result<Vec<(String, String)>> {
-    let mut stmt = conn.prepare("SELECT app, MAX(ts) FROM log_checkpoints GROUP BY app")?;
-    let rows = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+/// Timestamp of the latest checkpoint, to resume checkpoint spacing after a restart.
+pub fn latest_checkpoint(conn: &Connection) -> Result<Option<String>> {
+    Ok(conn.query_row("SELECT MAX(ts) FROM log_checkpoints", [], |r| r.get(0))?)
 }
 
-/// Byte offset of the latest global checkpoint at or before `ts`, or 0.
+/// Byte offset of the latest checkpoint at or before `ts`, or 0.
 pub fn seek_offset_before(conn: &Connection, ts: &str) -> Result<u64> {
     let off: Option<i64> = conn
         .query_row(
-            "SELECT byte_offset FROM log_checkpoints WHERE app = ?1 AND ts <= ?2
-             ORDER BY ts DESC LIMIT 1",
-            rusqlite::params![GLOBAL_CHECKPOINT_APP, ts],
+            "SELECT byte_offset FROM log_checkpoints WHERE ts <= ?1 ORDER BY ts DESC LIMIT 1",
+            [ts],
             |r| r.get(0),
         )
         .optional()?;
@@ -312,10 +302,11 @@ mod tests {
     fn checkpoint_seek() {
         let tmp = tempfile::tempdir().unwrap();
         let c = open_writer(&tmp.path().join("b.db")).unwrap();
-        insert_checkpoint(&c, "*", "2026-01-01T00:00:00.000Z", 0).unwrap();
-        insert_checkpoint(&c, "*", "2026-01-01T00:00:05.000Z", 500).unwrap();
-        insert_checkpoint(&c, "*", "2026-01-01T00:00:10.000Z", 900).unwrap();
-        insert_checkpoint(&c, "*", "2026-01-01T00:00:10.000Z", 999).unwrap(); // ignored duplicate
+        assert_eq!(latest_checkpoint(&c).unwrap(), None);
+        insert_checkpoint(&c, "2026-01-01T00:00:00.000Z", 0).unwrap();
+        insert_checkpoint(&c, "2026-01-01T00:00:05.000Z", 500).unwrap();
+        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 900).unwrap();
+        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 999).unwrap(); // ignored duplicate
         assert_eq!(
             seek_offset_before(&c, "2026-01-01T00:00:07.000Z").unwrap(),
             500
@@ -328,10 +319,9 @@ mod tests {
             seek_offset_before(&c, "2025-01-01T00:00:00.000Z").unwrap(),
             0
         );
-        let latest = latest_checkpoints(&c).unwrap();
         assert_eq!(
-            latest,
-            vec![("*".into(), "2026-01-01T00:00:10.000Z".into())]
+            latest_checkpoint(&c).unwrap().as_deref(),
+            Some("2026-01-01T00:00:10.000Z")
         );
     }
 }

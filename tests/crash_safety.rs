@@ -6,7 +6,6 @@
 use brain::eventlog::LogReader;
 use brain::ingest::CHECKPOINT_INTERVAL_MS;
 use rusqlite::Connection;
-use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -118,34 +117,28 @@ fn kill_dash_nine_never_corrupts() {
         .unwrap();
     assert_eq!(off as u64, log_len);
 
-    // ...and its derived rows are exactly what one uninterrupted pass over the
+    // ...and its checkpoints are exactly what one uninterrupted pass over the
     // log produces: across 25 kills, nothing was skipped or applied twice.
-    let mut expected: Vec<(String, String, i64)> = Vec::new();
-    let mut last: HashMap<String, i64> = HashMap::new();
+    let mut expected: Vec<(String, i64)> = Vec::new();
+    let mut last: Option<i64> = None;
     for (offset, ev) in &events {
-        for app in ["*", ev.app.as_str()] {
-            let due = last
-                .get(app)
-                .is_none_or(|prev| (ev.ts - prev).abs() >= CHECKPOINT_INTERVAL_MS);
-            if due {
-                let ts = brain::timefmt::format_ms(ev.ts);
-                // PRIMARY KEY (app, ts): a same-millisecond duplicate is ignored.
-                if !expected.iter().any(|(a, t, _)| a == app && *t == ts) {
-                    expected.push((app.to_string(), ts, *offset as i64));
-                }
-                last.insert(app.to_string(), ev.ts);
+        if last.is_none_or(|prev| (ev.ts - prev).abs() >= CHECKPOINT_INTERVAL_MS) {
+            let ts = brain::timefmt::format_ms(ev.ts);
+            // PRIMARY KEY (ts): a same-millisecond duplicate is ignored.
+            if !expected.iter().any(|(t, _)| *t == ts) {
+                expected.push((ts, *offset as i64));
             }
+            last = Some(ev.ts);
         }
     }
     let mut stmt = c
-        .prepare("SELECT app, ts, byte_offset FROM log_checkpoints ORDER BY byte_offset, app")
+        .prepare("SELECT ts, byte_offset FROM log_checkpoints ORDER BY byte_offset")
         .unwrap();
-    let actual: Vec<(String, String, i64)> = stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+    let actual: Vec<(String, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    expected.sort_by(|a, b| (a.2, &a.0).cmp(&(b.2, &b.0)));
     assert_eq!(actual, expected);
 
     // Sessions and documents are a pure function of the log: rebuilding the

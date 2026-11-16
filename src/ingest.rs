@@ -16,11 +16,10 @@
 
 use crate::eventlog::LogReader;
 use crate::sessions::{Sessions, Tier2Snapshotter};
-use crate::store::{self, GLOBAL_CHECKPOINT_APP};
+use crate::store;
 use crate::timefmt::{self, Millis};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Minimum spacing between two checkpoints for the same app, in log time.
@@ -32,7 +31,7 @@ pub struct Ingester {
     conn: Connection,
     log_path: PathBuf,
     offset: u64,
-    last_checkpoint: HashMap<String, Millis>,
+    last_checkpoint: Option<Millis>,
     sessions: Option<Sessions>,
     /// Tier 2 results waiting to be written: (session id, text or error).
     tier2_results: Vec<(i64, std::result::Result<String, String>)>,
@@ -73,12 +72,8 @@ impl Ingester {
             offset = log_len;
             store::set_ingest_offset(&conn, offset)?;
         }
-        let mut last_checkpoint = HashMap::new();
-        for (app, ts) in store::latest_checkpoints(&conn)? {
-            if let Ok(ms) = timefmt::parse_rfc3339_ms(&ts) {
-                last_checkpoint.insert(app, ms);
-            }
-        }
+        let last_checkpoint =
+            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok());
         let sessions = Sessions::recover(&conn, log_path, offset, tier2)
             .context("recovering open sessions")?;
         Ok(Self {
@@ -133,7 +128,7 @@ impl Ingester {
         let mut stats = StepStats::default();
         // Checkpoint decisions are staged and only become the in-memory state
         // once the transaction commits, so a failed commit cannot desync them.
-        let mut staged: HashMap<String, Millis> = HashMap::new();
+        let mut staged: Option<Millis> = None;
         let tx = self
             .conn
             .transaction()
@@ -150,21 +145,10 @@ impl Ingester {
                     stats.invalid_lines += 1;
                     continue;
                 };
-                for app in [GLOBAL_CHECKPOINT_APP, event.app.as_str()] {
-                    let last = staged
-                        .get(app)
-                        .or_else(|| self.last_checkpoint.get(app))
-                        .copied();
-                    if checkpoint_due(last, event.ts) {
-                        store::insert_checkpoint(
-                            &tx,
-                            app,
-                            &timefmt::format_ms(event.ts),
-                            line.offset,
-                        )?;
-                        staged.insert(app.to_owned(), event.ts);
-                        stats.checkpoints += 1;
-                    }
+                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
+                    store::insert_checkpoint(&tx, &timefmt::format_ms(event.ts), line.offset)?;
+                    staged = Some(event.ts);
+                    stats.checkpoints += 1;
                 }
                 sessions.on_event(&tx, line.offset, reader.offset(), &event)?;
             }
@@ -192,7 +176,9 @@ impl Ingester {
         }
 
         self.offset = new_offset;
-        self.last_checkpoint.extend(staged);
+        if staged.is_some() {
+            self.last_checkpoint = staged;
+        }
         let (jobs, discards) = sessions.take_committed_effects();
         self.tier2_jobs.extend(jobs);
         for id in discards {
@@ -281,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn ingests_and_checkpoints_per_app_and_globally() {
+    fn ingests_and_checkpoints_every_five_seconds() {
         let tmp = tempfile::tempdir().unwrap();
         let log = tmp.path().join("events.jsonl");
         let mut w = LogWriter::open(&log).unwrap();
@@ -303,19 +289,8 @@ mod tests {
             count(c, "SELECT log_offset FROM ingest_state"),
             w.len() as i64
         );
-        // Global: t=0,5,10,15 s. Per app (events every 2 s): a at 0,6,12,18; b at 1,7,13,19.
-        assert_eq!(
-            count(c, "SELECT count(*) FROM log_checkpoints WHERE app='*'"),
-            4
-        );
-        assert_eq!(
-            count(c, "SELECT count(*) FROM log_checkpoints WHERE app='a'"),
-            4
-        );
-        assert_eq!(
-            count(c, "SELECT count(*) FROM log_checkpoints WHERE app='b'"),
-            4
-        );
+        // One checkpoint per 5 s of log time: t = 0, 5, 10, 15 s.
+        assert_eq!(count(c, "SELECT count(*) FROM log_checkpoints"), 4);
         // Nothing new: a no-op step.
         assert_eq!(ing.step().unwrap(), StepStats::default());
     }
@@ -340,10 +315,7 @@ mod tests {
         let s = ing.catch_up(10).unwrap();
         assert_eq!(s.lines, 5, "only the new lines are read");
         assert_eq!(
-            count(
-                ing.connection(),
-                "SELECT count(*) FROM log_checkpoints WHERE app='a'"
-            ),
+            count(ing.connection(), "SELECT count(*) FROM log_checkpoints"),
             15
         );
     }
