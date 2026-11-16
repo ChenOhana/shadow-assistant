@@ -58,6 +58,22 @@ target/release/brain run --data-dir ~/brain-data
 start repairs a torn last line, if there is one, and resumes ingest exactly
 where it stopped.
 
+### As a service
+
+`brain` can run as a **systemd user service**: it starts with your Plasma
+session, restarts if it crashes, stops at logout, and runs as you (no
+root; it needs your desktop session for focus tracking):
+
+```sh
+make install-service          # installs /usr/bin/brain + the unit, enables it
+journalctl --user -u brain -f # its messages
+systemctl --user stop brain   # pause capture
+make uninstall-service        # remove it
+```
+
+The service uses `~/brain-data`. Stop it before running `brain run` by hand
+on the same directory (only one `brain run` per data directory).
+
 Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
 invisible copy of VS Code (tier 2, below). It is off by default.
 
@@ -143,3 +159,9 @@ cargo test                                   # unit + integration tests
 cargo test --release --test crash_safety     # 25 random kill -9s under load;
                                              # sessions must equal a rebuild from the log
 ```
+
+Tests that use real hardware need two narrow permissions, granted once by
+`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
+passwordless `sudo /usr/sbin/rtcwake -m mem -s 20` only (suspend with
+automatic wake, for the sleep/wake test), and access to `/dev/uinput` for
+the user at the local seat (virtual keyboard tests).

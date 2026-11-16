@@ -1,0 +1,27 @@
+# systemd *user* service: runs `brain run` as you, inside your desktop
+# session (it needs your session D-Bus for KWin focus, Klipper, screen lock
+# and keyboard layouts). No root: keyboards are read through the `input`
+# group. Install with `make install-service`.
+[Unit]
+Description=brain: capture what you type and make it searchable
+Documentation=https://github.com/ChenOhana/shadow-assistant
+# Start with the Plasma session, after the compositor, and stop at logout.
+PartOf=graphical-session.target
+After=graphical-session.target plasma-kwin_wayland.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/brain run --data-dir %h/brain-data
+# SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+# stderr (warnings, layout switches, tier 2 failures) goes to the journal:
+#   journalctl --user -u brain -f
+
+[Install]
+WantedBy=graphical-session.target

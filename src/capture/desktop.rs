@@ -122,7 +122,14 @@ impl KwinFocus {
             script_path,
             kwin_owner,
         };
-        me.load()?;
+        // KWin may not be up yet (brain started as a service early in the
+        // session). Keep the connection: `watch_kwin_restarts` loads the
+        // script as soon as KWin's name appears on the bus.
+        if let Err(e) = me.load() {
+            eprintln!(
+                "brain: KWin is not reachable yet ({e:#}); focus tracking starts when it appears"
+            );
+        }
         Ok(me)
     }
 
