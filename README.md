@@ -99,7 +99,9 @@ Example log lines:
 Ingest (inside `brain run`, about once a second) turns the log into
 **writing sessions**, stored in the `sessions` table with an FTS5 index.
 
-* A session is one `(app, window title)`. It closes after **30 s without
+* A session is one `(app, window title)`. Markers that change while you
+  type are removed from the title first: an editor's unsaved-file dot or
+  `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`). It closes after **30 s without
   typing in that window**, or right away when a single-line field is
   submitted (Enter at a shell prompt, in a chat box or a browser's address
   bar), cancelled (Ctrl+C at a prompt), or left for another field of the

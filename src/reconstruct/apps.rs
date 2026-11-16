@@ -135,11 +135,15 @@ pub fn classify(app: &str) -> AppClass {
 /// that marker flips on the first keystroke. Left in, it would split every
 /// editing session in two, so it is removed.
 pub fn normalize_window(title: &str) -> String {
-    let mut t = title.trim();
-    for prefix in ["● ", "●", "* "] {
-        if let Some(rest) = t.strip_prefix(prefix) {
-            t = rest.trim_start();
-        }
+    // Leading status glyphs: VS Code's unsaved dot, and the spinners and
+    // markers that terminal programs animate in the title (Claude Code
+    // flips ◐/◑ every second, others use braille spinners or ✳). Left in,
+    // each frame would start a new session.
+    let mut t = title
+        .trim()
+        .trim_start_matches(|c: char| is_status_glyph(c) || c.is_whitespace());
+    if let Some(rest) = t.strip_prefix("* ") {
+        t = rest.trim_start();
     }
     let mut out = t.replace(" [modified]", "").replace(" [Modified]", "");
     // A standalone "*" word (Kate/KDE: "file.txt * — Kate").
@@ -150,6 +154,13 @@ pub fn normalize_window(title: &str) -> String {
         out = stripped.to_string();
     }
     out
+}
+
+/// Symbol characters used as status markers at the start of window titles:
+/// geometric shapes (● ◐ ◑ ◒ ◓ ■ ▶), dingbats and miscellaneous symbols
+/// (✳ ✻ ⚡ ★), and braille (spinner frames ⠋ ⠙ ⠹).
+fn is_status_glyph(c: char) -> bool {
+    matches!(c as u32, 0x25A0..=0x25FF | 0x2600..=0x27BF | 0x2800..=0x28FF)
 }
 
 #[cfg(test)]
@@ -208,6 +219,17 @@ mod tests {
             "New tab - Google Chrome"
         );
         assert_eq!(normalize_window("a * b"), "a b");
+        // Animated title prefixes of terminal programs.
+        for t in [
+            "◐ Home assignment",
+            "◑ Home assignment",
+            "⠹ Home assignment",
+            "✳ Home assignment",
+        ] {
+            assert_eq!(normalize_window(t), "Home assignment");
+        }
+        assert_eq!(normalize_window("~"), "~");
+        assert_eq!(normalize_window("brain run"), "brain run");
         assert_eq!(normalize_window(""), "");
     }
 }
