@@ -539,9 +539,9 @@ window has to be read anyway. Clock steps backwards are discussed in section
 - **The mouse is not captured.** A click tells brain the cursor moved but not
   where in the text. Text edited after moving the cursor with the mouse
   (clicking into a line, mouse selection, drag and drop) is not supported:
-  typing continues from where the keyboard last left the cursor. A switch to
-  another tab with the mouse within 1 s of a keystroke would be taken as a
-  title rename.
+  typing continues from where the keyboard last left the cursor. Switching
+  *tabs* of one window with the mouse within 1 s of a keystroke would be
+  taken as a title rename (another window being activated never is).
 - **Held keys.** brain logs KDE's repeat schedule exactly, but each app runs
   its own repeat timer; Qt's may fire up to 5 % early or late, so a held key
   can produce one character more or less in the app than in brain.
