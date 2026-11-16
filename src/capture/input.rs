@@ -214,9 +214,28 @@ impl InputLoop {
                 continue;
             }
 
-            // Synthesized key repeats that came due while we slept.
+            // Key repeats must come out in time order with the transitions
+            // around them: read every key event the kernel queued up to
+            // `now` (all devices, readable or not), and only then emit the
+            // repeats due by `now`. Ticking first would emit repeats past a
+            // release that is still unread (keys::tests::
+            // ticking_past_an_unread_release_adds_repeats).
+            let now = now_ms();
+            gone.clear();
+            for i in 0..self.devices.len() {
+                let hup = fds[2 + i].revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL)
+                    != 0
+                    && fds[2 + i].revents & libc::POLLIN == 0;
+                if hup || !self.read_device(i) {
+                    gone.push(i);
+                }
+            }
+            for &i in gone.iter().rev() {
+                let d = self.devices.remove(i);
+                self.keys.device_gone(d.id);
+            }
             let rec = self.recorder.clone();
-            self.keys.tick(now_ms(), &mut |k| emit(&rec, k));
+            self.keys.tick(now, &mut |k| emit(&rec, k));
 
             if fds[0].revents != 0 {
                 drain_fd(self.wake.as_raw_fd());
@@ -243,27 +262,6 @@ impl InputLoop {
             if fds[1].revents != 0 {
                 drain_fd(self.inotify.as_raw_fd());
                 self.scan();
-                continue;
-            }
-
-            gone.clear();
-            for (i, pfd) in fds[2..].iter().enumerate() {
-                if pfd.revents == 0 {
-                    continue;
-                }
-                if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
-                    && pfd.revents & libc::POLLIN == 0
-                {
-                    gone.push(i);
-                    continue;
-                }
-                if !self.read_device(i) {
-                    gone.push(i);
-                }
-            }
-            for &i in gone.iter().rev() {
-                let d = self.devices.remove(i);
-                self.keys.device_gone(d.id);
             }
         }
     }

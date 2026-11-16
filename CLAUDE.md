@@ -90,5 +90,10 @@ tests/                   integration tests that drive the real binary
   report exactly what was tested and what was not.
 - Tests that need VS Code are `#[ignore]`: `cargo test --release --test
   vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
+- `tests/repeat_e2e.rs` (`#[ignore]`) types into a real Kate window through
+  /dev/uinput: it needs the KDE session, `scripts/setup-test-permissions.sh`,
+  and nobody touching the keyboard or mouse while it runs.
+- The input loop must deliver key transitions before emitting the repeats
+  due at the same time (`keys::tests::ticking_past_an_unread_release_adds_repeats`).
 - Never change desktop session state you did not set up (lock/unlock,
   suspend); check it first and restore it.

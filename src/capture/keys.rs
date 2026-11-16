@@ -464,6 +464,158 @@ mod tests {
         assert_eq!(out[0].key, "a");
     }
 
+    /// The contract the input loop must keep: `tick(now)` may only run once
+    /// every transition with a timestamp up to `now` has been delivered.
+    /// Ticking past a release that is still unread emits repeats the app
+    /// never saw (the bug that made held keys produce an extra character).
+    #[test]
+    fn ticking_past_an_unread_release_adds_repeats() {
+        let mut in_order = proc();
+        let ok = run(&mut in_order, &[(0, KEY_A, 1, 0), (0, KEY_A, 0, 650)]);
+        let mut late = proc();
+        let mut bad = run(&mut late, &[(0, KEY_A, 1, 0)]);
+        late.tick(700, &mut |k| bad.push(k)); // woke at 700, release (650) not read yet
+        late.key(0, KEY_A, 0, 650, &mut |k| bad.push(k));
+        assert_eq!(keys(&ok), vec!["a", "a", "a"]); // press, repeats at 600 and 640
+        assert_eq!(keys(&bad), vec!["a", "a", "a", "a"]); // + a phantom repeat at 680
+    }
+
+    /// Independent model of compositor key repeat: a key repeats `delay`
+    /// after its press, then every `1000/rate` ms, until it is released or
+    /// another key is pressed; each repeat uses the modifiers held at that
+    /// moment. Returns (timestamp, key, repeat) for every key the app gets.
+    fn reference(events: &[(u16, bool, Millis)], end: Millis) -> Vec<(Millis, String, bool)> {
+        let cfg = RepeatConfig::default();
+        let period = 1000.0 / cfg.rate_hz;
+        let letter = |code: u16, shift: bool| {
+            let c = match code {
+                KEY_A => 'a',
+                KEY_B => 'b',
+                KEY_BACKSPACE => return "Backspace".to_string(),
+                _ => unreachable!(),
+            };
+            if shift { c.to_ascii_uppercase() } else { c }.to_string()
+        };
+        let mut out = Vec::new();
+        let mut shift = false;
+        let mut repeating: Option<(u16, f64)> = None;
+        let fire_until =
+            |t: Millis, shift: bool, rep: &mut Option<(u16, f64)>, out: &mut Vec<_>| {
+                while let Some((code, next)) = rep.as_mut() {
+                    if *next > t as f64 {
+                        break;
+                    }
+                    out.push((next.floor() as Millis, letter(*code, shift), true));
+                    *next += period;
+                }
+            };
+        for &(code, down, t) in events {
+            fire_until(t, shift, &mut repeating, &mut out);
+            match (code, down) {
+                (KEY_LEFTSHIFT, d) => shift = d,
+                (c, true) => {
+                    out.push((t, letter(c, shift), false));
+                    repeating = Some((c, (t + cfg.delay_ms) as f64));
+                }
+                (c, false) => {
+                    if repeating.is_some_and(|(r, _)| r == c) {
+                        repeating = None;
+                    }
+                }
+            }
+        }
+        fire_until(end, shift, &mut repeating, &mut out);
+        out
+    }
+
+    /// xorshift64*: deterministic randomness without a dependency.
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// Random typing with long holds, overlapping keys, Shift changes during
+    /// holds and holds ending right at a repeat's due time, delivered with
+    /// random wakeup timing. Every emitted key and timestamp must match the
+    /// reference model, however early or late `tick` runs, as long as key
+    /// transitions are delivered in time order.
+    #[test]
+    fn repeat_stress_matches_reference_model() {
+        let mut rng = Rng(0x5EED_1234_ABCD_0001);
+        for scenario in 0..300 {
+            let mut events: Vec<(u16, bool, Millis)> = Vec::new();
+            let mut t: Millis = 1_000;
+            let mut shift_down = false;
+            for _ in 0..12 {
+                let code = [KEY_A, KEY_B, KEY_BACKSPACE][rng.below(3) as usize];
+                let hold = match rng.below(5) {
+                    0 => rng.below(120) as Millis,      // a tap
+                    1 => 560 + rng.below(80) as Millis, // around the delay
+                    // exactly on a repeat's due time, or 1 ms either side
+                    2 => 600 + 40 * rng.below(20) as Millis + rng.below(3) as Millis - 1,
+                    _ => rng.below(3_000) as Millis, // anything up to 3 s
+                };
+                events.push((code, true, t));
+                if rng.below(4) == 0 {
+                    // Shift toggled during the hold changes later repeats.
+                    let at = t + 1 + rng.below(hold.max(1) as u64) as Millis;
+                    shift_down = !shift_down;
+                    events.push((KEY_LEFTSHIFT, shift_down, at));
+                }
+                if rng.below(5) == 0 {
+                    // Another key pressed during the hold takes over the repeat;
+                    // the first key's release later must not stop it.
+                    let other = if code == KEY_A { KEY_B } else { KEY_A };
+                    let at = t + 1 + rng.below(hold.max(1) as u64) as Millis;
+                    events.push((other, true, at));
+                    events.push((other, false, at + hold));
+                }
+                events.push((code, false, t + hold));
+                t += hold + 1 + rng.below(200) as Millis;
+            }
+            if shift_down {
+                events.push((KEY_LEFTSHIFT, false, t));
+            }
+            events.sort_by_key(|e| e.2); // stable: same-ms events keep their order
+            // Overlapping holds can produce a press of a key that is already
+            // down, or a release of one that is up: drop those, so the input
+            // is something a real keyboard can send.
+            let mut down: HashSet<u16> = HashSet::new();
+            events.retain(|&(code, d, _)| {
+                if d {
+                    down.insert(code)
+                } else {
+                    down.remove(&code)
+                }
+            });
+            let end = events.last().unwrap().2 + 5_000;
+            let expected = reference(&events, end);
+
+            let mut p = proc();
+            let mut got: Vec<(Millis, String, bool)> = Vec::new();
+            let mut emit = |k: KeyOut| got.push((k.ts, k.key, k.repeat));
+            let mut last_tick: Millis = 0;
+            for &(code, down, ts) in &events {
+                // Wakeups at random times before this event: never past it.
+                while rng.below(3) == 0 && last_tick < ts {
+                    last_tick += 1 + rng.below((ts - last_tick) as u64) as Millis;
+                    p.tick(last_tick, &mut emit);
+                }
+                p.key(0, code, if down { 1 } else { 0 }, ts, &mut emit);
+            }
+            p.tick(end, &mut emit);
+            assert_eq!(got, expected, "scenario {scenario}: {events:?}");
+        }
+    }
+
     #[test]
     fn parses_kcminputrc() {
         let cfg = RepeatConfig::from_kcminputrc(

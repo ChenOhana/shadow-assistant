@@ -149,6 +149,14 @@ sqlite3 ~/brain-data/brain.db \
   layouts (us/il, Alt+Shift switching, layout changes from the tray), so
   the log holds the characters the app received (`"ש"`, `"H"`), as in the
   assignment's example event. Key repeat is regenerated on KDE's schedule.
+* **Held keys** are logged with the repeats KDE's schedule produces
+  (600 ms delay, then 25 Hz), exactly. The app may still have received one
+  more or one fewer character per hold: on Wayland each app runs its own
+  repeat timer, and Qt apps use timers that may fire up to 5% early or late
+  (a 600 ms delay fires anywhere in ~570–630 ms). Measured against Kate, the
+  same 620 ms hold gave 1, 2 or 3 characters across runs; brain's
+  reconstruction stays within one character per hold (two for holds over
+  2 s). `tests/repeat_e2e.rs` measures this against a real Kate window.
 * **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
   way applications match them; this also makes paste detection work in
   Hebrew.
@@ -279,6 +287,12 @@ caught. Transcripts are in `ai-logs/`.
 9. **Not flagging a design deviation.** Reconstruction is incremental, not
    "at session close" as the design says; it only explained this when the
    owner asked how reconstruction works.
-10. **A test weaker than it reads.** The kill -9 test never actually
+10. **Extra characters from held keys.** The input loop emitted the
+    repeats due "now" before reading key releases that were already
+    queued, so a late wakeup added repeats the app never saw. Found when
+    the owner reported held keys reconstructing wrongly; fixed (read all
+    queued events first) and covered by a model-based stress test and a
+    real-Kate test.
+11. **A test weaker than it reads.** The kill -9 test never actually
     killed brain in the middle of a log write (0 torn lines across runs);
     torn-line repair is covered by unit tests, not by that test.
