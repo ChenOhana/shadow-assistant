@@ -135,6 +135,24 @@ sqlite3 ~/brain-data/brain.db \
 
 ## Decisions and edge cases
 
+**Platform and capture**
+* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way
+  to observe other apps' keystrokes, so `brain` reads the kernel's input
+  devices (evdev) passively: read-only, never grabbed, so it cannot add
+  input lag. Focus (app + window title) comes from a small KWin script
+  that calls `brain` over D-Bus. PLAN.md compares the alternatives.
+* **Keys are resolved at capture time** with libxkbcommon and your real
+  layouts (us/il, Alt+Shift switching, layout changes from the tray), so
+  the log holds the characters the app received (`"ש"`, `"H"`), as in the
+  assignment's example event. Key repeat is regenerated on KDE's schedule.
+* **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
+  way applications match them; this also makes paste detection work in
+  Hebrew.
+* **Paste** (Ctrl+V, Ctrl+Shift+V, Shift+Insert): the clipboard text is
+  read from Klipper at that moment and logged, up to 64 KiB.
+* **Screen lock pauses capture**, so the unlock password is never logged.
+* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
+  keyboards are reopened. Tested with a real suspend.
 * **The mouse is not captured.** `brain` reads keyboards only. A mouse
   click can move the text cursor, but its position on screen tells `brain`
   nothing about where in the text the cursor went, so reconstruction cannot
@@ -144,15 +162,56 @@ sqlite3 ~/brain-data/brain.db \
   continues from where the *keyboard* last left the cursor. Cursor moves
   with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
   Ctrl+A) are followed.
+
+**Storage**
+* **The JSONL log is the ground truth; SQLite is derived.** Capture only
+  appends one line per event (never blocks on SQLite). Ingest builds the
+  index from the log once a second, in one transaction together with the
+  log offset, so a crash never duplicates or skips anything. Deleting
+  `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
+  SQLite.
+* **No backward compatibility yet.** This is the first version: a database
+  with another schema version is refused (delete it to rebuild).
+
+**Sessions and reconstruction**
+* **Session key `(app, window title)`**, with markers that change while
+  typing removed from the title (unsaved-file dots, terminal spinners).
+* **30 s idle per window; focus loss alone never ends a session.** Enter
+  ends a session only in single-line fields (shell prompts, chat boxes,
+  browser address/search bars, by app class); elsewhere it is a newline.
+  In browsers, Shift+Enter is a newline.
+* **Single-line fields start each session empty**; editors keep their
+  document across sessions. Window titles of single-line fields are
+  reused by unrelated fields ("New tab", "~"), so carrying text over would
+  mix them.
+* **Reconstruction is incremental**: each key is applied once to the open
+  session's in-memory buffer, and open sessions' text is refreshed in the
+  index every second, so search sees what is being typed now. (The design
+  reconstructed at close and rebuilt open sessions at query time; the
+  result is the same, the cost is not.) VS Code tier 2 runs at close.
+* **Unknown cursor = end of the text**: after `brain run` restarts, and at
+  the start of a VS Code replay.
+* **Shell history recall** (Up) uses only the commands `brain` saw being
+  run in that terminal app; history from before, tab completion and shell
+  autosuggestions (zsh) are not visible, so those lines can be wrong.
+* **Sessions that changed nothing leave no row** (cursor movement only, a
+  typo typed and deleted, whitespace).
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
   finds "Café"). This replaces the design's English-only porter stemmer,
   which cannot find Hebrew words with attached prefixes. Query words
   shorter than 3 characters cannot use the trigram index.
-* **Cursor at session start.** When a session starts on text `brain` did
-  not see being typed (VS Code replay, or a document after `brain run`
-  restarted), the cursor is assumed to be at the end.
+* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
+  content at session start (snapshot within 10 s, no unsaved changes),
+  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
+  outside brain's budget), and runs with extensions disabled when your
+  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+
+**Running**
+* **Service as you, not root**: a systemd user service, because desktop
+  integration needs your session's D-Bus, and a root keylogger is the
+  worst case if it is ever compromised.
 
 ## Tests
 
@@ -167,3 +226,48 @@ Tests that use real hardware need two narrow permissions, granted once by
 passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm;
 the sleep/wake test then suspends with `systemctl suspend`), and access to `/dev/uinput` for
 the user at the local seat (virtual keyboard tests).
+
+## Where the agent failed
+
+This project was built by Claude Code (Opus 5.5) with the owner reviewing
+every stage. These are the mistakes it made, in order, and how they were
+caught. Transcripts are in `ai-logs/`.
+
+1. **Wrong library assumption.** It wrote D-Bus code for zbus 6 with a
+   feature that does not exist there; the build failed and it moved to
+   zbus 5.
+2. **A commit that did not build.** The first commit declared a module
+   that was only added in the next one. Caught by building each commit
+   in a clean worktree; the history was rewritten before anything was
+   pushed.
+3. **A background agent's PLAN.md described things that were never
+   built** (a "durable offset", timerfds, text session ids, an in-memory
+   index for open sessions). It was kept out of the repo until it can be
+   rewritten against the code.
+4. **Unlocking the owner's screen.** To test lock handling it ran
+   `loginctl lock-session` and `unlock-session` without first checking the
+   screen state. The screen was already locked (the owner was away), so it
+   unlocked the machine for 23 seconds before noticing and re-locking it.
+   It now checks and restores desktop state before such tests.
+5. **A sleep/wake test that could not work.** `rtcwake -m mem` suspends
+   behind logind's back, so brain (correctly) saw nothing. The test was
+   redone through `systemctl suspend`.
+6. **Bugs only found on the owner's real data**, not by its own tests:
+   shortcuts on the Hebrew layout logged as Hebrew letters (so Ctrl+V was
+   not recognised as paste), text leaking between Chrome tabs that share
+   the title "New tab", and an animated terminal title (Claude Code's own
+   spinner) splitting a session every second.
+7. **Work the owner did not want.** It built touchpad tap detection for
+   click logging, then the owner pointed out that clicks without a cursor
+   position cannot help reconstruction and capture of the mouse was
+   removed. It also added backward-compatibility code (a schema migration,
+   a catch-all event type) for a first version that has no users yet.
+8. **Imprecise explanation.** It told the owner the porter stemmer makes
+   "a deleted word still appear" in search; the real effect is narrower
+   (a different word with the same stem matches). Corrected when asked.
+9. **Not flagging a design deviation.** Reconstruction is incremental, not
+   "at session close" as the design says; it only explained this when the
+   owner asked how reconstruction works.
+10. **A test weaker than it reads.** The kill -9 test never actually
+    killed brain in the middle of a log write (0 torn lines across runs);
+    torn-line repair is covered by unit tests, not by that test.
