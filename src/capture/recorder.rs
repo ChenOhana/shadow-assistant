@@ -283,7 +283,6 @@ mod tests {
                 EventKind::Paste { text, .. } => {
                     format!("{}:paste:{}", e.app, text.as_deref().unwrap_or("-"))
                 }
-                EventKind::Other => "other".into(),
                 EventKind::System { state } => format!("{}:{state:?}", e.app),
             })
             .collect();

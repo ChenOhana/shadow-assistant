@@ -284,7 +284,7 @@ impl Sessions {
                 s.editor.paste(text);
                 s.touch(ev.ts, next);
             }
-            EventKind::Focus { .. } | EventKind::Other => {}
+            EventKind::Focus { .. } => {}
             EventKind::System { state } => match state {
                 SystemState::Start => {
                     // A start without a preceding stop means a crash; either
@@ -841,40 +841,6 @@ mod tests {
         let mut ing = l.ingester("b.db");
         run(&mut ing, clock_late);
         assert_eq!(texts(ing.connection()), vec!["abc pasted", "yes"]);
-    }
-
-    #[test]
-    fn click_lines_from_older_builds_are_ignored() {
-        let tmp = tempfile::tempdir().unwrap();
-        let log = tmp.path().join("events.jsonl");
-        let mut text = String::new();
-        let mut line = Vec::new();
-        for (i, c) in ["a", "b"].iter().enumerate() {
-            Event {
-                ts: T0 + i as Millis * 100,
-                app: "notes".into(),
-                kind: EventKind::Key {
-                    key: (*c).into(),
-                    mods: vec![],
-                    repeat: false,
-                    window: "n".into(),
-                },
-            }
-            .to_line(&mut line);
-            text.push_str(std::str::from_utf8(&line).unwrap());
-            if i == 0 {
-                text.push_str(
-                    r#"{"ts":"2027-01-15T08:00:00.050Z","app":"notes","type":"click","button":"left","window":"n"}"#,
-                );
-                text.push('\n');
-            }
-        }
-        std::fs::write(&log, text).unwrap();
-        let mut ing =
-            Ingester::new(store::open_writer(&tmp.path().join("b.db")).unwrap(), &log).unwrap();
-        let s = ing.step_at(clock_late).unwrap();
-        assert_eq!((s.lines, s.invalid_lines), (3, 0));
-        assert_eq!(texts(ing.connection()), vec!["ab"]);
     }
 
     #[test]

@@ -58,7 +58,7 @@ src/capture/recorder.rs  stamps focus, appends to log, clipboard on paste, lock 
 src/capture/desktop.rs   D-Bus: KWin focus script, Klipper, lock, sleep, layouts
 src/capture/synthetic.rs synthetic input source for tests/benchmarks
 src/eventlog.rs          append-only JSONL log: torn-tail repair, line reader
-src/store.rs             SQLite schema (WAL, FTS5), migrations, helpers
+src/store.rs             SQLite schema (WAL, FTS5), helpers
 src/ingest.rs            log → SQLite, offset advanced in the same transaction
 src/sessions.rs          session rules, open/close, live text, crash recovery
 src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
@@ -68,6 +68,11 @@ tests/                   integration tests that drive the real binary
 ```
 
 ## Working rules
+
+- **No backward compatibility.** This is the first robust version, still
+  being built: change the log format, the schema or the CLI freely, with no
+  migration, compatibility shims or legacy-format handling. Test data
+  directories can be deleted and recreated.
 
 - `cargo fmt`, `cargo clippy --all-targets` (zero warnings) and `cargo test`
   before every commit. Run `cargo test --release --test crash_safety` when

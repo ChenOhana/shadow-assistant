@@ -50,11 +50,6 @@ pub enum EventKind {
     },
     /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.
     System { state: SystemState },
-    /// An event type this version does not know (for example `click` lines
-    /// written by earlier builds, which logged mouse buttons). Read and
-    /// ignored, so such a line is not mistaken for corruption. Never written.
-    #[serde(other)]
-    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -85,7 +80,7 @@ impl Event {
             EventKind::Key { window, .. }
             | EventKind::Focus { window }
             | EventKind::Paste { window, .. } => Some(window),
-            EventKind::System { .. } | EventKind::Other => None,
+            EventKind::System { .. } => None,
         }
     }
 
@@ -136,16 +131,6 @@ mod tests {
         );
         let back: Event = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(back, e);
-    }
-
-    #[test]
-    fn unknown_types_are_read_as_other() {
-        let e: Event = serde_json::from_str(
-            r#"{"ts":"2026-11-15T20:45:13.515Z","app":"x","type":"click","button":"left","window":"w"}"#,
-        )
-        .unwrap();
-        assert_eq!(e.kind, EventKind::Other);
-        assert_eq!(e.window(), None);
     }
 
     #[test]

@@ -125,8 +125,7 @@ sqlite3 ~/brain-data/brain.db \
   line to fix a typo, selecting with the mouse, drag and drop): typing
   continues from where the *keyboard* last left the cursor. Cursor moves
   with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
-  Ctrl+A) are followed. Earlier builds logged `click` events; such lines are
-  read and ignored.
+  Ctrl+A) are followed.
 * **Cursor at session start.** When a session starts on text `brain` did
   not see being typed (VS Code replay, or a document after `brain run`
   restarted), the cursor is assumed to be at the end.

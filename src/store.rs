@@ -16,7 +16,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-/// Bumped whenever the schema changes; see [`migrate`].
+/// Bumped whenever the schema changes; see [`init_schema`].
 pub const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA: &str = r#"
@@ -87,22 +87,10 @@ CREATE TABLE log_checkpoints (
 );
 "#;
 
-/// Everything [`SCHEMA`] creates, for rebuilding an index from an older schema.
-const DROP_ALL: &str = "
-DROP TRIGGER IF EXISTS sessions_ai;
-DROP TRIGGER IF EXISTS sessions_ad;
-DROP TRIGGER IF EXISTS sessions_au;
-DROP TABLE IF EXISTS sessions_fts;
-DROP TABLE IF EXISTS sessions;
-DROP TABLE IF EXISTS context_state;
-DROP TABLE IF EXISTS ingest_state;
-DROP TABLE IF EXISTS log_checkpoints;
-";
-
 /// The app value used for global (all-app) checkpoints.
 pub const GLOBAL_CHECKPOINT_APP: &str = "*";
 
-/// Opens the database for the writer (`brain run`), creating and migrating it.
+/// Opens the database for the writer (`brain run`), creating it if new.
 pub fn open_writer(path: &Path) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("opening database {}", path.display()))?;
@@ -119,7 +107,7 @@ pub fn open_writer(path: &Path) -> Result<Connection> {
          PRAGMA foreign_keys = ON;
          PRAGMA cache_size = -1024;", // 1 MiB page cache: keeps `run` well inside its memory budget
     )?;
-    migrate(&conn).with_context(|| format!("migrating database {}", path.display()))?;
+    init_schema(&conn, path)?;
     Ok(conn)
 }
 
@@ -136,35 +124,34 @@ pub fn open_reader(path: &Path) -> Result<Connection> {
     if version != SCHEMA_VERSION {
         bail!(
             "database {} has schema version {version}, this brain expects {SCHEMA_VERSION} \
-             (restart `brain run` to migrate it)",
+             (delete it and restart `brain run` to rebuild it from the capture log)",
             path.display()
         );
     }
     Ok(conn)
 }
 
-/// The index is derived from the capture log, so an older schema is not
-/// converted: it is dropped and rebuilt by re-ingesting the log from offset 0.
-fn migrate(conn: &Connection) -> Result<()> {
+/// Creates the schema in a new database. There is no migration (see
+/// CLAUDE.md: no backward compatibility yet): a database from another
+/// version is refused. Deleting it is safe, since the index is rebuilt from
+/// the capture log on the next start.
+fn init_schema(conn: &Connection, path: &Path) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version == SCHEMA_VERSION {
-        return Ok(());
+    match version {
+        SCHEMA_VERSION => Ok(()),
+        0 => {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(SCHEMA)?;
+            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            tx.commit()?;
+            Ok(())
+        }
+        v => bail!(
+            "{} has schema version {v}, this brain uses {SCHEMA_VERSION}; delete it \
+             and it will be rebuilt from the capture log",
+            path.display()
+        ),
     }
-    if version > SCHEMA_VERSION {
-        bail!("database schema version {version} is newer than this brain ({SCHEMA_VERSION})");
-    }
-    if version != 0 {
-        eprintln!(
-            "brain: index schema {version} is older than {SCHEMA_VERSION}; \
-             rebuilding it from the capture log"
-        );
-    }
-    let tx = conn.unchecked_transaction()?;
-    tx.execute_batch(DROP_ALL)?;
-    tx.execute_batch(SCHEMA)?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    tx.commit()?;
-    Ok(())
 }
 
 pub fn ingest_offset(conn: &Connection) -> Result<u64> {
@@ -267,30 +254,15 @@ mod tests {
     }
 
     #[test]
-    fn old_schema_is_rebuilt_from_scratch() {
+    fn other_schema_version_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("b.db");
-        {
-            let c = Connection::open(&p).unwrap();
-            c.execute_batch(
-                "CREATE TABLE sessions (id INTEGER PRIMARY KEY, junk TEXT);
-                 CREATE TABLE ingest_state (id INTEGER PRIMARY KEY, log_offset INTEGER);
-                 INSERT INTO ingest_state VALUES (1, 999);
-                 PRAGMA user_version = 1;",
-            )
+        Connection::open(&p)
+            .unwrap()
+            .execute_batch("PRAGMA user_version = 1;")
             .unwrap();
-        }
-        let c = open_writer(&p).unwrap();
-        assert_eq!(ingest_offset(&c).unwrap(), 0, "re-ingest from the start");
-        let v: i64 = c
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(v, SCHEMA_VERSION);
-        c.execute(
-            "INSERT INTO context_state (app, window, text, cursor, updated_at) VALUES ('a','w','',0,'t')",
-            [],
-        )
-        .unwrap();
+        let e = open_writer(&p).unwrap_err().to_string();
+        assert!(e.contains("delete it"), "{e}");
     }
 
     #[test]
