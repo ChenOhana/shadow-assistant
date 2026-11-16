@@ -219,7 +219,9 @@ fn held_keys_match_what_kate_received() {
     let mut kb = VirtualKeyboard::new();
     std::thread::sleep(Duration::from_millis(1500)); // brain and KWin pick the device up
     let kate = KillMatching(target.to_string_lossy().into_owned());
-    Command::new("kate")
+    // Kate forks the real window process and this launcher exits; it is
+    // reaped after `kate` (the window) is closed below.
+    let mut launcher = Command::new("kate")
         .args(["-n"])
         .arg(&target)
         .stdout(Stdio::null())
@@ -285,6 +287,7 @@ fn held_keys_match_what_kate_received() {
     std::thread::sleep(Duration::from_millis(1500));
     let actual = std::fs::read_to_string(&target).unwrap();
     drop(kate);
+    let _ = launcher.wait();
     drop(kb);
     drop(_brain); // SIGTERM: final ingest, sessions closed
 
