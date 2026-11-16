@@ -263,8 +263,11 @@ caught. Transcripts are in `ai-logs/`.
 6. **Bugs only found on the owner's real data**, not by its own tests:
    shortcuts on the Hebrew layout logged as Hebrew letters (so Ctrl+V was
    not recognised as paste), text leaking between Chrome tabs that share
-   the title "New tab", and an animated terminal title (Claude Code's own
-   spinner) splitting a session every second.
+   the title "New tab", an animated terminal title (Claude Code's own
+   spinner) splitting a session every second, VS Code's new-file title
+   (named after the text being typed) splitting a session on every
+   character, VS Code's real app id (`com.microsoft.VSCode`) not being
+   recognised for tier 2, and KRunner's Enter recorded as a newline.
 7. **Work the owner did not want.** It built touchpad tap detection for
    click logging, then the owner pointed out that clicks without a cursor
    position cannot help reconstruction and capture of the mouse was
