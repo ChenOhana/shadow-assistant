@@ -9,6 +9,7 @@ pub mod datadir;
 pub mod event;
 pub mod eventlog;
 pub mod ingest;
+pub mod query;
 pub mod reconstruct;
 pub mod sessions;
 pub mod store;

@@ -5,14 +5,12 @@ lets you search it later.
 
 ```
 brain run                      # capture keystrokes + focus changes, store them
-brain query search "<words>"   # (stage 2) full-text search over writing sessions
-brain query text --app A       # (stage 2) the raw typed stream of an app
+brain query search "<words>"   # full-text search over writing sessions
+brain query text --app A       # the raw typed stream of an app
 ```
 
-> **Status: capture, sessions, reconstruction and indexing are done;
-> `brain query` is next.** `brain run` captures, groups what you type into
-> writing sessions, reconstructs each session's text and indexes it for
-> full-text search. You can inspect the result in `brain.db` (see below).
+> **Status: capture, sessions, reconstruction, indexing and queries are
+> done; end-to-end verification is next.**
 
 ## Supported OS
 
@@ -92,6 +90,73 @@ Example log lines:
 ```json
 {"ts":"2026-11-15T17:20:01.112Z","app":"org.kde.konsole","type":"focus","window":"~ : bash — Konsole"}
 {"ts":"2026-11-15T17:20:02.348Z","app":"org.kde.konsole","type":"key","key":"H","mods":["shift"],"window":"~ : bash — Konsole"}
+```
+
+## Query
+
+Both commands run while `brain run` is capturing and print JSON. Errors go
+to stderr with a non-zero exit code.
+
+```sh
+brain query search "migration blocked" [--app A] [--from T] [--to T] [--at T] [--limit N]
+brain query text --app A [--from T] [--to T] [--at T]
+```
+
+* **`search`**: sessions whose text contains *every* word, anywhere inside
+  a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
+  first (default limit 20). Open sessions are included with what has been
+  typed so far (`ended_at: null`).
+* **`text`**: the raw stream typed into the app, as captured, with no
+  editing applied: characters as typed, Enter as a newline, Tab as a tab,
+  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
+  pasted text inline.
+* **`--app A`** matches apps whose id contains `A`, ignoring case
+  (`--app chrome` finds `google-chrome`).
+
+**Time flags** (both commands): `--at T` is the 10 minutes ending at T;
+`--from T` alone runs to now; `--from` and `--to` together are an explicit
+window. `--to T` alone means the 10 minutes ending at T for `text`, and
+everything up to T for `search`. With no flags, `text` covers the last 10
+minutes and `search` all time. T can be:
+
+| Form | Example |
+|---|---|
+| relative to now | `-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now` |
+| local date and time | `"2026-11-16 14:00"`, `2026-11-16T14:00:30` |
+| local date (midnight) | `2026-11-16` |
+| local time of day (today) | `14:00`, `14:00:30` |
+| RFC 3339 with a zone | `2026-11-16T12:00:00Z`, `2026-11-16T14:00:00+02:00` |
+
+Times without a zone are in the local time zone. Output times are UTC
+(`…Z`), and the resolved window is echoed (`from`, `to`, `at`) so it is
+visible how a local time was read.
+
+```json
+{
+  "query": "migration blocked",
+  "from": null,
+  "to": null,
+  "results": [
+    {
+      "session_id": "1",
+      "app": "synthetic",
+      "window": "corpus.txt",
+      "started_at": "2026-11-16T14:51:14.684Z",
+      "ended_at": null,
+      "snippet": "the migration is blocked on the schema change. Dana a…"
+    }
+  ]
+}
+```
+
+```json
+{
+  "app": "konsole",
+  "at": "2026-11-16T14:51:22.680Z",
+  "from": "2026-11-16T14:41:22.680Z",
+  "to": "2026-11-16T14:51:22.680Z",
+  "text": "git status\ncargo test\nls -la\n"
+}
 ```
 
 ## Sessions and reconstruction
@@ -212,6 +277,10 @@ sqlite3 ~/brain-data/brain.db \
   autosuggestions (zsh) are not visible, so those lines can be wrong.
 * **Sessions that changed nothing leave no row** (cursor movement only, a
   typo typed and deleted, whitespace).
+* **`query text` is the raw stream, `search` the edited text.** As the
+  owner decided, `text` returns exactly what was typed (with `<Backspace>`
+  and other keys visible) rather than reconstructed text; reconstructed,
+  edit-aware text is what `search` matches and returns.
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`

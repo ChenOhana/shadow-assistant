@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use brain::datadir::DataDir;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -42,32 +42,63 @@ enum Command {
     },
 }
 
+/// Accepted time forms, shown in `--help`.
+const TIME_HELP: &str = "T is relative (-30s, -15m, -2h, -1d, -1h30m, now), \
+RFC 3339 (2026-11-16T14:00:00Z, 2026-11-16T16:00:00+02:00), or local time \
+(2026-11-16 14:00[:SS], 2026-11-16 for midnight, 14:00 for today).";
+
+#[derive(clap::Args)]
+struct TimeArgs {
+    /// The 10 minutes ending at T.
+    #[arg(long, value_name = "T", allow_hyphen_values = true, conflicts_with_all = ["from", "to"])]
+    at: Option<String>,
+    /// Start of the window (with no --to: up to now).
+    #[arg(long, value_name = "T", allow_hyphen_values = true)]
+    from: Option<String>,
+    /// End of the window.
+    #[arg(long, value_name = "T", allow_hyphen_values = true)]
+    to: Option<String>,
+}
+
+impl From<TimeArgs> for brain::query::TimeFlags {
+    fn from(t: TimeArgs) -> Self {
+        Self {
+            at: t.at,
+            from: t.from,
+            to: t.to,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Query {
-    /// Full-text search over writing sessions.
+    /// Full-text search over writing sessions, newest first. Every word must
+    /// appear in the same session, anywhere inside a word, in any case.
+    /// Without time flags it searches all sessions; --to alone means up to T.
+    #[command(after_help = TIME_HELP)]
     Search {
-        /// One or more words; all must appear in the same session (case-insensitive).
+        /// One or more words.
         query: String,
+        /// Only apps whose id contains A (case-insensitive), e.g. chrome.
         #[arg(long, value_name = "A")]
         app: Option<String>,
-        #[arg(long, value_name = "T")]
-        from: Option<String>,
-        #[arg(long, value_name = "T")]
-        to: Option<String>,
+        #[command(flatten)]
+        time: TimeArgs,
+        /// At most N results.
         #[arg(long, value_name = "N", default_value_t = 20)]
         limit: usize,
     },
-    /// The raw typed character stream of an app over a time window.
+    /// The raw typed stream of an app (no editing applied): characters as
+    /// typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>...
+    /// Without time flags it covers the last 10 minutes; --to alone means the
+    /// 10 minutes ending at T.
+    #[command(after_help = TIME_HELP)]
     Text {
+        /// Apps whose id contains A (case-insensitive), e.g. chrome.
         #[arg(long, value_name = "A")]
         app: String,
-        /// End of a 10-minute window (default: now).
-        #[arg(long, value_name = "T", conflicts_with_all = ["from", "to"])]
-        at: Option<String>,
-        #[arg(long, value_name = "T")]
-        from: Option<String>,
-        #[arg(long, value_name = "T")]
-        to: Option<String>,
+        #[command(flatten)]
+        time: TimeArgs,
     },
 }
 
@@ -95,9 +126,30 @@ fn dispatch(cli: Cli) -> Result<()> {
             };
             brain::capture::run(&data_dir, &opts)
         }
-        Command::Query { .. } => {
+        Command::Query { query } => {
             data_dir.ensure_exists()?;
-            bail!("`brain query` is not implemented yet (stage 2)")
+            let now = brain::timefmt::now_ms();
+            let json =
+                match query {
+                    Query::Search {
+                        query,
+                        app,
+                        time,
+                        limit,
+                    } => serde_json::to_string_pretty(&brain::query::search(
+                        &data_dir,
+                        &query,
+                        app.as_deref(),
+                        &time.into(),
+                        limit,
+                        now,
+                    )?)?,
+                    Query::Text { app, time } => serde_json::to_string_pretty(
+                        &brain::query::text(&data_dir, &app, &time.into(), now)?,
+                    )?,
+                };
+            println!("{json}");
+            Ok(())
         }
     }
 }

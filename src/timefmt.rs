@@ -37,14 +37,27 @@ pub fn parse_rfc3339_ms(s: &str) -> Result<Millis> {
     Ok(DateTime::parse_from_rfc3339(s)?.timestamp_millis())
 }
 
-/// Parses a user-supplied time for `--at`, `--from` and `--to`.
-///
-/// Accepted forms:
+/// Parses a user-supplied time for `--at`, `--from` and `--to`, relative to
+/// the current time.
+pub fn parse_user_time(s: &str) -> Result<Millis> {
+    parse_user_time_at(s, now_ms())
+}
+
+/// Parses a user-supplied time, with `now` as the reference for relative
+/// forms. Accepted forms:
+/// * relative to now: `-90s`, `-15m`, `-2h`, `-1d`, combined `-1h30m`; `now`
 /// * RFC 3339 with an offset: `2026-11-08T14:03:22Z`, `2026-11-08T16:03:22+02:00`
 /// * local time without an offset: `2026-11-08T14:03`, `2026-11-08 14:03:22`
 /// * a local date: `2026-11-08` (midnight local time)
-pub fn parse_user_time(s: &str) -> Result<Millis> {
+/// * a local time of day: `14:03`, `14:03:22` (today)
+pub fn parse_user_time_at(s: &str, now: Millis) -> Result<Millis> {
     let s = s.trim();
+    if s.eq_ignore_ascii_case("now") {
+        return Ok(now);
+    }
+    if let Some(rel) = s.strip_prefix('-') {
+        return Ok(now - parse_duration(rel).ok_or_else(|| invalid(s))?);
+    }
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.timestamp_millis());
     }
@@ -63,10 +76,49 @@ pub fn parse_user_time(s: &str) -> Result<Millis> {
         let naive = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
         return local_to_ms(naive, s);
     }
-    bail!(
-        "invalid time {s:?}: expected RFC 3339 (2026-11-08T14:03:22Z) or local \
-         'YYYY-MM-DD[ HH:MM[:SS]]'"
+    for fmt in ["%H:%M:%S%.f", "%H:%M"] {
+        if let Ok(time) = chrono::NaiveTime::parse_from_str(s, fmt) {
+            let today = Local
+                .timestamp_millis_opt(now)
+                .single()
+                .ok_or_else(|| invalid(s))?
+                .date_naive();
+            return local_to_ms(today.and_time(time), s);
+        }
+    }
+    Err(invalid(s))
+}
+
+fn invalid(s: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "invalid time {s:?}: expected a relative time (-30s, -15m, -2h, -1d, -1h30m, now), \
+         RFC 3339 (2026-11-08T14:03:22Z) or local time ('2026-11-08 14:03', '2026-11-08', '14:03')"
     )
+}
+
+/// `90s`, `15m`, `2h`, `1d`, `1h30m` → milliseconds.
+fn parse_duration(s: &str) -> Option<Millis> {
+    let mut total: Millis = 0;
+    let mut digits = String::new();
+    let mut any = false;
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        let unit: Millis = match c {
+            's' => 1_000,
+            'm' => 60_000,
+            'h' => 3_600_000,
+            'd' => 86_400_000,
+            _ => return None,
+        };
+        let n: Millis = digits.parse().ok()?;
+        total = total.checked_add(n.checked_mul(unit)?)?;
+        digits.clear();
+        any = true;
+    }
+    (any && digits.is_empty()).then_some(total)
 }
 
 fn local_to_ms(naive: NaiveDateTime, original: &str) -> Result<Millis> {
@@ -108,6 +160,35 @@ mod tests {
         assert_eq!(a, b);
         let midnight = parse_user_time("2026-11-08").unwrap();
         assert!(midnight < a);
+    }
+
+    #[test]
+    fn parses_relative_times() {
+        let now = 1_800_000_000_000;
+        let at = |s: &str| parse_user_time_at(s, now).unwrap();
+        assert_eq!(at("now"), now);
+        assert_eq!(at("-90s"), now - 90_000);
+        assert_eq!(at("-15m"), now - 900_000);
+        assert_eq!(at("-2h"), now - 7_200_000);
+        assert_eq!(at("-1d"), now - 86_400_000);
+        assert_eq!(at("-1h30m"), now - 5_400_000);
+        assert_eq!(at(" -5m "), now - 300_000);
+        for bad in ["-", "-h", "-5", "-5x", "-1h30", "--5m", "-5 m"] {
+            assert!(parse_user_time_at(bad, now).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn parses_time_of_day_as_today_local() {
+        let now = parse_user_time("2026-11-16 15:30").unwrap();
+        assert_eq!(
+            parse_user_time_at("14:05", now).unwrap(),
+            parse_user_time("2026-11-16 14:05").unwrap()
+        );
+        assert_eq!(
+            parse_user_time_at("14:05:30", now).unwrap(),
+            parse_user_time("2026-11-16 14:05:30").unwrap()
+        );
     }
 
     #[test]
