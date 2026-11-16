@@ -20,19 +20,12 @@
 //!
 //!   cargo test --release --test repeat_e2e -- --ignored --nocapture
 
-use brain::capture::synthetic::us_keycode;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+mod common;
 
-const KEY_BACKSPACE: u16 = 14;
-const KEY_LEFTCTRL: u16 = 29;
-const KEY_S: u16 = 31;
-const EV_SYN: u16 = 0;
-const EV_KEY: u16 = 1;
+use brain::capture::synthetic::us_keycode;
+use common::*;
+use std::path::PathBuf;
+use std::time::Duration;
 
 /// KDE's repeat schedule (brain's model): first repeat after 600 ms, then 25 Hz.
 const DELAY_MS: u64 = 600;
@@ -47,156 +40,6 @@ fn model_count(ms: u64) -> usize {
     }
 }
 
-/// A uinput virtual keyboard, destroyed on drop.
-struct VirtualKeyboard {
-    file: std::fs::File,
-}
-
-impl VirtualKeyboard {
-    fn new() -> Self {
-        const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
-        const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
-        const UI_DEV_SETUP: libc::c_ulong = 0x405c_5503;
-        const UI_DEV_CREATE: libc::c_ulong = 0x5501;
-        #[repr(C)]
-        struct Setup {
-            bustype: u16,
-            vendor: u16,
-            product: u16,
-            version: u16,
-            name: [u8; 80],
-            ff_effects_max: u32,
-        }
-        let file = OpenOptions::new()
-            .write(true)
-            .open("/dev/uinput")
-            .expect("open /dev/uinput (run scripts/setup-test-permissions.sh)");
-        let fd = file.as_raw_fd();
-        let mut name = [0u8; 80];
-        name[..21].copy_from_slice(b"brain-test-keyboard\0\0");
-        let setup = Setup {
-            bustype: 0x03,
-            vendor: 0x1234,
-            product: 0x5678,
-            version: 1,
-            name,
-            ff_effects_max: 0,
-        };
-        // SAFETY: ioctls on a valid uinput fd with correctly sized arguments.
-        unsafe {
-            assert_eq!(libc::ioctl(fd, UI_SET_EVBIT as _, EV_KEY as libc::c_int), 0);
-            for code in 1..=127 {
-                libc::ioctl(fd, UI_SET_KEYBIT as _, code as libc::c_int);
-            }
-            assert_eq!(libc::ioctl(fd, UI_DEV_SETUP as _, &setup), 0);
-            assert_eq!(libc::ioctl(fd, UI_DEV_CREATE as _), 0);
-        }
-        Self { file }
-    }
-
-    fn emit(&mut self, kind: u16, code: u16, value: i32) {
-        #[repr(C)]
-        struct InputEvent {
-            sec: i64,
-            usec: i64,
-            kind: u16,
-            code: u16,
-            value: i32,
-        }
-        let ev = InputEvent {
-            sec: 0,
-            usec: 0,
-            kind,
-            code,
-            value,
-        };
-        // SAFETY: InputEvent is plain old data matching struct input_event.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                (&ev as *const InputEvent).cast::<u8>(),
-                std::mem::size_of::<InputEvent>(),
-            )
-        };
-        self.file.write_all(bytes).unwrap();
-    }
-
-    fn key(&mut self, code: u16, down: bool) {
-        self.emit(EV_KEY, code, down as i32);
-        self.emit(EV_SYN, 0, 0);
-    }
-
-    fn hold(&mut self, code: u16, ms: u64) {
-        self.key(code, true);
-        std::thread::sleep(Duration::from_millis(ms));
-        self.key(code, false);
-    }
-}
-
-impl Drop for VirtualKeyboard {
-    fn drop(&mut self) {
-        const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
-        // SAFETY: valid uinput fd.
-        unsafe { libc::ioctl(self.file.as_raw_fd(), UI_DEV_DESTROY as _) };
-    }
-}
-
-/// Kills a child process on drop (also on panic).
-struct Kill(Child);
-impl Drop for Kill {
-    fn drop(&mut self) {
-        // SAFETY: SIGTERM to our own child.
-        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };
-        let _ = self.0.wait();
-    }
-}
-
-/// Closes every process whose command line contains `needle` (Kate
-/// detaches from the process we start, so it is found by its unique file).
-struct KillMatching(String);
-impl Drop for KillMatching {
-    fn drop(&mut self) {
-        let me = std::process::id();
-        let find = || -> Vec<i32> {
-            std::fs::read_dir("/proc")
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
-                .filter(|&pid| pid as u32 != me)
-                .filter(|pid| {
-                    std::fs::read(format!("/proc/{pid}/cmdline"))
-                        .is_ok_and(|c| String::from_utf8_lossy(&c).contains(&self.0))
-                })
-                .collect()
-        };
-        for sig in [libc::SIGTERM, libc::SIGKILL] {
-            for pid in find() {
-                // SAFETY: signalling a process started by this test.
-                unsafe { libc::kill(pid, sig) };
-            }
-            std::thread::sleep(Duration::from_millis(500));
-        }
-    }
-}
-
-/// The window brain last saw focused: (app, title).
-fn focused(log: &Path) -> Option<(String, String)> {
-    let text = std::fs::read_to_string(log).ok()?;
-    text.lines().rev().find_map(|l| {
-        let v: serde_json::Value = serde_json::from_str(l).ok()?;
-        (v["type"] == "focus").then(|| {
-            (
-                v["app"].as_str().unwrap_or("").to_string(),
-                v["window"].as_str().unwrap_or("").to_string(),
-            )
-        })
-    })
-}
-
-fn kate_focused(log: &Path, file_name: &str) -> bool {
-    focused(log).is_some_and(|(app, title)| app.contains("kate") && title.contains(file_name))
-}
-
 #[test]
 #[ignore]
 fn held_keys_match_what_kate_received() {
@@ -207,36 +50,11 @@ fn held_keys_match_what_kate_received() {
     let target: PathBuf = tmp.path().join(&file_name);
     std::fs::write(&target, "").unwrap();
 
-    let _brain = Kill(
-        Command::new(env!("CARGO_BIN_EXE_brain"))
-            .args(["run", "--data-dir"])
-            .arg(&data)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
+    let brain = start_brain(&data);
     let mut kb = VirtualKeyboard::new();
     std::thread::sleep(Duration::from_millis(1500)); // brain and KWin pick the device up
-    let kate = KillMatching(target.to_string_lossy().into_owned());
-    // Kate forks the real window process and this launcher exits; it is
-    // reaped after `kate` (the window) is closed below.
-    let mut launcher = Command::new("kate")
-        .args(["-n"])
-        .arg(&target)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let t = Instant::now();
-    while !kate_focused(&log, &file_name) {
-        assert!(
-            t.elapsed() < Duration::from_secs(20),
-            "Kate never got focus (last: {:?}); nothing was typed",
-            focused(&log)
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    let kate = open_kate(&target);
+    wait_kate_focused(&log, &file_name);
     std::thread::sleep(Duration::from_millis(1500)); // let Kate finish loading
 
     // One distinct letter per hold, so each hold's characters can be counted.
@@ -260,36 +78,23 @@ fn held_keys_match_what_kate_received() {
         ('k', 2020, false),
     ];
     for &(c, ms, _) in holds {
-        assert!(
-            kate_focused(&log, &file_name),
-            "focus left Kate; stopped typing"
-        );
+        assert_kate_focused(&log, &file_name);
         kb.hold(us_keycode(c).unwrap().0, ms);
         std::thread::sleep(Duration::from_millis(150));
     }
     // Held Backspace deletes back into the 'k' run.
-    assert!(
-        kate_focused(&log, &file_name),
-        "focus left Kate; stopped typing"
-    );
+    assert_kate_focused(&log, &file_name);
     let bs_ms = 1020;
     kb.hold(KEY_BACKSPACE, bs_ms);
     std::thread::sleep(Duration::from_millis(150));
     // Save.
-    assert!(
-        kate_focused(&log, &file_name),
-        "focus left Kate; stopped typing"
-    );
-    kb.key(KEY_LEFTCTRL, true);
-    kb.key(KEY_S, true);
-    kb.key(KEY_S, false);
-    kb.key(KEY_LEFTCTRL, false);
+    assert_kate_focused(&log, &file_name);
+    kb.ctrl(KEY_S);
     std::thread::sleep(Duration::from_millis(1500));
     let actual = std::fs::read_to_string(&target).unwrap();
     drop(kate);
-    let _ = launcher.wait();
     drop(kb);
-    drop(_brain); // SIGTERM: final ingest, sessions closed
+    drop(brain); // SIGTERM: final ingest, sessions closed
 
     let conn = rusqlite::Connection::open(data.join("brain.db")).unwrap();
     let reconstructed: String = conn
