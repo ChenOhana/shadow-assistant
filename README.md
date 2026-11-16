@@ -162,6 +162,6 @@ cargo test --release --test crash_safety     # 25 random kill -9s under load;
 
 Tests that use real hardware need two narrow permissions, granted once by
 `sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
-passwordless `sudo /usr/sbin/rtcwake -m mem -s 20` only (suspend with
-automatic wake, for the sleep/wake test), and access to `/dev/uinput` for
+passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm;
+the sleep/wake test then suspends with `systemctl suspend`), and access to `/dev/uinput` for
 the user at the local seat (virtual keyboard tests).

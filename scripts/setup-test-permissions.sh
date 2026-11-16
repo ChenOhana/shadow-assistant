@@ -4,8 +4,12 @@
 #   sudo sh scripts/setup-test-permissions.sh --undo   # remove
 #
 # 1. Sleep/wake test: lets the invoking user run exactly
-#    `sudo /usr/sbin/rtcwake -m mem -s 20` (suspend, auto-wake after 20 s)
-#    without a password. No other command or argument is allowed.
+#    `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only sets
+#    the RTC wake alarm 30 s ahead. The test then suspends through logind
+#    (`systemctl suspend`, allowed for the desktop user without root), so
+#    brain sees the same PrepareForSleep signals as a real suspend.
+#    (`rtcwake -m mem` would suspend behind logind's back.) No other
+#    command or argument is allowed.
 # 2. Virtual keyboard tests: gives the user logged in at the local seat
 #    (systemd "uaccess") read/write access to /dev/uinput, so tests can type
 #    through a real kernel input device. Any program running as that user
@@ -29,7 +33,7 @@ if [ "${1:-}" = "--undo" ]; then
 fi
 
 tmp=$(mktemp)
-printf '%s ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m mem -s 20\n' "$user" > "$tmp"
+printf '%s ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m no -s 30\n' "$user" > "$tmp"
 visudo -cf "$tmp" >/dev/null
 install -m 0440 -o root -g root "$tmp" "$sudoers"
 rm -f "$tmp"

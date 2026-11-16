@@ -229,6 +229,10 @@ impl InputLoop {
                         Control::Reopen => {
                             self.close_all();
                             self.scan();
+                            eprintln!(
+                                "brain: resumed: reopened {} keyboard(s)",
+                                self.devices.len()
+                            );
                         }
                         Control::SetLayout(i) => self.keys.set_layout_index(i),
                         Control::SetKeyboard(kb) => self.keys.replace_keyboard(*kb),
