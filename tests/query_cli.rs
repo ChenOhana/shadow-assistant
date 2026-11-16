@@ -5,7 +5,7 @@ use brain::event::{Event, EventKind, Mod};
 use brain::eventlog::LogWriter;
 use brain::ingest::Ingester;
 use brain::store;
-use brain::timefmt::{Millis, format_ms, now_ms};
+use brain::timefmt::{Millis, format_ms, now_ms, parse_rfc3339_ms};
 use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -27,6 +27,18 @@ fn brain(dir: &Path, args: &[&str]) -> (i32, Value, String) {
         Value::Null
     };
     (code, json, String::from_utf8(out.stderr).unwrap())
+}
+
+/// An output timestamp as epoch milliseconds (output is local time).
+fn instant(v: &Value) -> Millis {
+    parse_rfc3339_ms(v.as_str().unwrap_or_else(|| panic!("not a time: {v}"))).unwrap()
+}
+
+/// Output times are local, with the local offset (not UTC "Z").
+fn assert_local(v: &Value) {
+    let s = v.as_str().unwrap();
+    let ms = parse_rfc3339_ms(s).unwrap();
+    assert_eq!(s, brain::timefmt::format_local(ms), "not local time: {s}");
 }
 
 fn ids(v: &Value) -> Vec<String> {
@@ -156,6 +168,9 @@ fn search_semantics_and_shapes() {
     ] {
         assert!(r.get(field).is_some(), "missing {field}: {r}");
     }
+    assert_eq!(r["app"], "org.kde.kate");
+    assert_local(&r["started_at"]);
+    assert_local(&r["ended_at"]);
     // Newest first: session 2 (still contains "sat"), then session 1.
     assert_eq!(ids(&v), vec!["2", "1"]);
 
@@ -205,9 +220,11 @@ fn search_time_windows() {
     let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
     assert_eq!(ids(&brain(d, &["search", "git", "--at", &at]).1), vec!["3"]);
     assert!(ids(&brain(d, &["search", "git", "--at", "-1m"]).1).is_empty());
-    // The resolved window is echoed back.
+    // The resolved window is echoed back, in local time.
     let (_, v, _) = brain(d, &["search", "git", "--from", &at]);
-    assert_eq!(v["from"], Value::String(at));
+    assert_eq!(instant(&v["from"]), parse_rfc3339_ms(&at).unwrap());
+    assert_local(&v["from"]);
+    assert_local(&v["to"]);
 }
 
 #[test]
@@ -223,19 +240,35 @@ fn text_is_the_raw_stream() {
         v["text"],
         format!("the cat sat secret{}", "<Backspace>".repeat(7))
     );
-    assert_eq!(v["app"], "kate");
+    // The full app id, not the part that was given.
+    assert_eq!(v["app"], "org.kde.kate");
     assert_eq!(v["at"], Value::Null);
+    assert_local(&v["from"]);
     // --at: the 10 minutes ending at T; only that app's keys.
     let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
     let (_, v, _) = brain(d, &["text", "--app", "konsole", "--at", &at]);
     assert_eq!(v["text"], "git status\n");
-    assert_eq!(v["at"], Value::String(at));
+    assert_eq!(v["app"], "org.kde.konsole");
+    assert_eq!(instant(&v["at"]), parse_rfc3339_ms(&at).unwrap());
+    assert_local(&v["at"]);
     // Default: the last 10 minutes, with shortcuts named and pastes inline.
     let (_, v, _) = brain(d, &["text", "--app", "chrome"]);
     assert_eq!(v["text"], "<Ctrl+V>pasted words\n");
-    // Nothing typed in the window: empty text, not an error.
-    let (code, v, _) = brain(d, &["text", "--app", "nosuchapp"]);
+    assert_eq!(v["app"], "google-chrome");
+    // A known app with nothing typed in the window: empty text, full id.
+    let (code, v, _) = brain(d, &["text", "--app", "konsole", "--at", "-1m"]);
     assert_eq!((code, v["text"].as_str()), (0, Some("")));
+    assert_eq!(v["app"], "org.kde.konsole");
+    // An unknown app, or one matching several apps, is an error.
+    let (code, _, err) = brain(d, &["text", "--app", "nosuchapp"]);
+    assert_ne!(code, 0);
+    assert!(
+        err.contains("no app matches") && err.contains("org.kde.kate"),
+        "{err}"
+    );
+    let (code, _, err) = brain(d, &["text", "--app", "org.kde"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("several apps"), "{err}");
 }
 
 #[test]
@@ -287,7 +320,7 @@ fn queries_are_consistent_while_run_writes() {
             for r in v["results"].as_array().unwrap() {
                 let snippet = r["snippet"].as_str().unwrap().to_lowercase();
                 assert!(snippet.contains(word), "{word} not in {snippet}");
-                assert!(r["started_at"].as_str().unwrap().ends_with('Z'));
+                assert_local(&r["started_at"]);
                 hits += 1;
             }
             searches += 1;
@@ -295,6 +328,7 @@ fn queries_are_consistent_while_run_writes() {
         let (code, v, err) = brain(&dir, &["text", "--app", "synthetic", "--from", "-5s"]);
         assert_eq!(code, 0, "{err}");
         assert!(v["text"].is_string());
+        assert_eq!(v["app"], "synthetic");
     }
     // SAFETY: SIGTERM to our own child.
     unsafe { libc::kill(run.id() as i32, libc::SIGTERM) };

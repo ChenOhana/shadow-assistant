@@ -101,15 +101,16 @@ fn resolve(flags: &TimeFlags, cmd: Command, now: Millis) -> Result<Window> {
     {
         bail!(
             "the time window is empty: it starts at {} and ends at {}",
-            timefmt::format_ms(f),
-            timefmt::format_ms(t)
+            timefmt::format_local(f),
+            timefmt::format_local(t)
         );
     }
     Ok(w)
 }
 
+/// Output times are local, with their offset (the database stores UTC).
 fn fmt_opt(t: Option<Millis>) -> Option<String> {
-    t.map(timefmt::format_ms)
+    t.map(timefmt::format_local)
 }
 
 /// `LIKE` pattern matching `s` anywhere (case-insensitive for ASCII).
@@ -215,8 +216,10 @@ pub fn search(
             session_id: r.get::<_, i64>(0)?.to_string(),
             app: r.get(1)?,
             window: r.get(2)?,
-            started_at: r.get(3)?,
-            ended_at: r.get(4)?,
+            started_at: timefmt::to_local(&r.get::<_, String>(3)?),
+            ended_at: r
+                .get::<_, Option<String>>(4)?
+                .map(|t| timefmt::to_local(&t)),
             snippet: snippet(&text, &words),
         })
     })?;
@@ -283,17 +286,23 @@ pub struct TextOutput {
     pub text: String,
 }
 
-/// The raw typed stream of the apps matching `app`, over the window: every
-/// key as captured, with no editing applied (see [`render_key`]), and pasted
-/// text inline.
+/// The raw typed stream of one app over the window: every key as captured,
+/// with no editing applied (see [`render_key`]), and pasted text inline.
+/// `app` may be part of the app id; see [`resolve_app`].
 pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
     let w = resolve(flags, Command::Text, now)?;
     let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));
     let conn = store::open_reader(&dir.db_path())?;
     let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;
-    drop(conn);
     let needle = app.to_lowercase();
-    let mut out = String::new();
+    let mut known: Vec<String> = conn
+        .prepare("SELECT DISTINCT app FROM sessions")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(conn);
+    // Events of every app matching `app` in the window, in log order; the
+    // app is resolved once the window's apps are known too.
+    let mut matching: Vec<(String, EventKind)> = Vec::new();
     if dir.log_path().exists() {
         let mut reader = LogReader::open(&dir.log_path(), start)?;
         while let Some(line) = reader.next_line()? {
@@ -301,25 +310,70 @@ pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<
             if ev.ts > to.saturating_add(CLOCK_SLACK_MS) {
                 break;
             }
-            if ev.ts < from || ev.ts > to || !ev.app.to_lowercase().contains(&needle) {
-                continue;
-            }
-            match ev.kind {
-                EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),
-                EventKind::Paste {
-                    text: Some(text), ..
-                } => out.push_str(&text),
-                _ => {}
+            let typed = matches!(ev.kind, EventKind::Key { .. } | EventKind::Paste { .. });
+            if typed && ev.ts >= from && ev.ts <= to && ev.app.to_lowercase().contains(&needle) {
+                if !known.contains(&ev.app) {
+                    known.push(ev.app.clone());
+                }
+                matching.push((ev.app, ev.kind));
             }
         }
     }
+    let full = resolve_app(app, &known)?;
+    let mut out = String::new();
+    for (a, kind) in matching {
+        if a != full {
+            continue;
+        }
+        match kind {
+            EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),
+            EventKind::Paste {
+                text: Some(text), ..
+            } => out.push_str(&text),
+            _ => {}
+        }
+    }
     Ok(TextOutput {
-        app: app.to_string(),
+        app: full,
         at: fmt_opt(w.at),
         from: fmt_opt(w.from),
         to: fmt_opt(w.to),
         text: out,
     })
+}
+
+/// The full app id `given` refers to, among the `known` ones (all apps with
+/// sessions, plus those with keys or pastes in the queried window): an exact match (ignoring
+/// case) wins; otherwise the one id containing it. Several candidates, or
+/// none, are an error, so text from different apps is never mixed.
+fn resolve_app(given: &str, known: &[String]) -> Result<String> {
+    let g = given.to_lowercase();
+    if let Some(exact) = known.iter().find(|a| a.to_lowercase() == g) {
+        return Ok(exact.clone());
+    }
+    let mut hits: Vec<&String> = known
+        .iter()
+        .filter(|a| a.to_lowercase().contains(&g))
+        .collect();
+    hits.sort();
+    hits.dedup();
+    match hits.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => {
+            let mut all: Vec<&String> = known.iter().collect();
+            all.sort();
+            all.dedup();
+            let list: Vec<&str> = all.iter().map(|s| s.as_str()).collect();
+            bail!("no app matches {given:?} (known apps: {})", list.join(", "))
+        }
+        many => {
+            let list: Vec<&str> = many.iter().map(|s| s.as_str()).collect();
+            bail!(
+                "{given:?} matches several apps: {}; be more specific",
+                list.join(", ")
+            )
+        }
+    }
 }
 
 /// One key of the raw stream: a typed character as itself, Enter as a
@@ -443,6 +497,34 @@ mod tests {
         );
         assert_eq!(snippet("short\n\ntext", &["text"]), "short text");
         assert_eq!(snippet("no match here", &["zzz"]), "no match here");
+    }
+
+    #[test]
+    fn app_names_resolve_to_full_ids() {
+        let known: Vec<String> = [
+            "org.kde.kate",
+            "google-chrome",
+            "code",
+            "com.microsoft.VSCode",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(resolve_app("kate", &known).unwrap(), "org.kde.kate");
+        assert_eq!(resolve_app("CHROME", &known).unwrap(), "google-chrome");
+        // Exact beats substring: "code" is an app, and part of another.
+        assert_eq!(resolve_app("code", &known).unwrap(), "code");
+        assert_eq!(
+            resolve_app("vscode", &known).unwrap(),
+            "com.microsoft.VSCode"
+        );
+        let e = resolve_app("o", &known).unwrap_err().to_string();
+        assert!(e.contains("several apps"), "{e}");
+        let e = resolve_app("firefox", &known).unwrap_err().to_string();
+        assert!(
+            e.contains("no app matches") && e.contains("org.kde.kate"),
+            "{e}"
+        );
     }
 
     #[test]

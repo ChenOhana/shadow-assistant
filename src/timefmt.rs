@@ -32,6 +32,23 @@ pub fn format_ms(ms: Millis) -> String {
     }
 }
 
+/// Formats in the local time zone with its offset, for people:
+/// `2026-11-16T16:51:14.684+02:00` (still RFC 3339).
+pub fn format_local(ms: Millis) -> String {
+    match Local.timestamp_millis_opt(ms).single() {
+        Some(dt) => dt.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string(),
+        None => format_ms(ms),
+    }
+}
+
+/// Re-formats a stored (UTC) timestamp in local time; unparsable input is
+/// returned unchanged.
+pub fn to_local(stored: &str) -> String {
+    parse_rfc3339_ms(stored)
+        .map(format_local)
+        .unwrap_or_else(|_| stored.to_string())
+}
+
 /// Parses an RFC 3339 timestamp (any offset), as written in the log.
 pub fn parse_rfc3339_ms(s: &str) -> Result<Millis> {
     Ok(DateTime::parse_from_rfc3339(s)?.timestamp_millis())
@@ -160,6 +177,15 @@ mod tests {
         assert_eq!(a, b);
         let midnight = parse_user_time("2026-11-08").unwrap();
         assert!(midnight < a);
+    }
+
+    #[test]
+    fn local_output_is_the_same_instant() {
+        let ms = 1_800_000_000_123;
+        let local = format_local(ms);
+        assert_eq!(parse_rfc3339_ms(&local).unwrap(), ms);
+        assert_eq!(to_local(&format_ms(ms)), local);
+        assert_eq!(to_local("garbage"), "garbage");
     }
 
     #[test]

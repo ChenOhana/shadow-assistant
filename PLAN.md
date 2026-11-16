@@ -458,7 +458,10 @@ window has to be read anyway. Clock steps backwards are discussed in section
   newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
   `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
   decision: an audit-style trail, distinct from the edited session text).
-- **`--app A`** matches app ids containing `A`, ignoring case.
+- **`--app A`** can be part of an app id, ignoring case. `search` keeps
+  every matching app; `text` resolves it to one full id (exact match first,
+  else the single id containing it; ambiguous or unknown is an error) and
+  reports that id.
 - **Windows**: `--at T` is the 10 minutes ending at T; `--from` alone runs to
   now; `--from` and `--to` together are explicit; `--to` alone is the 10
   minutes ending at T for `text` and everything up to T for `search`; no
@@ -466,7 +469,8 @@ window has to be read anyway. Clock steps backwards are discussed in section
 - **Times**: relative (`-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now`), local
   (`2026-11-16 14:00`, a date, or a time of day meaning today; DST folds
   take the earlier instant, DST gaps are an error), or RFC 3339 with a zone.
-  Output times are UTC, and the resolved window is echoed.
+  Output times are local with their offset (RFC 3339), and the resolved
+  window is echoed; the log and the database store UTC.
 - Errors (empty query, bad time, empty window, `--at` with `--from`/`--to`,
   missing data directory) go to stderr with a non-zero exit code.
 

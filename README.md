@@ -110,8 +110,12 @@ brain query text --app A [--from T] [--to T] [--at T]
   editing applied: characters as typed, Enter as a newline, Tab as a tab,
   other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
   pasted text inline.
-* **`--app A`** matches apps whose id contains `A`, ignoring case
-  (`--app chrome` finds `google-chrome`).
+* **`--app A`** can be part of the app id, ignoring case (`--app chrome`
+  finds `google-chrome`). `search` keeps every app that matches. `text`
+  resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
+  an exact match wins, otherwise the one id that contains `A`; if several do,
+  or none, it is an error that lists them, so text of different apps is
+  never mixed.
 
 **Time flags** (both commands): `--at T` is the 10 minutes ending at T;
 `--from T` alone runs to now; `--from` and `--to` together are an explicit
@@ -127,9 +131,10 @@ minutes and `search` all time. T can be:
 | local time of day (today) | `14:00`, `14:00:30` |
 | RFC 3339 with a zone | `2026-11-16T12:00:00Z`, `2026-11-16T14:00:00+02:00` |
 
-Times without a zone are in the local time zone. Output times are UTC
-(`…Z`), and the resolved window is echoed (`from`, `to`, `at`) so it is
-visible how a local time was read.
+Times without a zone are in the local time zone. Output times are local
+too, with their offset (`2026-11-17T00:04:38.044+02:00`, still RFC 3339),
+and the resolved window is echoed (`from`, `to`, `at`). The log and the
+database store UTC.
 
 ```json
 {
@@ -141,7 +146,7 @@ visible how a local time was read.
       "session_id": "1",
       "app": "synthetic",
       "window": "corpus.txt",
-      "started_at": "2026-11-16T14:51:14.684Z",
+      "started_at": "2026-11-16T16:51:14.684+02:00",
       "ended_at": null,
       "snippet": "the migration is blocked on the schema change. Dana a…"
     }
@@ -151,10 +156,10 @@ visible how a local time was read.
 
 ```json
 {
-  "app": "konsole",
-  "at": "2026-11-16T14:51:22.680Z",
-  "from": "2026-11-16T14:41:22.680Z",
-  "to": "2026-11-16T14:51:22.680Z",
+  "app": "org.kde.konsole",
+  "at": "2026-11-16T16:51:22.680+02:00",
+  "from": "2026-11-16T16:41:22.680+02:00",
+  "to": "2026-11-16T16:51:22.680+02:00",
   "text": "git status\ncargo test\nls -la\n"
 }
 ```
