@@ -150,6 +150,35 @@ impl Drop for Kill {
     }
 }
 
+/// Closes every process whose command line contains `needle` (Kate
+/// detaches from the process we start, so it is found by its unique file).
+struct KillMatching(String);
+impl Drop for KillMatching {
+    fn drop(&mut self) {
+        let me = std::process::id();
+        let find = || -> Vec<i32> {
+            std::fs::read_dir("/proc")
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+                .filter(|&pid| pid as u32 != me)
+                .filter(|pid| {
+                    std::fs::read(format!("/proc/{pid}/cmdline"))
+                        .is_ok_and(|c| String::from_utf8_lossy(&c).contains(&self.0))
+                })
+                .collect()
+        };
+        for sig in [libc::SIGTERM, libc::SIGKILL] {
+            for pid in find() {
+                // SAFETY: signalling a process started by this test.
+                unsafe { libc::kill(pid, sig) };
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+}
+
 /// The window brain last saw focused: (app, title).
 fn focused(log: &Path) -> Option<(String, String)> {
     let text = std::fs::read_to_string(log).ok()?;
@@ -189,15 +218,14 @@ fn held_keys_match_what_kate_received() {
     );
     let mut kb = VirtualKeyboard::new();
     std::thread::sleep(Duration::from_millis(1500)); // brain and KWin pick the device up
-    let kate = Kill(
-        Command::new("kate")
-            .args(["-n"])
-            .arg(&target)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    );
+    let kate = KillMatching(target.to_string_lossy().into_owned());
+    Command::new("kate")
+        .args(["-n"])
+        .arg(&target)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
     let t = Instant::now();
     while !kate_focused(&log, &file_name) {
         assert!(
@@ -224,19 +252,32 @@ fn held_keys_match_what_kate_received() {
         ('h', 1001, true),
         ('i', 999, true),
         ('j', 640, true),
+        // A long run for the Backspace hold below to delete into: its ±1
+        // can never make a whole run vanish (which would change the order
+        // of letters, not just a count).
+        ('k', 2020, false),
     ];
     for &(c, ms, _) in holds {
-        assert!(kate_focused(&log, &file_name), "focus left Kate; stopped typing");
+        assert!(
+            kate_focused(&log, &file_name),
+            "focus left Kate; stopped typing"
+        );
         kb.hold(us_keycode(c).unwrap().0, ms);
         std::thread::sleep(Duration::from_millis(150));
     }
-    // Held Backspace deletes back through the last holds' characters.
-    assert!(kate_focused(&log, &file_name), "focus left Kate; stopped typing");
+    // Held Backspace deletes back into the 'k' run.
+    assert!(
+        kate_focused(&log, &file_name),
+        "focus left Kate; stopped typing"
+    );
     let bs_ms = 1020;
     kb.hold(KEY_BACKSPACE, bs_ms);
     std::thread::sleep(Duration::from_millis(150));
     // Save.
-    assert!(kate_focused(&log, &file_name), "focus left Kate; stopped typing");
+    assert!(
+        kate_focused(&log, &file_name),
+        "focus left Kate; stopped typing"
+    );
     kb.key(KEY_LEFTCTRL, true);
     kb.key(KEY_S, true);
     kb.key(KEY_S, false);
@@ -262,7 +303,9 @@ fn held_keys_match_what_kate_received() {
     for l in std::fs::read_to_string(&log).unwrap().lines() {
         let v: serde_json::Value = serde_json::from_str(l).unwrap();
         if v["type"] == "key" && v["app"].as_str().unwrap_or("").contains("kate") {
-            *logged.entry(v["key"].as_str().unwrap().to_string()).or_default() += 1;
+            *logged
+                .entry(v["key"].as_str().unwrap().to_string())
+                .or_default() += 1;
         }
     }
     eprintln!("hold   ms   model  brain-log  kate-file  reconstructed");
@@ -280,9 +323,8 @@ fn held_keys_match_what_kate_received() {
         if b != model_count(ms) {
             log_mismatch.push(c);
         }
-        // Holds the Backspace run reached also absorb its own ±1.
-        let in_deleted_tail = matches!(c, 'i' | 'j');
-        let tolerance = if ms > 2_000 { 2 } else { 1 } + usize::from(in_deleted_tail);
+        // The run the Backspace hold deleted into also absorbs its ±1.
+        let tolerance = if ms > 2_000 { 2 } else { 1 } + usize::from(c == 'k');
         if k.abs_diff(r) > tolerance {
             text_mismatch.push(c);
         }
