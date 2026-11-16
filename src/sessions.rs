@@ -10,6 +10,11 @@
 //!   focus moves to another field of the same window (Tab in a web form).
 //! * Focus loss alone never closes it: switching away and back within the
 //!   idle timeout resumes the same session.
+//! * A window whose title changes *because of the typing* (VS Code names an
+//!   unsaved file after its first line, a mail window after its subject)
+//!   keeps its session: a title change within [`RENAME_WINDOW_MS`] of a
+//!   keystroke in that window, with no shortcut in between, makes the new
+//!   title an alias of the open session.
 //! * `brain run` stopping or restarting closes all sessions: what was typed
 //!   while it was not running is unknown.
 //!
@@ -50,6 +55,9 @@ pub const IDLE_TIMEOUT_MS: Millis = 30_000;
 const IDLE_GRACE_MS: Millis = 2_000;
 /// A context's document is forgotten after this long without a session.
 pub const CONTEXT_TTL_MS: Millis = 24 * 3600 * 1000;
+/// A window title change this soon after a keystroke in that window is
+/// taken as caused by the typing (VS Code updates it within ~25 ms).
+pub const RENAME_WINDOW_MS: Millis = 1_000;
 
 type Key = (String, String);
 
@@ -87,6 +95,8 @@ struct OpenSession {
     /// Hash of the document when the session opened: a session that ends
     /// with the same text changed nothing.
     start_hash: u64,
+    /// The window's latest title, when typing renamed it (see `aliases`).
+    latest: Option<Key>,
 }
 
 fn text_hash(s: &str) -> u64 {
@@ -100,6 +110,12 @@ pub struct Sessions {
     open: HashMap<Key, OpenSession>,
     /// A plain Ctrl+V in a terminal at this (app, window, ts): drop the paste.
     suppress_paste: Option<(String, String, Millis)>,
+    /// Titles a window took on while typing in it, mapped to the key of the
+    /// open session they belong to.
+    aliases: HashMap<Key, Key>,
+    /// The session the last applied keystroke went to, and when. Cleared by
+    /// any ignored key (a shortcut such as Ctrl+Tab may switch tabs).
+    last_key: Option<(Key, Millis)>,
     tier2: Option<Box<dyn Tier2Snapshotter>>,
     /// Effects to carry out only after the transaction commits.
     staged_jobs: Vec<i64>,
@@ -121,6 +137,8 @@ impl Sessions {
         let mut s = Self {
             open: HashMap::new(),
             suppress_paste: None,
+            aliases: HashMap::new(),
+            last_key: None,
             tier2,
             staged_jobs: Vec::new(),
             staged_discards: Vec::new(),
@@ -161,6 +179,7 @@ impl Sessions {
                     tier2_snapshot: tier2.as_deref() == Some("snapshot"),
                     dirty: false,
                     start_hash,
+                    latest: None,
                 },
             );
         }
@@ -194,31 +213,67 @@ impl Sessions {
             EventKind::Key {
                 key, mods, window, ..
             } => {
-                let k = (ev.app.clone(), normalize_window(window));
+                let k = self.resolve(&ev.app, window);
                 let class = classify(&ev.app);
                 let act = self.note_key(class, &k, key, mods, ev.ts);
-                if act == Action::Ignore || !in_session(&k) {
+                if act == Action::Ignore {
+                    self.last_key = None;
+                    return Ok(());
+                }
+                if !in_session(&k) {
                     return Ok(());
                 }
                 if let Some(s) = self.open.get_mut(&k) {
                     let mut hist = |n: usize| history_entry(conn, &ev.app, offset, n);
                     s.editor.apply(&act, &mut hist);
                     s.touch(ev.ts, next);
+                    self.last_key = Some((k, ev.ts));
                 }
             }
             EventKind::Paste { text, window } => {
-                let k = (ev.app.clone(), normalize_window(window));
+                let k = self.resolve(&ev.app, window);
                 if self.paste_suppressed(&k, ev.ts) || !in_session(&k) {
                     return Ok(());
                 }
                 if let (Some(t), Some(s)) = (text, self.open.get_mut(&k)) {
                     s.editor.paste(t);
                     s.touch(ev.ts, next);
+                    self.last_key = Some((k, ev.ts));
                 }
             }
+            EventKind::Focus { window } => self.note_title(&ev.app, window, ev.ts, in_session),
             _ => {}
         }
         Ok(())
+    }
+
+    /// The session key for an event: the normalized title, or the open
+    /// session it is an alias of.
+    fn resolve(&self, app: &str, window: &str) -> Key {
+        let k = (app.to_string(), normalize_window(window));
+        self.aliases.get(&k).cloned().unwrap_or(k)
+    }
+
+    /// A focus event: if the window's title just changed because of the
+    /// typing, record the new title as an alias of the open session.
+    /// `is_open` says whether a session is open at this point in the log.
+    fn note_title(&mut self, app: &str, window: &str, ts: Millis, is_open: &dyn Fn(&Key) -> bool) {
+        let Some((last, at)) = &self.last_key else {
+            return;
+        };
+        let k = (app.to_string(), normalize_window(window));
+        let renamed = last.0 == app
+            && ts - at <= RENAME_WINDOW_MS
+            && self.resolve(app, window) != *last
+            && is_open(last)
+            && !is_open(&k);
+        if renamed {
+            let last = last.clone();
+            if let Some(s) = self.open.get_mut(&last) {
+                s.latest = Some(k.clone());
+            }
+            self.aliases.insert(k, last);
+        }
     }
 
     /// Tracks the plain-Ctrl+V-in-a-terminal case and maps the key.
@@ -253,10 +308,11 @@ impl Sessions {
             EventKind::Key {
                 key, mods, window, ..
             } => {
-                let k = (ev.app.clone(), normalize_window(window));
+                let k = self.resolve(&ev.app, window);
                 let class = classify(&ev.app);
                 let act = self.note_key(class, &k, key, mods, ev.ts);
                 if act == Action::Ignore {
+                    self.last_key = None;
                     return Ok(());
                 }
                 self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
@@ -264,6 +320,7 @@ impl Sessions {
                 let mut hist = |n: usize| history_entry(tx, &ev.app, offset, n);
                 let outcome = s.editor.apply(&act, &mut hist);
                 s.touch(ev.ts, next);
+                self.last_key = Some((k.clone(), ev.ts));
                 let reason = match outcome {
                     Outcome::Continue => return Ok(()),
                     Outcome::Commit => "commit",
@@ -273,7 +330,7 @@ impl Sessions {
                 self.close(tx, &k, reason, true)?;
             }
             EventKind::Paste { text, window } => {
-                let k = (ev.app.clone(), normalize_window(window));
+                let k = self.resolve(&ev.app, window);
                 if self.paste_suppressed(&k, ev.ts) {
                     return Ok(());
                 }
@@ -283,8 +340,12 @@ impl Sessions {
                 let s = self.open.get_mut(&k).expect("just opened");
                 s.editor.paste(text);
                 s.touch(ev.ts, next);
+                self.last_key = Some((k, ev.ts));
             }
-            EventKind::Focus { .. } => {}
+            EventKind::Focus { window } => {
+                let open: Vec<Key> = self.open.keys().cloned().collect();
+                self.note_title(&ev.app, window, ev.ts, &|k| open.contains(k));
+            }
             EventKind::System { state } => match state {
                 SystemState::Start => {
                     // A start without a preceding stop means a crash; either
@@ -383,6 +444,7 @@ impl Sessions {
                 tier2_snapshot,
                 dirty: false,
                 start_hash,
+                latest: None,
             },
         );
         Ok(())
@@ -416,6 +478,10 @@ impl Sessions {
         let Some(s) = self.open.remove(k) else {
             return Ok(());
         };
+        self.aliases.retain(|_, v| v != k);
+        if self.last_key.as_ref().is_some_and(|(lk, _)| lk == k) {
+            self.last_key = None;
+        }
         let text = s.editor.buf.text();
         let changed = text_hash(&text) != s.start_hash;
         let keep = (changed || reason == "commit") && !text.trim().is_empty();
@@ -444,6 +510,19 @@ impl Sessions {
                 self.staged_discards.push(s.id);
             }
         }
+        // The document is saved under the session's key and, if typing
+        // renamed the window, under its current title too: the next session
+        // in this window will be keyed by that title.
+        let keys: Vec<&Key> = std::iter::once(k).chain(s.latest.as_ref()).collect();
+        for k in keys {
+            self.save_context(tx, k, &s, reset)?;
+        }
+        self.wrote = true;
+        Ok(())
+    }
+
+    fn save_context(&self, tx: &Connection, k: &Key, s: &OpenSession, reset: bool) -> Result<()> {
+        let text = s.editor.buf.text();
         if reset || s.editor.class.single_line() || s.editor.buf.is_empty() {
             tx.prepare_cached("DELETE FROM context_state WHERE app = ?1 AND window = ?2")?
                 .execute(params![k.0, k.1])?;
@@ -465,7 +544,6 @@ impl Sessions {
                 timefmt::format_ms(s.last_activity)
             ])?;
         }
-        self.wrote = true;
         Ok(())
     }
 
@@ -762,6 +840,73 @@ mod tests {
         assert_eq!(s[0].4, "abc");
     }
 
+    /// What VS Code does with a new file: the title becomes the first line.
+    fn type_renaming(l: &mut Log, ts: Millis, app: &str, text: &str, suffix: &str) -> Millis {
+        let mut t = ts;
+        let mut typed = String::new();
+        for c in text.chars() {
+            let title = if typed.trim().is_empty() {
+                suffix.to_string()
+            } else {
+                format!("● {} • {suffix}", typed.trim_end())
+            };
+            l.key(t, app, &title, &c.to_string(), &[]);
+            typed.push(c);
+            let new = format!("● {} • {suffix}", typed.trim_end());
+            if new != title {
+                l.push(t + 20, app, EventKind::Focus { window: new });
+            }
+            t += 100;
+        }
+        t
+    }
+
+    #[test]
+    fn title_renamed_by_typing_keeps_the_session() {
+        let mut l = Log::new();
+        let app = "com.microsoft.VSCode";
+        let suffix = "Untitled-1 - proj - Visual Studio Code";
+        let t = type_renaming(&mut l, T0, app, "testing a title", suffix);
+        // Back after the idle timeout: the window is now titled by its
+        // content, and the document continues under that title.
+        let title = format!("● testing a title • {suffix}");
+        l.typ(t + 40_000, app, &title, "!");
+        let mut ing = l.ingester("b.db");
+        run(&mut ing, clock_late);
+        let s = sessions(ing.connection());
+        assert_eq!(s.len(), 2, "{s:?}");
+        assert_eq!(s[0].1, suffix, "keyed by the title it started with");
+        assert_eq!(s[0].4, "testing a title");
+        assert_eq!(s[1].4, "testing a title!");
+    }
+
+    #[test]
+    fn a_shortcut_before_a_title_change_is_a_real_switch() {
+        let mut l = Log::new();
+        let t = l.typ(T0, "notes", "tab A", "one");
+        l.key(t, "notes", "tab A", "Tab", &[Mod::Ctrl]); // switches tabs
+        l.push(
+            t + 20,
+            "notes",
+            EventKind::Focus {
+                window: "tab B".into(),
+            },
+        );
+        let t = l.typ(t + 100, "notes", "tab B", "two");
+        // A title change long after the last keystroke is not a rename either.
+        l.push(
+            t + 5_000,
+            "notes",
+            EventKind::Focus {
+                window: "tab C".into(),
+            },
+        );
+        l.typ(t + 5_100, "notes", "tab C", "three");
+        let mut ing = l.ingester("b.db");
+        run(&mut ing, clock_late);
+        assert_eq!(texts(ing.connection()), vec!["one", "two", "three"]);
+    }
+
     #[test]
     fn enter_commits_single_line_fields() {
         let mut l = Log::new();
@@ -926,12 +1071,30 @@ mod tests {
         t = l.typ(t + 100, "notes", "n", "replaced");
         l.key(t, "notes", "n", "z", &[Mod::Ctrl]);
         t = l.typ(t + 40_000, k, "~", "\n");
-        l.typ(t + 100, "notes", "n", "!");
+        t = l.typ(t + 100, "notes", "n", "!");
+        let t = type_renaming(
+            &mut l,
+            t + 100,
+            "code",
+            "renamed doc",
+            "Untitled-1 - Visual Studio Code",
+        );
+        l.typ(
+            t + 31_000,
+            "code",
+            "● renamed doc • Untitled-1 - Visual Studio Code",
+            "?",
+        );
         let total = l.w.len();
 
         let mut full = l.ingester("full.db");
         run(&mut full, clock_late);
         let expected = sessions(full.connection());
+        let texts: Vec<&str> = expected.iter().map(|r| r.4.as_str()).collect();
+        assert!(
+            texts.contains(&"renamed doc") && texts.contains(&"renamed doc?"),
+            "{texts:?}"
+        );
 
         // Restart after every line, at the ingest level: each "process" only
         // gets to ingest one more line before it dies.

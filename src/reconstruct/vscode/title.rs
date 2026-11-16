@@ -12,6 +12,7 @@ const VSCODE_APP_IDS: &[&str] = &[
     "code-insiders",
     "visual-studio-code",
     "com.visualstudio.code",
+    "com.microsoft.vscode", // Microsoft's .deb/.rpm package on KDE Wayland
     "com.visualstudio.code.oss",
     "code-oss",
     "codium",
@@ -343,6 +344,7 @@ mod tests {
         assert!(is_vscode("Code"));
         assert!(is_vscode("code-url-handler"));
         assert!(is_vscode("com.visualstudio.code"));
+        assert!(is_vscode("com.microsoft.VSCode"));
         assert!(!is_vscode("org.kde.kate"));
         assert!(!is_vscode("google-chrome"));
     }

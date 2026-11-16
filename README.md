@@ -101,7 +101,11 @@ Ingest (inside `brain run`, about once a second) turns the log into
 
 * A session is one `(app, window title)`. Markers that change while you
   type are removed from the title first: an editor's unsaved-file dot or
-  `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`). It closes after **30 s without
+  `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`).
+  When the title changes *because of the typing* (VS Code names a new file
+  after its first line, a mail window after its subject), the session
+  continues: a title change within 1 s of a keystroke in that window, with
+  no shortcut in between, is treated as a rename. It closes after **30 s without
   typing in that window**, or right away when a single-line field is
   submitted (Enter at a shell prompt, in a chat box or a browser's address
   bar), cancelled (Ctrl+C at a prompt), or left for another field of the
@@ -175,10 +179,14 @@ sqlite3 ~/brain-data/brain.db \
 
 **Sessions and reconstruction**
 * **Session key `(app, window title)`**, with markers that change while
-  typing removed from the title (unsaved-file dots, terminal spinners).
+  typing removed from the title (unsaved-file dots, terminal spinners), and
+  titles renamed by the typing itself followed as the same session. A real
+  switch to another window or tab within 1 s of the last keystroke made
+  with the mouse (invisible to brain) would wrongly count as a rename.
 * **30 s idle per window; focus loss alone never ends a session.** Enter
   ends a session only in single-line fields (shell prompts, chat boxes,
-  browser address/search bars, by app class); elsewhere it is a newline.
+  browser address/search bars, launchers such as KRunner, by app class);
+  elsewhere it is a newline.
   In browsers, Shift+Enter is a newline.
 * **Single-line fields start each session empty**; editors keep their
   document across sessions. Window titles of single-line fields are

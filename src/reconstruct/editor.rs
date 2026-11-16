@@ -73,11 +73,12 @@ pub fn action(class: AppClass, key: &str, mods: &[Mod]) -> Action {
     };
     match key {
         "Enter" if ctrl || alt => match class {
-            AppClass::Chat | AppClass::Browser => Action::Commit,
+            AppClass::Chat | AppClass::Browser | AppClass::Launcher => Action::Commit,
             _ => Action::Ignore,
         },
         "Enter" => match class {
             AppClass::Terminal => Action::Commit,
+            AppClass::Launcher => Action::Commit,
             AppClass::Browser | AppClass::Chat if !shift => Action::Commit,
             _ => Action::Insert("\n".into()),
         },

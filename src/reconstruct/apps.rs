@@ -12,6 +12,8 @@ pub enum AppClass {
     Browser,
     /// Chat compose boxes: Enter sends, Shift+Enter is a newline.
     Chat,
+    /// App launchers and run dialogs (KRunner): a search field, Enter runs.
+    Launcher,
     /// Code and text editors: multi-line.
     Editor,
     /// Anything not in the table: multi-line, common text-field shortcuts.
@@ -23,7 +25,7 @@ impl AppClass {
     pub fn single_line(self) -> bool {
         matches!(
             self,
-            AppClass::Terminal | AppClass::Browser | AppClass::Chat
+            AppClass::Terminal | AppClass::Browser | AppClass::Chat | AppClass::Launcher
         )
     }
 
@@ -81,6 +83,17 @@ const CHATS: &[&str] = &[
     "mattermost",
     "rocketchat",
 ];
+const LAUNCHERS: &[&str] = &[
+    "krunner",
+    "ulauncher",
+    "albert",
+    "rofi",
+    "wofi",
+    "fuzzel",
+    "tofi",
+    "kickoff",
+    "cerebro",
+];
 const EDITORS: &[&str] = &[
     "code",
     "vscode",
@@ -121,6 +134,8 @@ pub fn classify(app: &str) -> AppClass {
         AppClass::Terminal
     } else if has(EDITORS) {
         AppClass::Editor
+    } else if has(LAUNCHERS) {
+        AppClass::Launcher
     } else if has(CHATS) {
         AppClass::Chat
     } else if has(BROWSERS) {
@@ -179,6 +194,8 @@ mod tests {
         assert_eq!(classify("code-url-handler"), AppClass::Editor);
         assert_eq!(classify("com.slack.Slack"), AppClass::Chat);
         assert_eq!(classify("org.telegram.desktop"), AppClass::Chat);
+        assert_eq!(classify("krunner"), AppClass::Launcher);
+        assert_eq!(classify("org.kde.krunner"), AppClass::Launcher);
         assert_eq!(classify("org.kde.dolphin"), AppClass::Generic);
         assert_eq!(classify("unknown"), AppClass::Generic);
         assert_eq!(classify("synthetic"), AppClass::Generic);
@@ -194,6 +211,7 @@ mod tests {
         assert!(AppClass::Terminal.single_line());
         assert!(AppClass::Browser.single_line());
         assert!(AppClass::Chat.single_line());
+        assert!(AppClass::Launcher.single_line());
         assert!(!AppClass::Editor.single_line());
         assert!(!AppClass::Generic.single_line());
     }
