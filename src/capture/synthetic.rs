@@ -60,7 +60,7 @@ enum Step {
 /// Types the corpus until `stop` is set. Every 50th word gets a typo that is
 /// immediately corrected with Backspace, to exercise editing keys.
 pub fn run(mut keys: KeyProcessor, recorder: Arc<Recorder>, rate_hz: f64, stop: Arc<AtomicBool>) {
-    recorder.set_focus(SYNTHETIC_APP, SYNTHETIC_WINDOW);
+    recorder.set_focus(SYNTHETIC_APP, SYNTHETIC_WINDOW, false);
     let period = Duration::from_secs_f64(1.0 / rate_hz.max(0.1));
     let start = Instant::now();
     let mut presses: u64 = 0;
@@ -99,7 +99,7 @@ pub fn run(mut keys: KeyProcessor, recorder: Arc<Recorder>, rate_hz: f64, stop: 
                 let (code, shift) = match step {
                     Step::Key(code, shift) => (code, shift),
                     Step::Focus(app, window) => {
-                        recorder.set_focus(app, window);
+                        recorder.set_focus(app, window, false);
                         continue;
                     }
                 };

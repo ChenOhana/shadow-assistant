@@ -7,12 +7,16 @@ const SERVICE = "@SERVICE@";
 const PATH = "@PATH@";
 const IFACE = "@IFACE@";
 
-function report(w) {
+// `renamed` tells brain whether this is the same window with a new title
+// (true) or a window being activated (false): typing can rename a window
+// (VS Code names a new file after its first line), but never activate one.
+function report(w, renamed) {
     if (w) {
         callDBus(SERVICE, PATH, IFACE, "Activated",
-                 String(w.desktopFileName || ""), String(w.resourceClass || ""), String(w.caption || ""));
+                 String(w.desktopFileName || ""), String(w.resourceClass || ""),
+                 String(w.caption || ""), renamed);
     } else {
-        callDBus(SERVICE, PATH, IFACE, "Activated", "", "", "");
+        callDBus(SERVICE, PATH, IFACE, "Activated", "", "", "", false);
     }
 }
 
@@ -21,12 +25,12 @@ function watch(w) {
     // another file in the editor, a new command in the terminal title.
     w.captionChanged.connect(function () {
         if (workspace.activeWindow === w) {
-            report(w);
+            report(w, true);
         }
     });
 }
 
 workspace.windowList().forEach(watch);
 workspace.windowAdded.connect(watch);
-workspace.windowActivated.connect(report);
-report(workspace.activeWindow);
+workspace.windowActivated.connect(function (w) { report(w, false); });
+report(workspace.activeWindow, false);

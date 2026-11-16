@@ -241,7 +241,9 @@ impl Sessions {
                     self.last_key = Some((k, ev.ts));
                 }
             }
-            EventKind::Focus { window } => self.note_title(&ev.app, window, ev.ts, in_session),
+            EventKind::Focus { window, renamed } => {
+                self.note_focus(&ev.app, window, *renamed, ev.ts, in_session)
+            }
             _ => {}
         }
         Ok(())
@@ -254,10 +256,25 @@ impl Sessions {
         self.aliases.get(&k).cloned().unwrap_or(k)
     }
 
-    /// A focus event: if the window's title just changed because of the
-    /// typing, record the new title as an alias of the open session.
-    /// `is_open` says whether a session is open at this point in the log.
-    fn note_title(&mut self, app: &str, window: &str, ts: Millis, is_open: &dyn Fn(&Key) -> bool) {
+    /// A focus event. A window being activated ends any possible rename: a
+    /// different window (opened, switched to by keyboard or mouse) is never
+    /// the typed window renamed. A title change of the active window
+    /// (`renamed`) shortly after a keystroke in it, with no shortcut in
+    /// between, is caused by the typing: the new title becomes an alias of
+    /// the open session. `is_open` says whether a session is open at this
+    /// point in the log.
+    fn note_focus(
+        &mut self,
+        app: &str,
+        window: &str,
+        renamed: bool,
+        ts: Millis,
+        is_open: &dyn Fn(&Key) -> bool,
+    ) {
+        if !renamed {
+            self.last_key = None;
+            return;
+        }
         let Some((last, at)) = &self.last_key else {
             return;
         };
@@ -342,9 +359,9 @@ impl Sessions {
                 s.touch(ev.ts, next);
                 self.last_key = Some((k, ev.ts));
             }
-            EventKind::Focus { window } => {
+            EventKind::Focus { window, renamed } => {
                 let open: Vec<Key> = self.open.keys().cloned().collect();
-                self.note_title(&ev.app, window, ev.ts, &|k| open.contains(k));
+                self.note_focus(&ev.app, window, *renamed, ev.ts, &|k| open.contains(k));
             }
             EventKind::System { state } => match state {
                 SystemState::Start => {
@@ -854,7 +871,14 @@ mod tests {
             typed.push(c);
             let new = format!("● {} • {suffix}", typed.trim_end());
             if new != title {
-                l.push(t + 20, app, EventKind::Focus { window: new });
+                l.push(
+                    t + 20,
+                    app,
+                    EventKind::Focus {
+                        window: new,
+                        renamed: true,
+                    },
+                );
             }
             t += 100;
         }
@@ -880,6 +904,39 @@ mod tests {
         assert_eq!(s[1].4, "testing a title!");
     }
 
+    /// The failure the real-keyboard test found: a new window of the same app
+    /// opening right after typing is an activation, never a rename, even
+    /// when that window then adjusts its own title.
+    #[test]
+    fn another_window_activated_right_after_typing_is_not_a_rename() {
+        let mut l = Log::new();
+        let t = l.typ(T0, "org.kde.kate", "a.txt — Kate", "hello");
+        let focus = |l: &mut Log, ts, window: &str, renamed| {
+            l.push(
+                ts,
+                "org.kde.kate",
+                EventKind::Focus {
+                    window: window.into(),
+                    renamed,
+                },
+            )
+        };
+        focus(&mut l, t + 50, "b.txt — Kate", false); // B opens and is activated
+        focus(&mut l, t + 80, "b.txt — Kate 2", true); // B settles its title
+        let t = l.typ(t + 200, "org.kde.kate", "b.txt — Kate 2", "beta");
+        focus(&mut l, t + 50, "a.txt — Kate", false); // back to A
+        l.typ(t + 200, "org.kde.kate", "a.txt — Kate", " again");
+        let mut ing = l.ingester("b.db");
+        run(&mut ing, clock_late);
+        let s = sessions(ing.connection());
+        assert_eq!(
+            texts(ing.connection()),
+            vec!["hello again", "beta"],
+            "{s:?}"
+        );
+        assert_eq!(s[1].1, "b.txt — Kate 2");
+    }
+
     #[test]
     fn a_shortcut_before_a_title_change_is_a_real_switch() {
         let mut l = Log::new();
@@ -890,6 +947,7 @@ mod tests {
             "notes",
             EventKind::Focus {
                 window: "tab B".into(),
+                renamed: true,
             },
         );
         let t = l.typ(t + 100, "notes", "tab B", "two");
@@ -899,6 +957,7 @@ mod tests {
             "notes",
             EventKind::Focus {
                 window: "tab C".into(),
+                renamed: true,
             },
         );
         l.typ(t + 5_100, "notes", "tab C", "three");

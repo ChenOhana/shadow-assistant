@@ -93,7 +93,9 @@ impl Recorder {
     }
 
     /// Records a focus change. A no-op if neither app nor window changed.
-    pub fn set_focus(&self, app: &str, window: &str) {
+    /// A window was activated (`renamed: false`) or the active window's title
+    /// changed (`renamed: true`).
+    pub fn set_focus(&self, app: &str, window: &str, renamed: bool) {
         let mut g = self.lock();
         if g.focus.app == app && g.focus.window == window {
             return;
@@ -110,6 +112,7 @@ impl Recorder {
             app: app.to_string(),
             kind: EventKind::Focus {
                 window: window.to_string(),
+                renamed,
             },
         };
         self.append(&mut g, ev);
@@ -145,7 +148,10 @@ impl Recorder {
                 Event {
                     ts: now_ms(),
                     app,
-                    kind: EventKind::Focus { window },
+                    kind: EventKind::Focus {
+                        window,
+                        renamed: false,
+                    },
                 },
             );
         }
@@ -264,13 +270,13 @@ mod tests {
             LogWriter::open(&p).unwrap(),
             Box::new(FixedClipboard("pasted")),
         );
-        rec.set_focus("code", "main.rs");
-        rec.set_focus("code", "main.rs"); // duplicate: no event
+        rec.set_focus("code", "main.rs", false);
+        rec.set_focus("code", "main.rs", true); // same title: no event
         rec.key(10, "h".into(), vec![], false);
         rec.key(11, "v".into(), vec![Mod::Ctrl], false);
         rec.set_paused(true);
         rec.key(12, "s".into(), vec![], false); // lock-screen password: dropped
-        rec.set_focus("org.kde.konsole", "bash"); // remembered, not written
+        rec.set_focus("org.kde.konsole", "bash", false); // remembered, not written
         rec.set_paused(false);
         rec.key(13, "x".into(), vec![], false);
 
@@ -279,7 +285,7 @@ mod tests {
             .iter()
             .map(|e| match &e.kind {
                 EventKind::Key { key, window, .. } => format!("{}:key:{key}@{window}", e.app),
-                EventKind::Focus { window } => format!("{}:focus@{window}", e.app),
+                EventKind::Focus { window, .. } => format!("{}:focus@{window}", e.app),
                 EventKind::Paste { text, .. } => {
                     format!("{}:paste:{}", e.app, text.as_deref().unwrap_or("-"))
                 }

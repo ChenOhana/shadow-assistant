@@ -169,8 +169,9 @@ Ingest (inside `brain run`, about once a second) turns the log into
   `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`).
   When the title changes *because of the typing* (VS Code names a new file
   after its first line, a mail window after its subject), the session
-  continues: a title change within 1 s of a keystroke in that window, with
-  no shortcut in between, is treated as a rename. It closes after **30 s without
+  continues: a change of the *same* window's title (KWin tells a title
+  change from a window activation) within 1 s of a keystroke in it, with no
+  shortcut in between, is treated as a rename. It closes after **30 s without
   typing in that window**, or right away when a single-line field is
   submitted (Enter at a shell prompt, in a chat box or a browser's address
   bar), cancelled (Ctrl+C at a prompt), or left for another field of the
@@ -258,9 +259,10 @@ sqlite3 ~/brain-data/brain.db \
 **Sessions and reconstruction**
 * **Session key `(app, window title)`**, with markers that change while
   typing removed from the title (unsaved-file dots, terminal spinners), and
-  titles renamed by the typing itself followed as the same session. A real
-  switch to another window or tab within 1 s of the last keystroke made
-  with the mouse (invisible to brain) would wrongly count as a rename.
+  titles renamed by the typing itself followed as the same session. Another
+  window being activated is never a rename; but switching *tabs* of the
+  same window with the mouse (invisible to brain) within 1 s of the last
+  keystroke would wrongly count as one.
 * **30 s idle per window; focus loss alone never ends a session.** Enter
   ends a session only in single-line fields (shell prompts, chat boxes,
   browser address/search bars, launchers such as KRunner, by app class);
@@ -381,6 +383,13 @@ caught. Transcripts are in `ai-logs/`.
     the owner reported held keys reconstructing wrongly; fixed (read all
     queued events first) and covered by a model-based stress test and a
     real-Kate test.
-11. **A test weaker than it reads.** The kill -9 test never actually
+11. **A rename rule that merged two windows.** The rule that keeps VS
+    Code's new-file session together (a title change shortly after typing
+    is a rename) also fired when another Kate window opened right after
+    typing, so the second window's text went into the first window's
+    session. The real-keyboard test caught it; KWin now reports whether a
+    focus event is a window activation or a title change, and only title
+    changes of the typed window can be renames.
+12. **A test weaker than it reads.** The kill -9 test never actually
     killed brain in the middle of a log write (0 torn lines across runs);
     torn-line repair is covered by unit tests, not by that test.

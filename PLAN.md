@@ -176,11 +176,13 @@ libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)
 (`src/capture/desktop.rs`, `kwin_focus.js`)
 
 - `brain run` claims `org.shadowassistant.Brain.p<pid>` on the session bus
-  and exports one method, `Activated(desktopFile, resourceClass, caption)`.
+  and exports one method, `Activated(desktopFile, resourceClass, caption,
+  renamed)`.
   It writes a small script and loads it through KWin's own
   `org.kde.KWin /Scripting` interface. The script reports
-  `workspace.windowActivated` and the active window's `captionChanged`, and
-  the current window right away. Calls from anyone but KWin's bus name are
+  `workspace.windowActivated` (`renamed = false`) and the active window's
+  `captionChanged` (`renamed = true`), and the current window right away.
+  Focus events in the log carry `"renamed": true` for title changes. Calls from anyone but KWin's bus name are
   ignored.
 - The app id is the window's desktop file name (`org.kde.kate`,
   `google-chrome`, `com.microsoft.VSCode`), falling back to the X11
@@ -288,9 +290,10 @@ document and checkpoint equals a clean rebuild from the log.
   markers, because they change while typing.
 - **Titles renamed by the typing itself** keep the session: VS Code names a
   new file after its first line, a mail window after its subject. A title
-  change within 1 s of a keystroke in that window, with no shortcut in
-  between (Ctrl+Tab, Alt+Tab may switch tabs or windows), makes the new title
-  an alias of the open session.
+  change *of the same window* (a `renamed` focus event) within 1 s of a
+  keystroke in it, with no shortcut in between (Ctrl+Tab, Alt+Tab may switch
+  tabs or windows), makes the new title an alias of the open session. A
+  window activation, by keyboard or mouse, ends any possible rename.
 - A session **closes** after **30 s without activity in that window**, or at
   once when a single-line field commits (Enter at a shell prompt, in a chat
   box, an address bar or a launcher), is cancelled (Ctrl+C at a prompt), or

@@ -39,8 +39,13 @@ pub enum EventKind {
         repeat: bool,
         window: String,
     },
-    /// Focus moved to another window, or the focused window's title changed.
-    Focus { window: String },
+    /// A window was activated, or (`renamed: true`) the focused window's
+    /// title changed.
+    Focus {
+        window: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        renamed: bool,
+    },
     /// Clipboard contents at the moment a paste shortcut was pressed. Written
     /// right after the key event that triggered it. `None` when the clipboard
     /// could not be read.
@@ -78,7 +83,7 @@ impl Event {
     pub fn window(&self) -> Option<&str> {
         match &self.kind {
             EventKind::Key { window, .. }
-            | EventKind::Focus { window }
+            | EventKind::Focus { window, .. }
             | EventKind::Paste { window, .. } => Some(window),
             EventKind::System { .. } => None,
         }
@@ -142,7 +147,14 @@ mod tests {
                 repeat: true,
                 window: "w".into(),
             },
-            EventKind::Focus { window: "w".into() },
+            EventKind::Focus {
+                window: "w".into(),
+                renamed: false,
+            },
+            EventKind::Focus {
+                window: "w2".into(),
+                renamed: true,
+            },
             EventKind::Paste {
                 text: Some("x\ny".into()),
                 window: "w".into(),

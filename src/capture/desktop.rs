@@ -61,6 +61,7 @@ impl FocusIface {
         desktop_file: String,
         resource_class: String,
         caption: String,
+        renamed: bool,
     ) {
         let expected = self
             .kwin_owner
@@ -72,7 +73,7 @@ impl FocusIface {
             return; // not from KWin: ignore spoofed focus reports
         }
         self.recorder
-            .set_focus(&app_id(&desktop_file, &resource_class), &caption);
+            .set_focus(&app_id(&desktop_file, &resource_class), &caption, renamed);
     }
 }
 

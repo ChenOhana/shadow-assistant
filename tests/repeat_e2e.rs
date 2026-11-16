@@ -6,7 +6,9 @@
 //!
 //! What is checked:
 //! * brain's log has exactly the repeats of KDE's schedule (600 ms delay,
-//!   25 Hz) for every hold, boundary cases included;
+//!   25 Hz) for every hold that ends between two repeats; for holds ending
+//!   right on a repeat's due time, within one (the test's own sleep makes
+//!   the real hold a fraction of a millisecond longer than asked);
 //! * brain's reconstruction matches Kate's text within one character per
 //!   hold (two for holds over 2 s). Wayland apps run their own repeat
 //!   timers, and Qt's default coarse timers may fire up to 5% early or late
@@ -128,7 +130,7 @@ fn held_keys_match_what_kate_received() {
             model_count(ms),
             if boundary { "  (boundary)" } else { "" }
         );
-        if b != model_count(ms) {
+        if (boundary && b.abs_diff(model_count(ms)) > 1) || (!boundary && b != model_count(ms)) {
             log_mismatch.push(c);
         }
         // The run the Backspace hold deleted into also absorbs its ±1.
