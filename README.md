@@ -9,8 +9,8 @@ brain query search "<words>"   # full-text search over writing sessions
 brain query text --app A       # the raw typed stream of an app
 ```
 
-> **Status: capture, sessions, reconstruction, indexing and queries are
-> done; end-to-end verification is next.**
+> **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
+> the AI transcripts are in [ai-logs/](ai-logs/).
 
 ## Supported OS
 
@@ -247,6 +247,11 @@ sqlite3 ~/brain-data/brain.db \
   log offset, so a crash never duplicates or skips anything. Deleting
   `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
   SQLite.
+* **`query text` assumes the log is in time order.** It starts reading at
+  the last checkpoint before its window and stops 60 s of log after it. If
+  the system clock is stepped backwards while capturing (an NTP correction,
+  a manual change), keys typed after the step whose times fall in a queried
+  window can be missed. PLAN.md (section 10) describes an exact bound.
 * **No backward compatibility yet.** This is the first version: a database
   with another schema version is refused (delete it to rebuild).
 
@@ -301,16 +306,30 @@ sqlite3 ~/brain-data/brain.db \
 ## Tests
 
 ```sh
-cargo test                                   # unit + integration tests
-cargo test --release --test crash_safety     # 25 random kill -9s under load;
-                                             # sessions must equal a rebuild from the log
+cargo test --release      # unit tests (~120) and the default integration tests:
+                          #   crash_safety  25 random kill -9s under load; sessions,
+                          #                 documents and checkpoints must equal a
+                          #                 clean rebuild from the log
+                          #   query_cli     the query commands through the binary,
+                          #                 incl. thousands of queries while run writes
+                          #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
 ```
 
-Tests that use real hardware need two narrow permissions, granted once by
+Tests against real software are opt-in (`-- --ignored`):
+
+```sh
+# Type through a virtual keyboard into real Kate windows; hands off the
+# keyboard and mouse while they run, and the screen must be unlocked:
+cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+# Drive a real (headless) VS Code:
+cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+```
+
+The Kate tests need two narrow permissions, granted once by
 `sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
-passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm;
-the sleep/wake test then suspends with `systemctl suspend`), and access to `/dev/uinput` for
-the user at the local seat (virtual keyboard tests).
+passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm
+for a sleep/wake check that suspends with `systemctl suspend`), and access to
+`/dev/uinput` for the user at the local seat.
 
 ## Where the agent failed
 
