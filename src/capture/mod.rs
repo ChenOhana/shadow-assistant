@@ -5,7 +5,8 @@
 //! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.
 //! * **D-Bus**: zbus's connection executors plus one small thread per watched
 //!   signal (focus calls from KWin, lock, sleep, layout).
-//! * **tier2** (only with `--vscode-replay`): VS Code replays, one at a time.
+//! * **tier2** (only with `--vscode-replay`): VS Code tier 2 jobs (a saved
+//!   file's diff, or a replay), one at a time.
 //! * **main**: waits for a termination signal, then shuts down in order.
 
 pub mod desktop;

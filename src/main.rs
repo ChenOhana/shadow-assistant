@@ -30,9 +30,11 @@ enum Command {
         /// input devices (no root or desktop needed).
         #[arg(long, value_name = "RATE", hide = true)]
         synthetic: Option<f64>,
-        /// Reconstruct VS Code sessions by replaying their keystrokes into a
-        /// sandboxed, invisible VS Code (no network, capped CPU/memory).
-        /// Falls back to generic reconstruction when it cannot.
+        /// Reconstruct VS Code sessions with the real editor: a git-style diff
+        /// of the file when it was saved after the session, otherwise a
+        /// best-effort replay of the keystrokes into a sandboxed, invisible
+        /// VS Code (no network, capped CPU/memory). Keeps the generic
+        /// reconstruction when neither works.
         #[arg(long)]
         vscode_replay: bool,
     },
@@ -90,10 +92,10 @@ enum Query {
         #[arg(long, value_name = "N", default_value_t = 20)]
         limit: usize,
     },
-    /// What was typed into an app in the time window, reconstructed (edits
+    /// What was typed into an app in the time range, reconstructed (edits
     /// applied) per window title with the app's rules; each window's text
-    /// starts empty at the window's start. Without time flags it covers the
-    /// last 10 minutes; --to alone means the 10 minutes ending at T.
+    /// starts empty at the start of the range. Without time flags it covers
+    /// the last 10 minutes; --to alone means the 10 minutes ending at T.
     #[command(after_help = TIME_HELP)]
     Text {
         /// The app: its full id or a part of it, case-insensitive (e.g. kate

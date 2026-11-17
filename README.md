@@ -17,7 +17,8 @@ brain query text --app A       # what was typed into an app, reconstructed
 Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
 works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
 desktops, keys are recorded under the app `unknown`. The optional VS Code
-replay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).
+tier 2 (`--vscode-replay`) replays into VS Code when a file was not saved,
+which needs VS Code installed (`/usr/bin/code`).
 
 ## Build
 
@@ -57,8 +58,9 @@ target/release/brain run --data-dir ~/brain-data
 start repairs a torn last line, if there is one, and resumes ingest exactly
 where it stopped.
 
-Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
-invisible copy of VS Code (tier 2, below). It is off by default.
+Add `--vscode-replay` to reconstruct VS Code sessions with the real editor
+(tier 2, below): a diff of the file when you saved it, otherwise a replay in
+a sandboxed, invisible copy of VS Code. It is off by default.
 
 ### As a service
 
@@ -383,27 +385,30 @@ database read-only and reopen it to see the current state.
   run in that terminal app; history from before, tab completion and shell
   autosuggestions (zsh) are not visible, so those lines can be wrong.
 * **Sessions that changed nothing leave no row** (cursor movement only, a
-  typo typed and deleted, whitespace).
-* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
-  content at session start, so it is skipped for unsaved new files
-  (`Untitled-1`), files with unsaved changes when the session started, and
-  files saved before they could be identified (within 2 minutes of the
-  session start). When the file is saved after the last edit, the session
-  text is a git-style diff of it (exact; the format matches `git diff -U3`,
-  though in very repetitive text an ambiguous line may be placed
-  differently than git's heuristics would). Search also matches words on
-  the diff's removed (`-`) and context lines. Otherwise a replay in VS Code is a best
-  effort: ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
-  outside brain's budget), the cursor assumed at the end of the file, and no
-  extensions when yours exceed 300 MB, so autocomplete from extensions is
-  not reproduced.
+  typo typed and deleted, whitespace). With VS Code tier 2, the saved file
+  decides: a session whose diff is empty is removed once the worker has
+  checked it.
+* **VS Code tier 2 is opt-in** (`--vscode-replay`). It needs the file's
+  content from before the session, so it is skipped for unsaved new files
+  (`Untitled-1`), for files with unsaved changes when the session started,
+  and for files brain could not identify, or copy before they were saved,
+  within 2 minutes of the session start.
+* **A saved file gives an exact diff.** Its format matches `git diff -U3`;
+  in very repetitive text an ambiguous line may be placed differently than
+  git's heuristics would. Search also matches words on the diff's removed
+  (`-`) and context lines.
+* **A replay is a best effort**: ~25 s for the first one and ~1.2 GB while
+  VS Code runs (capped, outside brain's budget), the cursor assumed at the
+  end of the file, and no extensions when yours exceed 300 MB, so
+  autocomplete from extensions is not reproduced.
 
 **Queries**
 * **`query text` reconstructs "stupidly", per app window.** It takes the
   keys typed in the time range and runs them through the same tier 0/1
   adapters the sessions use, per app and window title, from an empty text:
-  no session boundaries, no text from before the range. (An earlier version returned
-  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
+  no session boundaries, no text from before the range. (An earlier version
+  returned the raw keys with `<Backspace>` etc.; the owner asked for
+  reconstruction.)
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
@@ -431,13 +436,15 @@ database read-only and reopen it to see the current state.
 ## Tests
 
 ```sh
-cargo test --release      # unit tests (~120) and the default integration tests:
+cargo test --release      # unit tests (~130) and the default integration tests:
                           #   crash_safety  25 random kill -9s under load; sessions,
                           #                 documents and checkpoints must equal a
                           #                 clean rebuild from the log
                           #   query_cli     the query commands through the binary,
                           #                 incl. thousands of queries while run writes
                           #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
+                          #   tier2_e2e     VS Code saved-file diffs and shortcut-only
+                          #                 sessions (no VS Code needed)
 ```
 
 Tests against real software are opt-in (`-- --ignored`):
@@ -446,11 +453,9 @@ Tests against real software are opt-in (`-- --ignored`):
 # Type through a virtual keyboard into real Kate windows; hands off the
 # keyboard and mouse while they run, and the screen must be unlocked:
 cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
-# Drive a real (headless) VS Code:
+# Replay into a real (headless) VS Code, incl. a file opened from outside
+# the window's folder, identified late through VS Code's window state:
 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
-#   (tier2_e2e includes a file opened from outside the window's folder,
-#    identified late through VS Code's window state; its saved-file test
-#    needs no VS Code and also runs with plain `cargo test`)
 ```
 
 `sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`) grants two
@@ -503,7 +508,9 @@ caught. Transcripts are in `ai-logs/`.
    spinner) splitting a session every second, VS Code's new-file title
    (named after the text being typed) splitting a session on every
    character, VS Code's real app id (`com.microsoft.VSCode`) not being
-   recognised for tier 2, and KRunner's Enter recorded as a newline.
+   recognised for tier 2, KRunner's Enter recorded as a newline, VS Code
+   files opened from outside the window's folder not being identified, and
+   shortcut-only VS Code edits (Ctrl+D then Ctrl+S) leaving no session.
 7. **Work the owner did not want.** It built touchpad tap detection for
    click logging, then the owner pointed out that clicks without a cursor
    position cannot help reconstruction and capture of the mouse was
@@ -533,11 +540,16 @@ caught. Transcripts are in `ai-logs/`.
     torn-line repair is covered by unit tests, not by that test.
 13. **A status that overstated the result.** VS Code replays were marked
     `done` whether or not they matched what VS Code really produced; a C++
-    session with autocompletion replayed into garbage while the user's
-    autosaved file held the exact text. Now the saved file is used when it
-    has the final edits, and a replay is labelled best effort.
+    session with autocompletion replayed into garbage while the file the
+    owner had saved held the exact text. Now a saved file gives the session
+    a diff, and a replay is labelled best effort.
 14. **A test that left a process running.** A failed test run left a
     synthetic `brain run` typing into a deleted temp directory for 16 hours;
     the tests started `brain run` without a guard that stops it on failure.
     The owner noticed it. Every test now uses such a guard and checks that
     nothing is left running.
+15. **Incomplete instructions.** Asked how to trigger a VS Code replay, it
+    said to open a file with no unsaved-changes dot, without saying the file
+    must exist on disk; the owner tried a new untitled file, which tier 2
+    always skips. The owner pointed it out, and it then listed every
+    condition the replay needs.

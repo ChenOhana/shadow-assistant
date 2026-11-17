@@ -5,9 +5,10 @@
 `brain run` captures keystrokes + focus and stores them; `brain query`
 (`search`, `text`) answers questions while `run` keeps going.
 
-Design doc (source of truth for architecture):
-https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9 — `PLAN.md` is the in-repo
-research/architecture write-up and must stay consistent with the code.
+Original design doc: https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9
+(copy in `ai-logs/design-doc.md`). `PLAN.md` is the in-repo research and
+architecture write-up of the code as built, marks where it differs from the
+design, and must stay consistent with the code.
 
 ## Target platform
 
@@ -50,13 +51,16 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 - The mouse is not captured (owner's call): cursor moves made with the mouse
   are a documented limitation, not something to work around.
 - Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
-  2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
-  falling back to tier 0. Sessions, reconstruction and indexing are built
+  2 = VS Code from the real editor, **opt-in** via `brain run
+  --vscode-replay`: a git-style diff (3 lines of context) when the file was
+  saved after the session, otherwise a best-effort replay; tier 0/1 text
+  stays when neither works. Unsaved new files are not supported. Sessions, reconstruction and indexing are built
   before `brain query` (owner's call, changing the original stage order).
 - Search is substring matching (FTS5 trigram, case- and accent-insensitive),
   not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
-- Sessions and their text must stay a pure function of the log: the crash
-  test compares the live index with a fresh rebuild.
+- Sessions and their text must stay a pure function of the log (tier 2
+  aside, which depends on files on disk): the crash test compares the live
+  index with a fresh rebuild.
 - Work went through stages (capture with sessions and indexing, query,
   end-to-end verification), each approved by the owner. Keep the habit for
   new work: build, run, test it yourself, report, then **stop and wait for
@@ -79,10 +83,11 @@ src/ingest.rs            log → SQLite, offset advanced in the same transaction
 src/sessions.rs          session rules, open/close, live text, crash recovery
 src/query.rs             `query search` / `query text`, time windows, JSON output
 src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
-                         tier2.rs + vscode/ tier 2 (VS Code replay, opt-in)
+                         tier2.rs + vscode/ tier 2 (VS Code diff / replay)
 src/event.rs, timefmt.rs event format, timestamp parsing/formatting
 tests/                   integration tests that drive the real binary;
-                         tests/common: uinput keyboard and KDE helpers
+                         tests/common: `brain run` guard, uinput keyboard,
+                         KDE helpers
 ```
 
 ## Working rules
@@ -104,7 +109,8 @@ tests/                   integration tests that drive the real binary;
 - Prefer verifying behaviour by running the binary over reasoning about it;
   report exactly what was tested and what was not.
 - Tests that need VS Code are `#[ignore]`: `cargo test --release --test
-  vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
+  vscode_replay --test tier2_e2e -- --ignored --test-threads=1`
+  (`tier2_e2e`'s saved-file tests need no VS Code and run by default).
 - Every `brain run` a test starts goes through `tests/common::spawn_brain`
   (or `start_brain`): the guard stops it even when the test fails, and
   tests end with `assert_no_brain_on(data)`. No test may leave a process or

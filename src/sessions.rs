@@ -17,6 +17,10 @@
 //!   title an alias of the open session.
 //! * `brain run` stopping or restarting closes all sessions: what was typed
 //!   while it was not running is unknown.
+//! * With tier 2 (VS Code, `--vscode-replay`), every key except desktop
+//!   (Super) shortcuts is activity, even one tier 0/1 ignores (Ctrl+D,
+//!   Ctrl+S), and a session with a file snapshot is kept at close even if its
+//!   text is unchanged, for the saved file's diff to decide.
 //!
 //! **Text.** In multi-line apps (editors and anything unknown) each
 //! `(app, window)` has a modelled document ([`TextBuffer`]) that outlives its
@@ -28,10 +32,12 @@
 //! every shell at home is "~"), so carrying text over would mix them.
 //!
 //! **Determinism.** Everything here is a function of the log, except two
-//! wall-clock decisions that cannot change the result: closing an idle
-//! session before the next event arrives ([`Sessions::close_idle`] waits a
-//! grace period past the timeout, so the event-time rule would close it the
-//! same way), and the VS Code file snapshot (tier 2, an additive upgrade).
+//! things. Closing an idle session before the next event arrives is decided
+//! on the wall clock but cannot change the result ([`Sessions::close_idle`]
+//! waits a grace period past the timeout, so the event-time rule would close
+//! it the same way). Tier 2 (opt-in) depends on files on disk: the VS Code
+//! file snapshot, and later the saved file, which can replace a session's
+//! text or remove a session that changed nothing.
 //! After a crash, open sessions are rebuilt by replaying their events from
 //! the log ([`Sessions::recover`]), so a rebuild from the log produces the
 //! same rows as an uninterrupted run.

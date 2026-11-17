@@ -17,7 +17,7 @@ build deliberately differs from it are called out ("Differs from the design").
  KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
  Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
                                                               checkpoints     log_checkpoints
-                                    tier 2 worker (opt-in): VS Code replay ──┘
+                    tier 2 worker (opt-in): VS Code diff / replay ──┘
  brain query search ──► brain.db (read-only snapshot)
  brain query text   ──► log_checkpoints → events.jsonl
 ```
@@ -277,10 +277,14 @@ document and checkpoint equals a clean rebuild from the log.
 - **Focus loss alone never closes a session**: switching away and back
   within 30 s of that window's last keystroke resumes it.
 - Shortcuts with no modelled effect (Ctrl+C copy, Alt+Tab, Ctrl+S, F-keys)
-  are not activity: they neither open nor extend a session.
+  are not activity: they neither open nor extend a session. (With tier 2
+  on, VS Code is the exception, section 4.4: there they can change the
+  file.)
 - A session that changed nothing (cursor movement only, a typo typed and
   deleted, whitespace) leaves no row; a committed non-empty line always
-  does (a shell command run again from history).
+  does (a shell command run again from history). A VS Code session with a
+  tier 2 snapshot is kept until its saved file shows whether it changed
+  anything.
 - **Idle closing on the clock** happens only once ingest has caught up with
   the log, and 2 s past the 30 s timeout, so it always agrees with the same
   rule applied to event times on a rebuild.
@@ -327,7 +331,7 @@ session.
   (Ctrl+A/E/U/K/W, Alt+B/F) and history recall with Up/Down from the commands
   brain saw committed in that terminal app, browser field changes, and that
   plain Ctrl+V does not paste in a terminal.
-- **Tier 2, VS Code replayed in VS Code** (`reconstruct/vscode/`,
+- **Tier 2, VS Code from the real editor** (`reconstruct/vscode/`,
   `tier2.rs`, opt-in with `--vscode-replay`): when a VS Code session opens,
   the file is identified from the window title: an absolute path if the
   title has one, otherwise the title's file name looked up in VS Code's
@@ -345,15 +349,15 @@ session.
   made of the keys: the session's text is a git-style unified diff from the
   snapshot to the saved file, 3 lines of context (`done: saved file`,
   exact, VS Code not started; Myers line diff with git's "slide down"
-  placement of ambiguous runs). Otherwise the
-  worker replays the session's own keystrokes from the log into one warm,
-  headless VS Code (Electron's headless mode, no display server) over the
-  DevTools protocol on a pipe, in its own network namespace and a
-  CPU/memory-capped systemd scope, with the user's settings and keybindings,
-  saves, and takes the changed lines (`done: replayed (best effort,
-  unverified)`: cursor assumed at the end, no extensions above 300 MB, so
-  extension autocomplete is not reproduced). Failures and timeouts keep the
-  tier 0/1 text; pending jobs survive restarts.
+  placement of ambiguous runs). Otherwise the worker replays the session's
+  own keystrokes from the log into one warm, headless VS Code (Electron's
+  headless mode, no display server) over the DevTools protocol on a pipe,
+  in its own network namespace and a CPU/memory-capped systemd scope, with
+  the user's settings and keybindings, saves, and takes the changed lines
+  (`done: replayed (best effort, unverified)`: cursor assumed at the end,
+  no extensions above 300 MB, so extension autocomplete is not reproduced).
+  Failures and timeouts keep the tier 0/1 text; pending jobs survive
+  restarts.
 
   With tier 2 on, every VS Code key except desktop (Super) shortcuts opens
   or extends the session, even ones tier 0/1 ignores (Ctrl+D, Alt+Up,
@@ -380,7 +384,8 @@ key-to-action rules. The `start` event that follows closes them (input while
 brain was not running is unknown). Everything the engine decides is a
 function of the log, so a database rebuilt from the log alone is identical;
 `sessions::tests::crash_recovery_reproduces_an_uninterrupted_run` restarts
-ingest after every line to prove it.
+ingest after every line to prove it. The one exception is tier 2, which
+depends on files on disk (section 10).
 
 ## 5. Storage and indexing
 
@@ -495,7 +500,8 @@ window has to be read anyway. Clock steps backwards are discussed in section
   sessions in memory.
 - **Measured** (`tests/perf_budget.rs`, part of `cargo test`): 8 keys/s for
   30 s through the whole pipeline with a query every 3 s: **0.1 % CPU, 8.1 MB
-  peak RSS**. A real run idles at about 8 MB.
+  peak RSS**. A real run (13 threads) sits at about 10 MB after hours of
+  use.
 - The opt-in VS Code instance runs outside brain's budget, in its own
   systemd scope capped at 50 % CPU and 1.5 GB, shut down after 10 minutes
   idle.
@@ -519,13 +525,14 @@ window has to be read anyway. Clock steps backwards are discussed in section
   method; calls not coming from KWin are ignored.
 - **Queries**: search words are quoted for FTS5 and all SQL uses bound
   parameters.
-- **Tests that need privileges** get exactly two narrow ones
-  (`scripts/setup-test-permissions.sh`): passwordless `rtcwake -m no -s 30`
-  only, and `/dev/uinput` for the user at the local seat.
+- **Hardware checks that need privileges** get exactly two narrow ones
+  (`scripts/setup-test-permissions.sh`): `/dev/uinput` for the user at the
+  local seat (the Kate tests), and passwordless `rtcwake -m no -s 30` only
+  (the manual sleep/wake check).
 
 ## 9. Testing strategy
 
-- **Unit tests** (about 120, `cargo test`): key resolution and layouts,
+- **Unit tests** (about 130, `cargo test`): key resolution and layouts,
   repeat synthesis (including a 300-scenario stress test against an
   independent model, with random early and late wakeups), the recorder, the
   log's torn-tail repair, schema and search, ingest, the tier 0 buffer and
@@ -536,13 +543,16 @@ window has to be read anyway. Clock steps backwards are discussed in section
   load, compared with a clean rebuild), `query_cli` (the binary's JSON
   output, search semantics through the CLI, time windows, reconstructed
   text including the README's example, errors, and thousands of queries
-  while `run` writes), `perf_budget` (CPU and
-  memory budget).
+  while `run` writes), `perf_budget` (CPU and memory budget), and
+  `tier2_e2e`'s saved-file tests (diffs, shortcut-only sessions, the copy
+  taken on focus; no VS Code needed).
 - **Opt-in tests against real software**: `repeat_e2e` and
   `real_keyboard_e2e` type through a uinput keyboard into real Kate windows
   and compare Kate's saved files with brain (held-key repeats, Hebrew via
   Alt+Shift, focus moving between windows, keyboard unplug/replug);
-  `vscode_replay` and `tier2_e2e` drive real VS Code.
+  `vscode_replay` and `tier2_e2e`'s replay tests drive real VS Code. The
+  diff's output was also compared once with `git diff -U3` on 300 random
+  edits (identical for distinct lines).
 - **Manual, once**: sleep/wake through a real suspend, screen lock and
   unlock, the systemd service (start, restart after `kill -9`, clean stop).
 
@@ -570,12 +580,14 @@ window has to be read anyway. Clock steps backwards are discussed in section
   before the window, stop after the last one within 5 s after it); not done.
 - **Other password prompts** are captured. AT-SPI's `password text` role
   would allow skipping them in apps that expose it.
-- **VS Code tier 2** assumes the cursor starts at the end of the file,
+- **VS Code tier 2** is the one part of `brain.db` a rebuild from the log
+  does not reproduce: it depends on files on disk (the snapshot, taken
+  within 2 minutes of the session starting and before the file is saved,
+  and the saved file). Its replay, used only when the file was not saved
+  after the session, assumes the cursor starts at the end of the file,
   replays faster than a human (so accepting a suggestion may not replay the
-  same), runs without extensions when they exceed 300 MB, and is the one part
-  of `brain.db` a rebuild from the log does not reproduce (its file snapshot
-  must be taken within 2 minutes of the session starting, before the file
-  is saved).
+  same) and runs without extensions when they exceed 300 MB. Unsaved new
+  files are not supported.
 - **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
   be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
   are captured on any Linux, attributed to `unknown`.
