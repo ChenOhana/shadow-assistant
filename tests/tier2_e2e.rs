@@ -365,5 +365,9 @@ fn saved_file_gives_the_session_text_without_replay() {
         .unwrap();
     assert_eq!(status, "done: saved file");
     assert_eq!(tier, 2);
-    assert_eq!(text, "    std", "only the changed line");
+    // A git-style diff of the session: initial content → saved file.
+    assert_eq!(
+        text,
+        "--- a/main.cpp\n+++ b/main.cpp\n@@ -1,2 +1,3 @@\n int main() {\n+    std\n }"
+    );
 }

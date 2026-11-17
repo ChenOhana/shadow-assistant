@@ -342,8 +342,10 @@ session.
   When the session closes with its tier 0/1 text, a worker works out its
   real text. If the file on disk was written after the session's last
   keystroke (autosave, or Ctrl+S at the end), it already holds what VS Code
-  made of the keys: the session's text is the lines it changed from the
-  snapshot (`done: saved file`, exact, VS Code not started). Otherwise the
+  made of the keys: the session's text is a git-style unified diff from the
+  snapshot to the saved file, 3 lines of context (`done: saved file`,
+  exact, VS Code not started; Myers line diff with git's "slide down"
+  placement of ambiguous runs). Otherwise the
   worker replays the session's own keystrokes from the log into one warm,
   headless VS Code (Electron's headless mode, no display server) over the
   DevTools protocol on a pipe, in its own network namespace and a

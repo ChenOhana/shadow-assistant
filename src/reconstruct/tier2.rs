@@ -7,8 +7,9 @@
 //!
 //! 1. If the file on disk was written after the session's last keystroke
 //!    (autosave, or Ctrl+S at the end), it holds exactly what VS Code made of
-//!    the session: the text is the lines it changed from the initial content
-//!    (status `done: saved file`). VS Code is not started.
+//!    the session: the text is a git-style unified diff from the initial
+//!    content to the saved file, with 3 lines of context (status
+//!    `done: saved file`). VS Code is not started.
 //! 2. Otherwise the session's own keystrokes are replayed from the log into a
 //!    sandboxed VS Code ([`super::vscode`]), as a best effort that nothing
 //!    verifies (status `done: replayed (best effort, unverified)`).
@@ -145,7 +146,7 @@ impl Tier2Snapshotter for VsCodeSnapshots {
     }
 }
 
-/// `tier2_status` of a session whose text comes from the saved file.
+/// `tier2_status` of a session whose text is a diff of the saved file.
 pub const STATUS_SAVED_FILE: &str = "done: saved file";
 /// `tier2_status` of a session whose text comes from a replay in VS Code.
 pub const STATUS_REPLAYED: &str = "done: replayed (best effort, unverified)";
@@ -307,8 +308,12 @@ fn run_job(
     // 1. The file as VS Code saved it after the last keystroke, if it was.
     let last_key = crate::timefmt::parse_rfc3339_ms(&ended_at)?;
     if let Some(saved) = saved_after(Path::new(&file), last_key) {
+        let name = Path::new(&file)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         return Ok(Tier2Text {
-            text: vscode::changed_lines(&initial_text, &saved),
+            text: vscode::unified_diff(&initial_text, &saved, &name, 3),
             status: STATUS_SAVED_FILE,
         });
     }

@@ -68,7 +68,7 @@ mod diff;
 mod keys;
 mod title;
 
-pub use diff::changed_lines;
+pub use diff::{changed_lines, unified_diff};
 pub use title::{is_vscode, resolve_file, resolve_file_in, title_is_dirty, title_is_untitled};
 
 use crate::event::Mod;

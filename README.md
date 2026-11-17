@@ -249,24 +249,26 @@ Ingest (inside `brain run`, about once a second) turns the log into
 * **Tier 2** (`--vscode-replay`): when a VS Code session opens, the
   edited file's initial content is saved. When the session closes:
   1. if the file was saved after your last keystroke (autosave, or Ctrl+S
-     at the end), the session text is the lines it changed from the
-     initial content: exactly what VS Code made of your keys, autocomplete
-     and auto-indent included; VS Code is not started;
+     at the end), the session text is a **git-style diff** from the initial
+     content to the saved file (`--- a/test.cpp`, `+++ b/test.cpp`, `@@`
+     hunks with 3 lines of context, `-` removed and `+` added lines): what
+     you did to the file in that session, autocomplete and auto-indent
+     included; VS Code is not started;
   2. otherwise the keystrokes are replayed into a headless VS Code with
      your settings, in a network-less sandbox with capped CPU and memory, as
      a best effort: the cursor is assumed at the end of the file, your
      extensions are not loaded (so their autocomplete is not reproduced),
      and nothing checks the result.
 
-  Either way the session stores only the changed lines, and tier 0/1 text
-  stays if neither works. The `tier2_status` column says what happened:
+  The replay stores the lines it changed; tier 0/1 text stays if neither
+  works. The `tier2_status` column says what happened:
 
   | `tier2_status` | Meaning |
   |---|---|
   | `resolving` | looking for the edited file |
   | `snapshot` | initial content saved, session open |
   | `pending` | session closed, waiting for the worker |
-  | `done: saved file` | text from the file saved after the last edit (exact) |
+  | `done: saved file` | a diff of the file saved after the last edit (exact) |
   | `done: replayed (best effort, unverified)` | text from a replay in VS Code |
   | `failed: …` | the replay failed; tier 0/1 text kept |
   | `skipped: …` | tier 2 impossible (unsaved new file, unsaved changes at the start, file not found, …) |
@@ -373,7 +375,10 @@ database read-only and reopen it to see the current state.
   (`Untitled-1`), files with unsaved changes when the session started, and
   files saved before they could be identified (within 2 minutes of the
   session start). When the file is saved after the last edit, the session
-  text comes from it (exact). Otherwise a replay in VS Code is a best
+  text is a git-style diff of it (exact; the format matches `git diff -U3`,
+  though in very repetitive text an ambiguous line may be placed
+  differently than git's heuristics would). Search also matches words on
+  the diff's removed (`-`) and context lines. Otherwise a replay in VS Code is a best
   effort: ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
   outside brain's budget), the cursor assumed at the end of the file, and no
   extensions when yours exceed 300 MB, so autocomplete from extensions is
