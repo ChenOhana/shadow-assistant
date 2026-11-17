@@ -500,3 +500,13 @@ caught. Transcripts are in `ai-logs/`.
 12. **A test weaker than it reads.** The kill -9 test never actually
     killed brain in the middle of a log write (0 torn lines across runs);
     torn-line repair is covered by unit tests, not by that test.
+13. **A status that overstated the result.** VS Code replays were marked
+    `done` whether or not they matched what VS Code really produced; a C++
+    session with autocompletion replayed into garbage while the user's
+    autosaved file held the exact text. Now the saved file is used when it
+    has the final edits, and a replay is labelled best effort.
+14. **A test that left a process running.** A failed test run left a
+    synthetic `brain run` typing into a deleted temp directory for 16 hours;
+    the tests started `brain run` without a guard that stops it on failure.
+    The owner noticed it. Every test now uses such a guard and checks that
+    nothing is left running.
