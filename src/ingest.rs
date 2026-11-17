@@ -15,6 +15,7 @@
 //! ([`Sessions::recover`]) before the next attempt.
 
 use crate::eventlog::LogReader;
+use crate::reconstruct::tier2::{Tier2Result, Tier2Text};
 use crate::sessions::{Sessions, Tier2Snapshotter};
 use crate::store;
 use crate::timefmt::{self, Millis};
@@ -34,7 +35,7 @@ pub struct Ingester {
     last_checkpoint: Option<Millis>,
     sessions: Option<Sessions>,
     /// Tier 2 results waiting to be written: (session id, text or error).
-    tier2_results: Vec<(i64, std::result::Result<String, String>)>,
+    tier2_results: Vec<Tier2Result>,
     /// Tier 2 jobs whose sessions are committed as pending, to hand to the worker.
     tier2_jobs: Vec<i64>,
 }
@@ -92,7 +93,7 @@ impl Ingester {
     }
 
     /// Queues a finished tier 2 replay to be written by the next step.
-    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<String, String>) {
+    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<Tier2Text, String>) {
         self.tier2_results.push((id, result));
     }
 
@@ -211,18 +212,19 @@ impl Ingester {
     }
 }
 
-/// Writes a finished tier 2 replay over the session's tier 0/1 text. Only a
-/// session still waiting for it is updated.
+/// Writes a finished tier 2 text over the session's tier 0/1 text, with the
+/// status saying where it came from. Only a session still waiting for it is
+/// updated.
 fn apply_tier2_result(
     tx: &Connection,
     id: i64,
-    result: &std::result::Result<String, String>,
+    result: &std::result::Result<Tier2Text, String>,
 ) -> Result<()> {
     match result {
-        Ok(text) => tx.execute(
-            "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = 'done'
-             WHERE id = ?2 AND tier2_status = 'pending'",
-            rusqlite::params![text, id],
+        Ok(done) => tx.execute(
+            "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2
+             WHERE id = ?3 AND tier2_status = 'pending'",
+            rusqlite::params![done.text, done.status, id],
         )?,
         Err(why) => tx.execute(
             "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status = 'pending'",

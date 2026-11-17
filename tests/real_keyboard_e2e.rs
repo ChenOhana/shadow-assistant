@@ -119,6 +119,7 @@ fn real_keyboard_layouts_focus_and_hotplug() {
     drop(kate_b);
     drop(kb);
     drop(brain);
+    assert_no_brain_on(&data);
     drop(restore);
 
     let conn = rusqlite::Connection::open(data.join("brain.db")).unwrap();

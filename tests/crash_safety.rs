@@ -3,22 +3,14 @@
 //! Drives the real `brain` binary with its synthetic input source (the evdev
 //! read is the only part replaced), so it runs unattended and without root.
 
+mod common;
+
 use brain::eventlog::LogReader;
 use brain::ingest::CHECKPOINT_INTERVAL_MS;
+use common::{assert_no_brain_on, spawn_brain};
 use rusqlite::Connection;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
-
-fn spawn_brain(dir: &Path, rate: u32) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_brain"))
-        .args(["run", "--synthetic", &rate.to_string(), "--data-dir"])
-        .arg(dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("spawn brain")
-}
 
 /// xorshift64*: deterministic, dependency-free randomness for kill timing.
 struct Rng(u64);
@@ -57,11 +49,11 @@ fn kill_dash_nine_never_corrupts() {
 
     for _ in 0..25 {
         // A high key rate makes it likely that some kills land mid-write.
-        let mut child = spawn_brain(&dir, 3000);
+        let mut child = spawn_brain(&["run", "--synthetic", "3000"], &dir);
         wait_for_file(&db);
         std::thread::sleep(Duration::from_millis(rng.range_ms(50, 1500)));
-        child.kill().unwrap(); // SIGKILL
-        child.wait().unwrap();
+        child.0.kill().unwrap(); // SIGKILL
+        child.0.wait().unwrap();
 
         let bytes = std::fs::read(&log).unwrap();
         if bytes.last().is_some_and(|&b| b != b'\n') {
@@ -86,12 +78,10 @@ fn kill_dash_nine_never_corrupts() {
     }
 
     // A final clean run: start, let ingest catch up, stop with SIGTERM.
-    let child = spawn_brain(&dir, 50);
+    let mut child = spawn_brain(&["run", "--synthetic", "50"], &dir);
     std::thread::sleep(Duration::from_millis(1500));
-    // SAFETY: sending SIGTERM to our own child.
-    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "clean stop must exit 0");
+    assert!(child.stop().success(), "clean stop must exit 0");
+    assert_no_brain_on(&dir);
 
     // Every line in the log is a complete, valid event.
     let mut reader = LogReader::open(&log, 0).unwrap();

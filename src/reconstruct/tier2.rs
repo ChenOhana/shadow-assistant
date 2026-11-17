@@ -1,13 +1,22 @@
 //! Tier 2 plumbing: snapshots, the background worker, and the results path.
 //!
 //! When a VS Code session opens, [`VsCodeSnapshots`] copies the edited file
-//! (identified from the window title) into the data directory. When the
-//! session closes as tier 0/1 text, it is marked `pending`; [`Tier2Worker`]
-//! then replays the session's own keystrokes from the log into a sandboxed
-//! VS Code ([`super::vscode`]), one job at a time, and hands the text back to
-//! the ingest thread, which writes it over the tier 0/1 text. A failure or
-//! timeout leaves the tier 0/1 text in place and records why. Pending jobs
-//! survive restarts (they are rows in the database) and are retried.
+//! (identified from the window title) into the data directory: its initial
+//! content. When the session closes as tier 0/1 text, it is marked
+//! `pending`, and [`Tier2Worker`] works out its real text, one job at a time:
+//!
+//! 1. If the file on disk was written after the session's last keystroke
+//!    (autosave, or Ctrl+S at the end), it holds exactly what VS Code made of
+//!    the session: the text is the lines it changed from the initial content
+//!    (status `done: saved file`). VS Code is not started.
+//! 2. Otherwise the session's own keystrokes are replayed from the log into a
+//!    sandboxed VS Code ([`super::vscode`]), as a best effort that nothing
+//!    verifies (status `done: replayed (best effort, unverified)`).
+//!
+//! The text goes back to the ingest thread, which writes it over the tier
+//! 0/1 text. A failure or timeout leaves the tier 0/1 text in place and
+//! records why. Pending jobs survive restarts (they are rows in the
+//! database) and are retried.
 
 use super::apps::normalize_window;
 use super::vscode::{self, ReplayEvent, ReplayInput, VsCodeReplayer};
@@ -136,8 +145,20 @@ impl Tier2Snapshotter for VsCodeSnapshots {
     }
 }
 
-/// A finished replay: the session id and its text, or why it failed.
-pub type Tier2Result = (i64, std::result::Result<String, String>);
+/// `tier2_status` of a session whose text comes from the saved file.
+pub const STATUS_SAVED_FILE: &str = "done: saved file";
+/// `tier2_status` of a session whose text comes from a replay in VS Code.
+pub const STATUS_REPLAYED: &str = "done: replayed (best effort, unverified)";
+
+/// A finished tier 2 job's text, and the status saying where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tier2Text {
+    pub text: String,
+    pub status: &'static str,
+}
+
+/// A finished job: the session id and its text, or why it failed.
+pub type Tier2Result = (i64, std::result::Result<Tier2Text, String>);
 
 /// The background worker running tier 2 replays.
 pub struct Tier2Worker {
@@ -177,8 +198,14 @@ impl Tier2Worker {
     }
 
     /// Stops the worker, killing an in-flight replay (it stays pending and
-    /// is retried on the next start).
-    pub fn stop(mut self) {
+    /// is retried on the next start). Dropping the worker does the same.
+    pub fn stop(self) {
+        drop(self);
+    }
+}
+
+impl Drop for Tier2Worker {
+    fn drop(&mut self) {
         self.jobs = None; // closes the channel
         self.kill.kill();
         if let Some(t) = self.thread.take()
@@ -244,21 +271,48 @@ fn run_job(
     log_path: &Path,
     snapshots: &Path,
     id: i64,
-) -> Result<String> {
+) -> Result<Tier2Text> {
     let conn = store::open_reader(db_path)?;
-    let (app, window, start, end, file): (String, String, i64, Option<i64>, Option<String>) = conn
+    type Row = (
+        String,
+        String,
+        i64,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+    );
+    let (app, window, start, end, file, ended_at): Row = conn
         .query_row(
-            "SELECT app, window, start_offset, end_offset, tier2_file FROM sessions
+            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at FROM sessions
              WHERE id = ?1 AND tier2_status = 'pending'",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .context("session is no longer pending")?;
     drop(conn);
-    let (Some(end), Some(file)) = (end, file) else {
-        bail!("session has no end offset or file");
+    let (Some(end), Some(file), Some(ended_at)) = (end, file, ended_at) else {
+        bail!("session has no end offset, file or end time");
     };
     let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
+    let initial_text = String::from_utf8_lossy(&initial);
+    // 1. The file as VS Code saved it after the last keystroke, if it was.
+    let last_key = crate::timefmt::parse_rfc3339_ms(&ended_at)?;
+    if let Some(saved) = saved_after(Path::new(&file), last_key) {
+        return Ok(Tier2Text {
+            text: vscode::changed_lines(&initial_text, &saved),
+            status: STATUS_SAVED_FILE,
+        });
+    }
+    // 2. Otherwise, a best-effort replay.
     let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
     let file_name = Path::new(&file)
         .file_name()
@@ -274,10 +328,27 @@ fn run_job(
         },
         timeout,
     )?;
-    Ok(vscode::changed_lines(
-        &String::from_utf8_lossy(&initial),
-        &saved,
-    ))
+    Ok(Tier2Text {
+        text: vscode::changed_lines(&initial_text, &saved),
+        status: STATUS_REPLAYED,
+    })
+}
+
+/// The content of `file` if it was written after `last_key` (so it includes
+/// every edit of the session) and is a readable text file of reasonable size.
+fn saved_after(file: &Path, last_key: Millis) -> Option<String> {
+    let meta = std::fs::metadata(file).ok()?;
+    let modified = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as Millis;
+    if !meta.is_file() || meta.len() > MAX_FILE_BYTES || modified <= last_key {
+        return None;
+    }
+    let bytes = std::fs::read(file).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// The session's own input events: everything logged for its (app, window)

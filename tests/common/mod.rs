@@ -136,14 +136,71 @@ impl Drop for VirtualKeyboard {
     }
 }
 
-/// Kills a child process on drop (also on panic).
+/// A child process that is stopped when this goes out of scope, also when
+/// the test fails partway: no test may leave a `brain run` behind. Declare it
+/// after the test's temp directory, so the process stops before its data is
+/// deleted.
 pub struct Kill(pub Child);
+
+impl Kill {
+    /// Stops the process: SIGTERM (a clean stop), then SIGKILL if it has not
+    /// exited after 10 s. Returns its exit status. Never signals a process
+    /// that has already been reaped (its pid may belong to another by then).
+    pub fn stop(&mut self) -> std::process::ExitStatus {
+        if let Ok(Some(status)) = self.0.try_wait() {
+            return status;
+        }
+        // SAFETY: SIGTERM to our own child, which try_wait says is not reaped.
+        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(Some(status)) = self.0.try_wait() {
+                return status;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.0.kill(); // SIGKILL
+        self.0.wait().expect("reaping the child")
+    }
+}
+
 impl Drop for Kill {
     fn drop(&mut self) {
-        // SAFETY: SIGTERM to our own child.
-        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };
-        let _ = self.0.wait();
+        self.stop();
     }
+}
+
+/// Starts `brain` with `args` (output discarded), guarded by [`Kill`].
+pub fn spawn_brain(args: &[&str], data: &Path) -> Kill {
+    Kill(
+        Command::new(env!("CARGO_BIN_EXE_brain"))
+            .args(args)
+            .arg("--data-dir")
+            .arg(data)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    )
+}
+
+/// Panics if any process still runs `brain` on the data directory `data`.
+pub fn assert_no_brain_on(data: &Path) {
+    let needle = data.to_string_lossy().into_owned();
+    let left: Vec<String> = std::fs::read_dir("/proc")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.parse::<u32>().is_ok())
+        })
+        .filter_map(|e| std::fs::read(e.path().join("cmdline")).ok())
+        .map(|c| String::from_utf8_lossy(&c).replace('\0', " "))
+        .filter(|c| c.contains("brain") && c.contains(&needle))
+        .collect();
+    assert!(left.is_empty(), "brain still running on {needle}: {left:?}");
 }
 
 /// Closes every process whose command line contains `needle` (Kate
@@ -193,17 +250,9 @@ pub fn kate_focused(log: &Path, file_name: &str) -> bool {
     focused(log).is_some_and(|(app, title)| app.contains("kate") && title.contains(file_name))
 }
 
-/// Starts `brain run` on `data` (stopped with SIGTERM when dropped).
+/// Starts `brain run` on `data`, guarded by [`Kill`].
 pub fn start_brain(data: &Path) -> Kill {
-    Kill(
-        Command::new(env!("CARGO_BIN_EXE_brain"))
-            .args(["run", "--data-dir"])
-            .arg(data)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap(),
-    )
+    spawn_brain(&["run"], data)
 }
 
 /// Opens `file` in a new Kate window; closed (by file name) when dropped.

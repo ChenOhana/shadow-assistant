@@ -2,8 +2,9 @@
 //! when it opens, marked pending when it closes, replayed by the worker in a
 //! real (sandboxed, headless) VS Code, and its tier 2 text written back.
 //!
-//! Needs /usr/bin/code, so it is ignored by default:
-//! `cargo test --release --test tier2_e2e -- --ignored`
+//! The replay tests need /usr/bin/code, so they are ignored by default:
+//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.
+//! The saved-file test needs no VS Code and runs with `cargo test`.
 
 use brain::event::{Event, EventKind, Mod, SystemState};
 use brain::eventlog::LogWriter;
@@ -114,7 +115,7 @@ fn vscode_session_is_upgraded_to_tier_2() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!(status, "done");
+    assert_eq!(status, "done: replayed (best effort, unverified)");
     assert_eq!(tier, 2);
     // VS Code closed the brace and indented the body; the unchanged first
     // line of the file is not part of the session's text.
@@ -270,9 +271,99 @@ fn file_outside_the_folder_is_identified_late_and_replayed() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!(status().as_deref(), Some("done"));
+    assert_eq!(
+        status().as_deref(),
+        Some("done: replayed (best effort, unverified)")
+    );
     assert_eq!(tier, 2);
     // Replayed at the end of the real file (after its final newline): the
     // session's text is the line it added.
     assert_eq!(text, "let b = 2;");
+}
+
+/// When VS Code saved the file after the session's last keystroke (autosave,
+/// or Ctrl+S at the end), the session's text comes from that saved file:
+/// exactly what VS Code made of the keys (here an autocompletion the keys
+/// alone do not show), as the lines changed from the initial content.
+/// VS Code is not started, so this runs without it.
+#[test]
+fn saved_file_gives_the_session_text_without_replay() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join("main.cpp");
+    std::fs::write(&file, "int main() {\n}\n").unwrap();
+    std::thread::sleep(Duration::from_millis(20)); // file mtime < session start
+
+    let data = tmp.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let log_path = data.join("events.jsonl");
+    let db_path = data.join("brain.db");
+    let mut log = LogWriter::open(&log_path).unwrap();
+    let title = format!("{} - project - Visual Studio Code", file.display());
+    let mut ts = now_ms();
+    // "st" + Down×4 + Enter: an autocompletion picked from VS Code's list.
+    let keys = [
+        "Up", "End", "Enter", "s", "t", "Down", "Down", "Down", "Down", "Enter",
+    ];
+    for k in keys {
+        log.append(&Event {
+            ts,
+            app: "com.microsoft.VSCode".into(),
+            kind: EventKind::Key {
+                key: k.into(),
+                mods: vec![],
+                repeat: false,
+                window: title.clone(),
+            },
+        })
+        .unwrap();
+        ts += 30;
+    }
+    log.append(&Event {
+        ts,
+        app: "unknown".into(),
+        kind: EventKind::System {
+            state: SystemState::Stop,
+        },
+    })
+    .unwrap();
+    let vscode_dir = data.join("vscode");
+    let snaps = VsCodeSnapshots::new(vscode_dir.join("snapshots")).unwrap();
+    let mut ing = Ingester::with_tier2(
+        store::open_writer(&db_path).unwrap(),
+        &log_path,
+        Some(Box::new(snaps)),
+    )
+    .unwrap();
+    ing.catch_up(10).unwrap();
+    let jobs = ing.take_tier2_jobs();
+    assert_eq!(jobs.len(), 1);
+
+    // VS Code autosaves after the last keystroke.
+    while now_ms() <= ts {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::fs::write(&file, "int main() {\n    std\n}\n").unwrap();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = Tier2Worker::spawn(db_path.clone(), log_path.clone(), vscode_dir, tx).unwrap();
+    let (id, result) = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("tier 2 result");
+    worker.stop();
+    assert_eq!(id, jobs[0]);
+    ing.add_tier2_result(id, result);
+    ing.catch_up(10).unwrap();
+    let c = Connection::open(&db_path).unwrap();
+    let (text, tier, status): (String, i64, String) = c
+        .query_row(
+            "SELECT reconstructed_text, tier_used, tier2_status FROM sessions",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(status, "done: saved file");
+    assert_eq!(tier, 2);
+    assert_eq!(text, "    std", "only the changed line");
 }

@@ -1,6 +1,8 @@
 //! `brain query` through the real binary: output shapes, search semantics,
 //! time windows, and queries running while `brain run` writes.
 
+mod common;
+
 use brain::event::{Event, EventKind, Mod};
 use brain::eventlog::LogWriter;
 use brain::ingest::Ingester;
@@ -8,7 +10,7 @@ use brain::store;
 use brain::timefmt::{Millis, format_ms, now_ms, parse_rfc3339_ms};
 use serde_json::Value;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn brain(dir: &Path, args: &[&str]) -> (i32, Value, String) {
@@ -451,13 +453,7 @@ fn errors_exit_non_zero_with_a_message() {
 fn queries_are_consistent_while_run_writes() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("data");
-    let mut run = Command::new(env!("CARGO_BIN_EXE_brain"))
-        .args(["run", "--synthetic", "200", "--data-dir"])
-        .arg(&dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut run = common::spawn_brain(&["run", "--synthetic", "200"], &dir);
     let t = Instant::now();
     while !dir.join("brain.db").exists() {
         assert!(t.elapsed() < Duration::from_secs(10));
@@ -484,9 +480,8 @@ fn queries_are_consistent_while_run_writes() {
         assert!(v["text"].is_string());
         assert_eq!(v["app"], "synthetic");
     }
-    // SAFETY: SIGTERM to our own child.
-    unsafe { libc::kill(run.id() as i32, libc::SIGTERM) };
-    assert!(run.wait().unwrap().success());
+    assert!(run.stop().success());
+    common::assert_no_brain_on(&dir);
     assert!(
         searches > 30 && hits > 0,
         "{searches} searches, {hits} hits"

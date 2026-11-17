@@ -8,7 +8,9 @@
 //! The synthetic source replaces only the evdev read, which is one `read`
 //! per key.
 
-use std::process::{Command, Stdio};
+mod common;
+
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 const KEYS_PER_SECOND: u32 = 8;
@@ -40,19 +42,8 @@ fn peak_rss_kb(pid: u32) -> u64 {
 fn cpu_and_memory_stay_within_budget_while_typing() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("data");
-    let mut run = Command::new(env!("CARGO_BIN_EXE_brain"))
-        .args([
-            "run",
-            "--synthetic",
-            &KEYS_PER_SECOND.to_string(),
-            "--data-dir",
-        ])
-        .arg(&dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let pid = run.id();
+    let mut run = common::spawn_brain(&["run", "--synthetic", &KEYS_PER_SECOND.to_string()], &dir);
+    let pid = run.0.id();
     std::thread::sleep(Duration::from_secs(2)); // past startup
 
     // SAFETY: sysconf is always safe to call.
@@ -73,9 +64,8 @@ fn cpu_and_memory_stay_within_budget_while_typing() {
     let elapsed = start.elapsed().as_secs_f64();
     let cpu = (cpu_ticks(pid) - start_ticks) as f64 / hz / elapsed * 100.0;
     let rss = peak_rss_kb(pid);
-    // SAFETY: SIGTERM to our own child.
-    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    assert!(run.wait().unwrap().success());
+    assert!(run.stop().success());
+    common::assert_no_brain_on(&dir);
 
     // The typing really went through the whole pipeline.
     let log = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();

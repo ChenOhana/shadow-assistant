@@ -97,6 +97,7 @@ fn held_keys_match_what_kate_received() {
     drop(kate);
     drop(kb);
     drop(brain); // SIGTERM: final ingest, sessions closed
+    assert_no_brain_on(&data);
 
     let conn = rusqlite::Connection::open(data.join("brain.db")).unwrap();
     let reconstructed: String = conn

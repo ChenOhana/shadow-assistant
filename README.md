@@ -246,12 +246,31 @@ Ingest (inside `brain run`, about once a second) turns the log into
   move to another field. Enter submits single-line fields and inserts a
   newline elsewhere. Editors and unknown apps keep their document across
   sessions. Single-line fields start empty each time.
-* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its
-  keystrokes are replayed into a headless VS Code with your settings, in a
-  network-less sandbox with capped CPU and memory. The session text then
-  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
-  The session stores the changed lines. If replay is impossible or fails,
-  the tier 0/1 text stays, and the `tier2_status` column says why.
+* **Tier 2** (`--vscode-replay`): when a VS Code session opens, the
+  edited file's initial content is saved. When the session closes:
+  1. if the file was saved after your last keystroke (autosave, or Ctrl+S
+     at the end), the session text is the lines it changed from the
+     initial content: exactly what VS Code made of your keys, autocomplete
+     and auto-indent included; VS Code is not started;
+  2. otherwise the keystrokes are replayed into a headless VS Code with
+     your settings, in a network-less sandbox with capped CPU and memory, as
+     a best effort: the cursor is assumed at the end of the file, your
+     extensions are not loaded (so their autocomplete is not reproduced),
+     and nothing checks the result.
+
+  Either way the session stores only the changed lines, and tier 0/1 text
+  stays if neither works. The `tier2_status` column says what happened:
+
+  | `tier2_status` | Meaning |
+  |---|---|
+  | `resolving` | looking for the edited file |
+  | `snapshot` | initial content saved, session open |
+  | `pending` | session closed, waiting for the worker |
+  | `done: saved file` | text from the file saved after the last edit (exact) |
+  | `done: replayed (best effort, unverified)` | text from a replay in VS Code |
+  | `failed: …` | the replay failed; tier 0/1 text kept |
+  | `skipped: …` | tier 2 impossible (unsaved new file, unsaved changes at the start, file not found, …) |
+
   The edited file is found from the window title: VS Code's default title
   only has the file and folder names, so `brain` looks the name up in VS
   Code's own state for that window (the editors it has open, also for files
@@ -264,9 +283,14 @@ Ingest (inside `brain run`, about once a second) turns the log into
 Inspect the result:
 
 ```sh
-sqlite3 ~/brain-data/brain.db \
-  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
+sqlite3 -readonly ~/brain-data/brain.db \
+  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, tier2_status, reconstructed_text FROM sessions"
 ```
+
+A GUI such as DB Browser for SQLite keeps a read transaction open and shows
+the database as of when it started: sessions that have closed since still
+look `open`, and SQLite cannot shrink its WAL file meanwhile. Open the
+database read-only and reopen it to see the current state.
 
 ## Decisions and edge cases
 
@@ -348,10 +372,12 @@ sqlite3 ~/brain-data/brain.db \
   content at session start, so it is skipped for unsaved new files
   (`Untitled-1`), files with unsaved changes when the session started, and
   files saved before they could be identified (within 2 minutes of the
-  session start);
-  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
-  outside brain's budget), and runs with extensions disabled when your
-  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+  session start). When the file is saved after the last edit, the session
+  text comes from it (exact). Otherwise a replay in VS Code is a best
+  effort: ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
+  outside brain's budget), the cursor assumed at the end of the file, and no
+  extensions when yours exceed 300 MB, so autocomplete from extensions is
+  not reproduced.
 
 **Queries**
 * **`query text` reconstructs "stupidly", per app window.** It takes the
@@ -404,7 +430,8 @@ cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --n
 # Drive a real (headless) VS Code:
 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
 #   (tier2_e2e includes a file opened from outside the window's folder,
-#    identified late through VS Code's window state)
+#    identified late through VS Code's window state; its saved-file test
+#    needs no VS Code and also runs with plain `cargo test`)
 ```
 
 The Kate tests need two narrow permissions, granted once by

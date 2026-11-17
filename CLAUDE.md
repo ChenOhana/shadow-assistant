@@ -102,6 +102,10 @@ tests/                   integration tests that drive the real binary;
   report exactly what was tested and what was not.
 - Tests that need VS Code are `#[ignore]`: `cargo test --release --test
   vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
+- Every `brain run` a test starts goes through `tests/common::spawn_brain`
+  (or `start_brain`): the guard stops it even when the test fails, and
+  tests end with `assert_no_brain_on(data)`. No test may leave a process or
+  a file behind.
 - `tests/repeat_e2e.rs` and `tests/real_keyboard_e2e.rs` (`#[ignore]`) type
   into real Kate windows through /dev/uinput: they need an unlocked KDE
   session, `scripts/setup-test-permissions.sh`, and nobody touching the

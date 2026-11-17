@@ -338,13 +338,20 @@ session.
   again on each ingest step while the session is open, for up to 2 minutes.
   The file is copied, unless it is an unsaved new file (`Untitled-1`), had
   unsaved changes when the session started, or changed on disk after the
-  session started (a late snapshot is therefore still the starting text). When the session closes with its tier 0/1 text, a worker replays
-  the session's own keystrokes from the log into one warm, headless VS Code
-  (Electron's headless mode, no display server) over the DevTools protocol on
-  a pipe, in its own network namespace and a CPU/memory-capped systemd scope,
-  with the user's settings and keybindings. It saves and the session's text
-  becomes the changed lines. Failures and timeouts keep the tier 0/1 text;
-  pending jobs survive restarts.
+  session started (a late snapshot is therefore still the starting text).
+  When the session closes with its tier 0/1 text, a worker works out its
+  real text. If the file on disk was written after the session's last
+  keystroke (autosave, or Ctrl+S at the end), it already holds what VS Code
+  made of the keys: the session's text is the lines it changed from the
+  snapshot (`done: saved file`, exact, VS Code not started). Otherwise the
+  worker replays the session's own keystrokes from the log into one warm,
+  headless VS Code (Electron's headless mode, no display server) over the
+  DevTools protocol on a pipe, in its own network namespace and a
+  CPU/memory-capped systemd scope, with the user's settings and keybindings,
+  saves, and takes the changed lines (`done: replayed (best effort,
+  unverified)`: cursor assumed at the end, no extensions above 300 MB, so
+  extension autocomplete is not reproduced). Failures and timeouts keep the
+  tier 0/1 text; pending jobs survive restarts.
 
 *Differs from the design*: no Xvfb (headless Electron needs no display), and
 the CDP connection is a pipe, because the network namespace makes a TCP port
