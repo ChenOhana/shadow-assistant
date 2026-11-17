@@ -1,9 +1,10 @@
 //! Timestamps: everything internal is milliseconds since the Unix epoch (UTC).
 //!
-//! On disk and in JSON output, timestamps are RFC 3339 in UTC with millisecond
+//! On disk (log and database), timestamps are RFC 3339 in UTC with millisecond
 //! precision (`2026-11-08T14:03:22.118Z`). Fixed width and UTC means the
 //! strings sort lexicographically in time order, which the SQLite schema
-//! relies on.
+//! relies on. Query output is for people and uses local time with its offset
+//! ([`format_local`]). User input is parsed by [`parse_user_time_at`].
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};

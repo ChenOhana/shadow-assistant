@@ -587,10 +587,6 @@ impl Sessions {
     pub fn into_tier2(self) -> Option<Box<dyn Tier2Snapshotter>> {
         self.tier2
     }
-
-    pub fn open_count(&self) -> usize {
-        self.open.len()
-    }
 }
 
 impl OpenSession {

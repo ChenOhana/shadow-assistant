@@ -9,7 +9,7 @@ For every session transcript (and each subagent transcript under it):
 Redaction replaces the given strings (e.g. an email address) everywhere,
 case-insensitively, in both outputs.
 
-Usage:
+Usage (from the repository root):
   python3 -I scripts/export-ai-logs.py --redact you@example.com \
       [--src ~/.claude/projects/<project>] [--out ai-logs]
 """
@@ -105,7 +105,10 @@ def render(path, title):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default=str(Path.home() / ".claude/projects/-home-juan-Documents-shadow-assistant"))
+    # Claude Code keeps a project's transcripts under a folder named after
+    # the project's path, with "/" replaced by "-".
+    default_src = Path.home() / ".claude/projects" / str(Path.cwd()).replace("/", "-")
+    ap.add_argument("--src", default=str(default_src))
     ap.add_argument("--out", default="ai-logs")
     ap.add_argument("--redact", action="append", default=[])
     args = ap.parse_args()

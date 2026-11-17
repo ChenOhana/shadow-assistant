@@ -359,6 +359,9 @@ fn resolve_app(given: &str, known: &[String]) -> Result<String> {
     hits.dedup();
     match hits.as_slice() {
         [one] => Ok((*one).clone()),
+        [] if known.is_empty() => {
+            bail!("no app matches {given:?}: no typing has been captured in any app yet")
+        }
         [] => {
             let mut all: Vec<&String> = known.iter().collect();
             all.sort();
@@ -525,6 +528,8 @@ mod tests {
             e.contains("no app matches") && e.contains("org.kde.kate"),
             "{e}"
         );
+        let e = resolve_app("kate", &[]).unwrap_err().to_string();
+        assert!(e.contains("no typing has been captured"), "{e}");
     }
 
     #[test]

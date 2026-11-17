@@ -14,10 +14,10 @@ research/architecture write-up and must stay consistent with the code.
 Ubuntu, **KDE Plasma 6 on Wayland** (KWin). Not GNOME. Keys come from evdev
 (`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon
 (`libxkbcommon.so.0`, linked by file name, so no `-dev` package is needed).
-Focus comes from a KWin script calling back over D-Bus. `/dev/uinput` is
-root-only on the dev machine: tests must not depend on it. Use
-`brain run --synthetic RATE` (hidden flag) to drive the real pipeline without
-hardware.
+Focus comes from a KWin script calling back over D-Bus. Tests that run by
+default must not need hardware, a desktop or privileges: use
+`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only
+the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 
 ## Hard requirements (from the assignment) — never regress these
 
@@ -27,15 +27,22 @@ hardware.
   (`tests/crash_safety.rs` must stay green).
 - `query` works while `run` writes and always sees a consistent state.
 - Both commands take `--data-dir` (default `./brain-data`) and exit non-zero
-  with a message on stderr on error. Query output is JSON on stdout.
+  with a message on stderr on error. Query output is JSON on stdout, with
+  times in local time (the log and database store UTC).
 
 ## Decisions already made by the owner — do not re-litigate
 
 - `brain query text` returns the **raw decoded keystroke stream** (no
   backspace/cursor editing applied) over a window: default last 10 min,
-  `--at T` = 10-min window ending at T, or `--from/--to`.
-- Sessions: keyed by (app, window); close after 30 s idle in that context or
-  on Enter in single-line contexts; focus loss alone never closes a session.
+  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
+  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
+  `text` resolves it to exactly one app and reports the full id.
+- Sessions: keyed by (app, normalized window title); close after 30 s idle
+  in that context or on Enter in single-line contexts; focus loss alone
+  never closes a session; a title change of the typed window (a `renamed`
+  focus event) shortly after a keystroke keeps the session.
+- The mouse is not captured (owner's call): cursor moves made with the mouse
+  are a documented limitation, not something to work around.
 - Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
   2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
   falling back to tier 0. Sessions, reconstruction and indexing are built
@@ -44,16 +51,17 @@ hardware.
   not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
 - Sessions and their text must stay a pure function of the log: the crash
   test compares the live index with a fresh rebuild.
-- Work proceeds in 4 stages (capture, query, reconstruction, E2E tests).
-  After each stage: build, run, test it yourself, report, then **stop and
-  wait for explicit approval** before the next stage.
+- Work went through stages (capture with sessions and indexing, query,
+  end-to-end verification), each approved by the owner. Keep the habit for
+  new work: build, run, test it yourself, report, then **stop and wait for
+  explicit approval** before starting the next piece.
 
 ## Code map
 
 ```
 src/main.rs              CLI (clap), error → stderr + exit 1
 src/capture/mod.rs       `run` orchestration: sources, ingest thread, signals
-src/capture/input.rs     poll loop over evdev devices, hotplug, EVIOCSMASK
+src/capture/input.rs     poll loop over keyboards (evdev), hotplug, EVIOCSMASK
 src/capture/keys.rs      pure key processing: xkb resolution + repeat synthesis
 src/capture/xkb.rs       libxkbcommon FFI wrapper
 src/capture/recorder.rs  stamps focus, appends to log, clipboard on paste, lock pause
@@ -67,7 +75,8 @@ src/query.rs             `query search` / `query text`, time windows, JSON outpu
 src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
                          tier2.rs + vscode/ tier 2 (VS Code replay, opt-in)
 src/event.rs, timefmt.rs event format, timestamp parsing/formatting
-tests/                   integration tests that drive the real binary
+tests/                   integration tests that drive the real binary;
+                         tests/common: uinput keyboard and KDE helpers
 ```
 
 ## Working rules
@@ -76,7 +85,6 @@ tests/                   integration tests that drive the real binary
   being built: change the log format, the schema or the CLI freely, with no
   migration, compatibility shims or legacy-format handling. Test data
   directories can be deleted and recreated.
-
 - `cargo fmt`, `cargo clippy --all-targets` (zero warnings) and `cargo test`
   before every commit. Run `cargo test --release --test crash_safety` when
   touching the log, ingest or store.
@@ -91,9 +99,11 @@ tests/                   integration tests that drive the real binary
   report exactly what was tested and what was not.
 - Tests that need VS Code are `#[ignore]`: `cargo test --release --test
   vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
-- `tests/repeat_e2e.rs` (`#[ignore]`) types into a real Kate window through
-  /dev/uinput: it needs the KDE session, `scripts/setup-test-permissions.sh`,
-  and nobody touching the keyboard or mouse while it runs.
+- `tests/repeat_e2e.rs` and `tests/real_keyboard_e2e.rs` (`#[ignore]`) type
+  into real Kate windows through /dev/uinput: they need an unlocked KDE
+  session, `scripts/setup-test-permissions.sh`, and nobody touching the
+  keyboard or mouse while they run. They only type while brain's log shows
+  the intended window focused.
 - The input loop must deliver key transitions before emitting the repeats
   due at the same time (`keys::tests::ticking_past_an_unread_release_adds_repeats`).
 - Never change desktop session state you did not set up (lock/unlock,

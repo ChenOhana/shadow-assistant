@@ -68,33 +68,6 @@ each application. Every approach below falls into one of those three groups.
 | J | **Per-app extensions** (browser extension, VS Code extension, shell `PROMPT_COMMAND`/zsh hooks) | Yes | **The real document state** (`onDidChangeTextDocument`, DOM `input` events, the executed command line) | Per-app install | Low | Highest possible, but only inside that app | Each app's extension API | One integration per app; doesn't meet "follows what they write in each application" by itself |
 | K | **xdg-desktop-portal** (GlobalShortcuts, InputCapture, RemoteDesktop/EIS) | n/a | GlobalShortcuts: only registered shortcuts. InputCapture: input only after the pointer crosses a barrier (made for Synergy-style sharing). RemoteDesktop: *sends* input | User consent dialog | — | None of them give a passive global key stream | — | Not usable, by design |
 
-**Notes on the rows that were close calls:**
-
-- **evdev (A) vs libinput (B).** Both read the same device nodes. libinput's
-  value is pointer acceleration, touchpad gestures and tablet handling, none of
-  which we need. For keys it adds nothing over `struct input_event`. Reading
-  evdev directly keeps the dependency set and the memory footprint small, and
-  gives full control over hotplug and resync.
-- **Why not grab (D).** A passive reader is *not on the input path*: the kernel
-  delivers each event to every open evdev client independently. If brain
-  stalls, the user notices nothing. A grab-and-forward proxy makes every
-  keystroke wait on brain, needs root for `/dev/uinput`, and its failure mode
-  (frozen keyboard) is the worst one possible. It only makes sense for tools
-  that *modify* input (remappers); we only observe.
-- **AT-SPI (F)** is the only system-wide source that sees real text rather than
-  keys, and it is tempting for exactly that reason. In practice, coverage
-  decides: our three target app classes (Chrome/Electron, VS Code, terminals)
-  are the weak spots. It needs browser flags and a11y forced on, and terminal
-  emulators expose little of their contents. It stays a future enhancement, as
-  a *second source* that could correct key-based reconstruction for GTK/Qt
-  apps. It would not replace evdev.
-- **Compositor hook (H)** has the best key-level fidelity, but a plugin
-  compiled against one KWin version and loaded into the user's compositor is a
-  bad trade for a home-assignment tool: an ABI mismatch or a bug takes down the
-  desktop. We take the one thing we need from the compositor (focus) through
-  its *supported* scripting interface, and copy its keymap and repeat settings
-  instead of hooking it.
-
 **Notes on the close calls:**
 
 - **evdev (A) vs libinput (B).** Both read the same device nodes. libinput's
@@ -182,8 +155,8 @@ libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)
   `org.kde.KWin /Scripting` interface. The script reports
   `workspace.windowActivated` (`renamed = false`) and the active window's
   `captionChanged` (`renamed = true`), and the current window right away.
-  Focus events in the log carry `"renamed": true` for title changes. Calls from anyone but KWin's bus name are
-  ignored.
+  Focus events in the log carry `"renamed": true` for title changes. Calls
+  from anyone but KWin's bus name are ignored.
 - The app id is the window's desktop file name (`org.kde.kate`,
   `google-chrome`, `com.microsoft.VSCode`), falling back to the X11
   resource class. Every key is stamped with the current app and window
@@ -217,12 +190,14 @@ window title:
 {"ts":"2026-11-16T11:37:56.937Z","app":"org.kde.kate","type":"key","key":"H","mods":["shift"],"window":"notes.md — Kate"}
 {"ts":"2026-11-16T11:37:57.132Z","app":"org.kde.kate","type":"key","key":"Backspace","mods":[],"repeat":true,"window":"notes.md — Kate"}
 {"ts":"2026-11-16T11:38:00.003Z","app":"google-chrome","type":"focus","window":"New tab - Google Chrome"}
+{"ts":"2026-11-16T11:38:01.120Z","app":"google-chrome","type":"focus","window":"brain - Google Search - Google Chrome","renamed":true}
 {"ts":"2026-11-16T11:38:02.410Z","app":"google-chrome","type":"paste","text":"pasted words","window":"New tab - Google Chrome"}
 {"ts":"2026-11-16T11:36:48.298Z","app":"org.kde.kate","type":"system","state":"sleep"}
 ```
 
-Types: `key` (with `repeat: true` for synthesized repeats), `focus` (window
-activated or its title changed), `paste`, and `system` (`start`, `stop`,
+Types: `key` (with `repeat: true` for synthesized repeats), `focus` (a
+window activated, or with `renamed: true` the active window's title
+changed), `paste`, and `system` (`start`, `stop`,
 `sleep`, `wake`, `lock`, `unlock`). Timestamps are RFC 3339 UTC with
 milliseconds: fixed width, so they sort as strings.
 

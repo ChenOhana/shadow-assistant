@@ -23,7 +23,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Capture keystrokes and focus changes until stopped (Ctrl+C / SIGTERM).
+    /// Capture keystrokes and focus changes, group them into writing sessions
+    /// with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM).
     Run {
         /// Test hook: type a built-in corpus at RATE keys/s instead of reading
         /// input devices (no root or desktop needed).
@@ -35,7 +36,8 @@ enum Command {
         #[arg(long)]
         vscode_replay: bool,
     },
-    /// Query what has been captured. Safe to run while `brain run` is running.
+    /// Query what has been captured; prints JSON, with times in local time.
+    /// Safe to run while `brain run` is running.
     Query {
         #[command(subcommand)]
         query: Query,
@@ -94,7 +96,9 @@ enum Query {
     /// 10 minutes ending at T.
     #[command(after_help = TIME_HELP)]
     Text {
-        /// Apps whose id contains A (case-insensitive), e.g. chrome.
+        /// The app: its full id or a part of it, case-insensitive (e.g. kate
+        /// for org.kde.kate). It must match exactly one app; the output names
+        /// it in full.
         #[arg(long, value_name = "A")]
         app: String,
         #[command(flatten)]

@@ -1,10 +1,11 @@
 //! `brain run`: capture → log → ingest, until SIGINT/SIGTERM.
 //!
 //! Threads:
-//! * **input**: one `poll` loop over all input devices (the hot path, see [`input`]).
+//! * **input**: one `poll` loop over all keyboards (the hot path, see [`input`]).
 //! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.
 //! * **D-Bus**: zbus's connection executors plus one small thread per watched
 //!   signal (focus calls from KWin, lock, sleep, layout).
+//! * **tier2** (only with `--vscode-replay`): VS Code replays, one at a time.
 //! * **main**: waits for a termination signal, then shuts down in order.
 
 pub mod desktop;

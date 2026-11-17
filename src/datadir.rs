@@ -7,6 +7,7 @@
 //!   brain.db-wal/-shm    SQLite WAL files
 //!   run.lock             flock'd by the one `brain run` using this directory
 //!   kwin/                generated KWin focus-tracking script
+//!   vscode/              VS Code replay sandbox and snapshots (--vscode-replay)
 //! ```
 
 use anyhow::{Context, Result, bail};

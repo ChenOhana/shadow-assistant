@@ -157,10 +157,6 @@ impl Recorder {
         }
     }
 
-    pub fn is_paused(&self) -> bool {
-        self.lock().paused
-    }
-
     pub fn system(&self, state: SystemState) {
         let mut g = self.lock();
         let app = g.focus.app.clone();

@@ -2,7 +2,8 @@
 //!
 //! Pipeline: [`capture`] (keystrokes + focus → append-only [`eventlog`]) →
 //! [`ingest`] (log → [`sessions`] with [`reconstruct`]ed text → SQLite
-//! [`store`] with full-text index) → query.
+//! [`store`] with full-text index) → [`query`] (`search` over sessions, `text`
+//! over the log).
 
 pub mod capture;
 pub mod datadir;

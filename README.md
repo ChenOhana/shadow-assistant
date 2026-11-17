@@ -15,8 +15,9 @@ brain query text --app A       # the raw typed stream of an app
 ## Supported OS
 
 Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
-works on any Linux. Focus tracking needs KWin (Wayland or X11). On other
-desktops, keys are recorded under the app `unknown`.
+works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
+desktops, keys are recorded under the app `unknown`. The optional VS Code
+replay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).
 
 ## Build
 
@@ -56,6 +57,9 @@ target/release/brain run --data-dir ~/brain-data
 start repairs a torn last line, if there is one, and resumes ingest exactly
 where it stopped.
 
+Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
+invisible copy of VS Code (tier 2, below). It is off by default.
+
 ### As a service
 
 `brain` can run as a **systemd user service**: it starts with your Plasma
@@ -70,10 +74,9 @@ make uninstall-service        # remove it
 ```
 
 The service uses `~/brain-data`. Stop it before running `brain run` by hand
-on the same directory (only one `brain run` per data directory).
-
-Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
-invisible copy of VS Code (tier 2, below). It is off by default.
+on the same directory (only one `brain run` per data directory). The
+service runs without `--vscode-replay`; add it to `ExecStart` in
+`~/.config/systemd/user/brain.service` to turn it on.
 
 Data directory (mode 0700):
 
@@ -90,7 +93,17 @@ Example log lines:
 ```json
 {"ts":"2026-11-15T17:20:01.112Z","app":"org.kde.konsole","type":"focus","window":"~ : bash — Konsole"}
 {"ts":"2026-11-15T17:20:02.348Z","app":"org.kde.konsole","type":"key","key":"H","mods":["shift"],"window":"~ : bash — Konsole"}
+{"ts":"2026-11-15T17:20:03.020Z","app":"org.kde.konsole","type":"key","key":"Backspace","mods":[],"repeat":true,"window":"~ : bash — Konsole"}
+{"ts":"2026-11-15T17:20:05.400Z","app":"google-chrome","type":"paste","text":"pasted words","window":"New tab - Google Chrome"}
+{"ts":"2026-11-15T17:20:07.801Z","app":"com.microsoft.VSCode","type":"focus","window":"● notes • Untitled-1 - proj - Visual Studio Code","renamed":true}
+{"ts":"2026-11-15T17:21:00.000Z","app":"com.microsoft.VSCode","type":"system","state":"lock"}
 ```
+
+Every line has a time (UTC), the app and a type: `key` (`repeat: true` for
+key repeats), `focus` (a window activated, or with `renamed: true` the
+active window's title changed), `paste` (the clipboard text at a paste
+shortcut) and `system` (`start`, `stop`, `sleep`, `wake`, `lock`,
+`unlock`).
 
 ## Query
 
@@ -176,13 +189,14 @@ Ingest (inside `brain run`, about once a second) turns the log into
   after its first line, a mail window after its subject), the session
   continues: a change of the *same* window's title (KWin tells a title
   change from a window activation) within 1 s of a keystroke in it, with no
-  shortcut in between, is treated as a rename. It closes after **30 s without
-  typing in that window**, or right away when a single-line field is
-  submitted (Enter at a shell prompt, in a chat box or a browser's address
-  bar), cancelled (Ctrl+C at a prompt), or left for another field of the
-  same window (Tab, Ctrl+L in a browser). Switching to another app and back
-  within 30 s continues the same session. Stopping or restarting `brain run`
-  closes all sessions.
+  shortcut in between, is treated as a rename.
+* A session closes after **30 s without typing in that window**, or right
+  away when a single-line field is submitted (Enter at a shell prompt, in a
+  chat box, a browser's address bar or a launcher such as KRunner),
+  cancelled (Ctrl+C at a prompt), or left for another field of the same
+  window (Tab, Ctrl+L in a browser). Switching to another app and back
+  within 30 s continues the same session. Stopping or restarting
+  `brain run` closes all sessions.
 * While a session is open, its text so far is already in the index, so a
   search finds what you are typing right now.
 * **Tier 0**: keys are replayed into a virtual text field with a cursor,
@@ -253,11 +267,6 @@ sqlite3 ~/brain-data/brain.db \
   log offset, so a crash never duplicates or skips anything. Deleting
   `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
   SQLite.
-* **`query text` assumes the log is in time order.** It starts reading at
-  the last checkpoint before its window and stops 60 s of log after it. If
-  the system clock is stepped backwards while capturing (an NTP correction,
-  a manual change), keys typed after the step whose times fall in a queried
-  window can be missed. PLAN.md (section 10) describes an exact bound.
 * **No backward compatibility yet.** This is the first version: a database
   with another schema version is refused (delete it to rebuild).
 
@@ -271,8 +280,8 @@ sqlite3 ~/brain-data/brain.db \
 * **30 s idle per window; focus loss alone never ends a session.** Enter
   ends a session only in single-line fields (shell prompts, chat boxes,
   browser address/search bars, launchers such as KRunner, by app class);
-  elsewhere it is a newline.
-  In browsers, Shift+Enter is a newline.
+  elsewhere it is a newline. In browsers and chat apps, Shift+Enter is a
+  newline.
 * **Single-line fields start each session empty**; editors keep their
   document across sessions. Window titles of single-line fields are
   reused by unrelated fields ("New tab", "~"), so carrying text over would
@@ -289,6 +298,13 @@ sqlite3 ~/brain-data/brain.db \
   autosuggestions (zsh) are not visible, so those lines can be wrong.
 * **Sessions that changed nothing leave no row** (cursor movement only, a
   typo typed and deleted, whitespace).
+* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
+  content at session start (snapshot within 10 s, no unsaved changes),
+  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
+  outside brain's budget), and runs with extensions disabled when your
+  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+
+**Queries**
 * **`query text` is the raw stream, `search` the edited text.** As the
   owner decided, `text` returns exactly what was typed (with `<Backspace>`
   and other keys visible) rather than reconstructed text; reconstructed,
@@ -298,12 +314,19 @@ sqlite3 ~/brain-data/brain.db \
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
   finds "Café"). This replaces the design's English-only porter stemmer,
   which cannot find Hebrew words with attached prefixes. Query words
-  shorter than 3 characters cannot use the trigram index.
-* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
-  content at session start (snapshot within 10 s, no unsaved changes),
-  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
-  outside brain's budget), and runs with extensions disabled when your
-  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+  shorter than 3 characters cannot use the trigram index and are matched
+  with a slower scan.
+* **Times in, times out are local.** `--from`, `--to` and `--at` accept
+  relative times (`-2h`), local dates and times, and RFC 3339; output times
+  are local with their offset. The log and the database store UTC.
+* **`--app` takes part of the id.** `search` keeps every matching app;
+  `text` must resolve to exactly one app and reports its full id, so two
+  apps' keystrokes are never mixed into one stream.
+* **`query text` assumes the log is in time order.** It starts reading at
+  the last checkpoint before its window and stops 60 s of log after it. If
+  the system clock is stepped backwards while capturing (an NTP correction,
+  a manual change), keys typed after the step whose times fall in a queried
+  window can be missed. PLAN.md (section 10) describes an exact bound.
 
 **Running**
 * **Service as you, not root**: a systemd user service, because desktop
@@ -353,8 +376,8 @@ caught. Transcripts are in `ai-logs/`.
    pushed.
 3. **A background agent's PLAN.md described things that were never
    built** (a "durable offset", timerfds, text session ids, an in-memory
-   index for open sessions). It was kept out of the repo until it can be
-   rewritten against the code.
+   index for open sessions). It was kept out of the repo and, once the code
+   was done, rewritten against it.
 4. **Unlocking the owner's screen.** To test lock handling it ran
    `loginctl lock-session` and `unlock-session` without first checking the
    screen state. The screen was already locked (the owner was away), so it
