@@ -4,6 +4,7 @@
 //! read is the only part replaced), so it runs unattended and without root.
 
 use brain::eventlog::LogReader;
+use brain::ingest::CHECKPOINT_INTERVAL_MS;
 use rusqlite::Connection;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -109,12 +110,36 @@ fn kill_dash_nine_never_corrupts() {
         events.len()
     );
 
-    // Ingest covered the whole log.
+    // Ingest covered the whole log...
     let c = Connection::open(&db).unwrap();
     let off: i64 = c
         .query_row("SELECT log_offset FROM ingest_state", [], |r| r.get(0))
         .unwrap();
     assert_eq!(off as u64, log_len);
+
+    // ...and its checkpoints are exactly what one uninterrupted pass over the
+    // log produces: across 25 kills, nothing was skipped or applied twice.
+    let mut expected: Vec<(String, i64)> = Vec::new();
+    let mut last: Option<i64> = None;
+    for (offset, ev) in &events {
+        if last.is_none_or(|prev| (ev.ts - prev).abs() >= CHECKPOINT_INTERVAL_MS) {
+            let ts = brain::timefmt::format_ms(ev.ts);
+            // PRIMARY KEY (ts): a same-millisecond duplicate is ignored.
+            if !expected.iter().any(|(t, _)| *t == ts) {
+                expected.push((ts, *offset as i64));
+            }
+            last = Some(ev.ts);
+        }
+    }
+    let mut stmt = c
+        .prepare("SELECT ts, byte_offset FROM log_checkpoints ORDER BY byte_offset")
+        .unwrap();
+    let actual: Vec<(String, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(actual, expected);
 
     // Sessions and documents are a pure function of the log: rebuilding the
     // index from the log alone gives exactly the rows the crashing runs built.

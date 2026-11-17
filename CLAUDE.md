@@ -32,12 +32,9 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 
 ## Decisions already made by the owner — do not re-litigate
 
-- `brain query text` returns the app's **reconstructed** text as it stood
-  at the end of the window (sessions still running are replayed to that
-  moment with `sessions::text_at`; editors show each document's latest
-  state). It replaced the earlier raw-keystroke output at the owner's
-  request. Window: default last 10 min, `--at T` = 10-min window ending at
-  T, or `--from/--to`. Times accept
+- `brain query text` returns the **raw decoded keystroke stream** (no
+  backspace/cursor editing applied) over a window: default last 10 min,
+  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
   relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
   `text` resolves it to exactly one app and reports the full id.
 - Sessions: keyed by (app, normalized window title); close after 30 s idle

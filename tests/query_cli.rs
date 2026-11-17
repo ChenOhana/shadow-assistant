@@ -141,10 +141,6 @@ fn fixture() -> Fixture {
         "Enter",
         &[],
     );
-    // Session 5 (+117 min): "alpha", then " beta" 10 s later, same session.
-    let t4 = t0 + 117 * 60_000;
-    let t = typ(&mut w, t4, "org.example.notes", "draft", "alpha");
-    typ(&mut w, t + 10_000, "org.example.notes", "draft", " beta");
     drop(w);
     let log = dir.join("events.jsonl");
 
@@ -232,55 +228,34 @@ fn search_time_windows() {
 }
 
 #[test]
-fn text_is_reconstructed() {
+fn text_is_the_raw_stream() {
     let f = fixture();
     let d = &f.dir;
-    // Session 1's time, absolute bounds: the edited text, not the keys
-    // ("secret" was typed and deleted), and the full app id.
+    // Session 1's window, absolute bounds: raw keys, no editing applied.
     let from = format_ms(f.t0);
     let to = format_ms(f.t0 + 5 * 60_000);
     let (code, v, _) = brain(d, &["text", "--app", "kate", "--from", &from, "--to", &to]);
     assert_eq!(code, 0);
-    assert_eq!(v["text"], "the cat sat");
+    assert_eq!(
+        v["text"],
+        format!("the cat sat secret{}", "<Backspace>".repeat(7))
+    );
+    // The full app id, not the part that was given.
     assert_eq!(v["app"], "org.kde.kate");
     assert_eq!(v["at"], Value::Null);
     assert_local(&v["from"]);
-    let s = &v["sessions"][0];
-    assert_eq!(
-        (s["session_id"].as_str(), s["window"].as_str()),
-        (Some("1"), Some("notes.md — Kate"))
-    );
-    assert_local(&s["started_at"]);
-    assert_local(&s["ended_at"]);
-    // Over both Kate sessions: the document as it stood at the end (session 2
-    // deleted "cat" and added Hebrew), not both copies.
-    let (_, v, _) = brain(d, &["text", "--app", "kate", "--from", "-3h"]);
-    assert_eq!(v["text"], "the  sat גרתי בבית");
-    assert_eq!(v["sessions"].as_array().unwrap().len(), 1);
-    // --at: the 10 minutes ending at T.
+    // --at: the 10 minutes ending at T; only that app's keys.
     let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
     let (_, v, _) = brain(d, &["text", "--app", "konsole", "--at", &at]);
-    assert_eq!(v["text"], "git status");
+    assert_eq!(v["text"], "git status\n");
     assert_eq!(v["app"], "org.kde.konsole");
     assert_eq!(instant(&v["at"]), parse_rfc3339_ms(&at).unwrap());
     assert_local(&v["at"]);
-    // --at in the middle of a session: its text at that moment, replayed
-    // from the log ("alpha" typed by then, " beta" 10 s later).
-    let at = format_ms(f.t0 + 117 * 60_000 + 3_000);
-    let (_, v, _) = brain(d, &["text", "--app", "notes", "--at", &at]);
-    assert_eq!(v["text"], "alpha");
-    assert_eq!(
-        v["sessions"][0]["ended_at"],
-        Value::Null,
-        "still running at T"
-    );
-    let (_, v, _) = brain(d, &["text", "--app", "notes"]);
-    assert_eq!(v["text"], "alpha beta");
-    // Default: the last 10 minutes; pasted text is part of the session.
+    // Default: the last 10 minutes, with shortcuts named and pastes inline.
     let (_, v, _) = brain(d, &["text", "--app", "chrome"]);
-    assert_eq!(v["text"], "pasted words");
+    assert_eq!(v["text"], "<Ctrl+V>pasted words\n");
     assert_eq!(v["app"], "google-chrome");
-    // A known app with nothing in the window: empty text, full id.
+    // A known app with nothing typed in the window: empty text, full id.
     let (code, v, _) = brain(d, &["text", "--app", "konsole", "--at", "-1m"]);
     assert_eq!((code, v["text"].as_str()), (0, Some("")));
     assert_eq!(v["app"], "org.kde.konsole");

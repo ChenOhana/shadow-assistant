@@ -32,11 +32,9 @@
 //! session before the next event arrives ([`Sessions::close_idle`] waits a
 //! grace period past the timeout, so the event-time rule would close it the
 //! same way), and the VS Code file snapshot (tier 2, an additive upgrade).
-//! Each session row keeps the document it started from, so any session can
-//! be replayed from the log to any point: after a crash, open sessions are
-//! rebuilt that way ([`Sessions::recover`]), and `query text` uses it to know
-//! a session's text at a given time ([`text_at`]). A rebuild from the log
-//! produces the same rows as an uninterrupted run.
+//! After a crash, open sessions are rebuilt by replaying their events from
+//! the log ([`Sessions::recover`]), so a rebuild from the log produces the
+//! same rows as an uninterrupted run.
 
 use crate::event::{Event, EventKind, SystemState};
 use crate::eventlog::LogReader;
@@ -128,28 +126,12 @@ pub struct Sessions {
 
 impl Sessions {
     /// Rebuilds the open sessions from the database and the log: each open
-    /// session starts from the document stored in its row and its events
+    /// session's document is restored from `context_state` and its events
     /// (from `start_offset` up to `upto`, the ingested offset) are replayed.
     pub fn recover(
         conn: &Connection,
         log_path: &Path,
         upto: u64,
-        tier2: Option<Box<dyn Tier2Snapshotter>>,
-    ) -> Result<Self> {
-        let replays = load_replays(conn, "status = 'open'", [])?;
-        Self::replay(conn, log_path, replays, upto, None, tier2)
-    }
-
-    /// Replays the given sessions from their start up to log offset `upto`,
-    /// ignoring events later than `until` if given, with the same rules as
-    /// live ingest (without opening or closing sessions). Used by crash
-    /// recovery and to know a session's text at a point in time.
-    fn replay(
-        conn: &Connection,
-        log_path: &Path,
-        replays: Vec<Replay>,
-        upto: u64,
-        until: Option<Millis>,
         tier2: Option<Box<dyn Tier2Snapshotter>>,
     ) -> Result<Self> {
         let mut s = Self {
@@ -162,19 +144,41 @@ impl Sessions {
             staged_discards: Vec::new(),
             wrote: false,
         };
+        let mut stmt = conn.prepare(
+            "SELECT id, app, window, started_at, start_offset, tier2_status
+             FROM sessions WHERE status = 'open' ORDER BY start_offset",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
         let mut starts: HashMap<Key, u64> = HashMap::new();
-        for r in replays {
-            starts.insert(r.key.clone(), r.start_offset);
+        for (id, app, window, started_at, start_offset, tier2) in rows {
+            let started = timefmt::parse_rfc3339_ms(&started_at)
+                .with_context(|| format!("session {id}: bad started_at"))?;
+            let buf = load_context(conn, &app, &window, started, false)?;
+            let start_hash = text_hash(&buf.text());
+            let key = (app.clone(), window);
+            starts.insert(key.clone(), start_offset as u64);
             s.open.insert(
-                r.key.clone(),
+                key,
                 OpenSession {
-                    id: r.id,
-                    start_hash: text_hash(&r.buf.text()),
-                    editor: FieldEditor::new(classify(&r.key.0), r.buf),
-                    last_activity: r.started,
-                    end_offset: r.start_offset,
-                    tier2_snapshot: r.tier2_snapshot,
+                    id,
+                    editor: FieldEditor::new(classify(&app), buf),
+                    last_activity: started,
+                    end_offset: start_offset as u64,
+                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
                     dirty: false,
+                    start_hash,
                     latest: None,
                 },
             );
@@ -189,9 +193,6 @@ impl Sessions {
             }
             let next = reader.offset();
             let Some(ev) = line.event else { continue };
-            if until.is_some_and(|u| ev.ts > u) {
-                continue;
-            }
             let in_session = |k: &Key| starts.get(k).is_some_and(|&st| line.offset >= st);
             s.replay_event(conn, &ev, line.offset, next, &in_session)?;
         }
@@ -413,13 +414,12 @@ impl Sessions {
         if self.open.contains_key(k) {
             return Ok(());
         }
-        let buf = load_context(tx, &k.0, &k.1, ts)?;
+        let buf = load_context(tx, &k.0, &k.1, ts, true)?;
         let start_hash = text_hash(&buf.text());
         tx.prepare_cached(
             "INSERT INTO sessions (app, window, started_at, status, tier_used,
-                                   reconstructed_text, start_offset,
-                                   start_text, start_cursor, start_anchor)
-             VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?6, ?5, ?7, ?8)",
+                                   reconstructed_text, start_offset)
+             VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?6)",
         )?
         .execute(params![
             k.0,
@@ -427,9 +427,7 @@ impl Sessions {
             timefmt::format_ms(ts),
             class.tier(),
             buf.text(),
-            offset as i64,
-            buf.cursor() as i64,
-            buf.anchor().map(|a| a as i64)
+            offset as i64
         ])?;
         let id = tx.last_insert_rowid();
         let mut tier2_snapshot = false;
@@ -600,102 +598,18 @@ impl OpenSession {
     }
 }
 
-/// The text of session `id` as it stood at `until`: the stored text if the
-/// session had ended by then, otherwise its events replayed from its start
-/// up to `until`, with the same rules as live ingest.
-pub fn text_at(conn: &Connection, log_path: &Path, id: i64, until: Millis) -> Result<String> {
-    let (stored, ended_at, end_offset): (Option<String>, Option<String>, Option<i64>) = conn
-        .query_row(
-            "SELECT reconstructed_text, ended_at, end_offset FROM sessions WHERE id = ?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .with_context(|| format!("session {id}"))?;
-    let ended = ended_at
-        .as_deref()
-        .map(timefmt::parse_rfc3339_ms)
-        .transpose()?;
-    if ended.is_some_and(|e| e <= until) {
-        return Ok(stored.unwrap_or_default());
-    }
-    let replays = load_replays(conn, "id = ?1", [id])?;
-    let Some(key) = replays.first().map(|r| r.key.clone()) else {
-        return Ok(String::new());
-    };
-    // A closed session's events end at its end offset; an open one's at what
-    // has been ingested so far.
-    let upto = match end_offset {
-        Some(e) => e as u64,
-        None => crate::store::ingest_offset(conn)?,
-    };
-    let s = Sessions::replay(conn, log_path, replays, upto, Some(until), None)?;
-    Ok(s.open
-        .get(&key)
-        .map(|o| o.editor.buf.text())
-        .unwrap_or_default())
-}
-
-/// A session to replay: its row and the document it started from.
-struct Replay {
-    id: i64,
-    key: Key,
-    started: Millis,
-    start_offset: u64,
-    buf: TextBuffer,
-    tier2_snapshot: bool,
-}
-
-fn load_replays(
+/// Loads the modelled document of a context as of `ts`. A document not
+/// touched for [`CONTEXT_TTL_MS`] is forgotten. After a restart of `brain run`
+/// (cursor unknown: the user may have typed meanwhile) the cursor goes to the
+/// end; with `write_back` that resolution is saved, so recovery later loads
+/// exactly what this session started from.
+fn load_context(
     conn: &Connection,
-    filter: &str,
-    params: impl rusqlite::Params,
-) -> Result<Vec<Replay>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT id, app, window, started_at, start_offset, tier2_status,
-                start_text, start_cursor, start_anchor
-         FROM sessions WHERE {filter} ORDER BY start_offset"
-    ))?;
-    let rows = stmt
-        .query_map(params, |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, i64>(4)?,
-                r.get::<_, Option<String>>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, i64>(7)?,
-                r.get::<_, Option<i64>>(8)?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    rows.into_iter()
-        .map(
-            |(id, app, window, started_at, start_offset, tier2, text, cursor, anchor)| {
-                Ok(Replay {
-                    id,
-                    key: (app, window),
-                    started: timefmt::parse_rfc3339_ms(&started_at)
-                        .with_context(|| format!("session {id}: bad started_at"))?,
-                    start_offset: start_offset as u64,
-                    buf: TextBuffer::from_state(
-                        &text,
-                        cursor.max(0) as usize,
-                        anchor.map(|a| a.max(0) as usize),
-                    ),
-                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
-                })
-            },
-        )
-        .collect()
-}
-
-/// Loads the modelled document of a context as of `ts`, for a session that
-/// opens. A document not touched for [`CONTEXT_TTL_MS`] is forgotten. After a
-/// restart of `brain run` (cursor unknown: the user may have typed meanwhile)
-/// the cursor goes to the end.
-fn load_context(conn: &Connection, app: &str, window: &str, ts: Millis) -> Result<TextBuffer> {
+    app: &str,
+    window: &str,
+    ts: Millis,
+    write_back: bool,
+) -> Result<TextBuffer> {
     let row = conn
         .prepare_cached(
             "SELECT text, cursor, anchor, cursor_unknown, updated_at
@@ -725,6 +639,13 @@ fn load_context(conn: &Connection, app: &str, window: &str, ts: Millis) -> Resul
     );
     if unknown {
         buf.cursor_unknown();
+        if write_back {
+            conn.prepare_cached(
+                "UPDATE context_state SET cursor = ?1, anchor = NULL, cursor_unknown = 0
+                 WHERE app = ?2 AND window = ?3",
+            )?
+            .execute(params![buf.cursor() as i64, app, window])?;
+        }
     }
     Ok(buf)
 }
@@ -1039,36 +960,6 @@ mod tests {
         let mut ing = l.ingester("b.db");
         run(&mut ing, clock_late);
         assert_eq!(texts(ing.connection()), vec!["one", "two", "three"]);
-    }
-
-    #[test]
-    fn text_at_a_point_in_time() {
-        let mut l = Log::new();
-        let t = l.typ(T0, "notes", "n", "alpha");
-        let t2 = l.typ(t + 10_000, "notes", "n", " beta");
-        // A second session on the same document, after the idle timeout.
-        l.typ(t2 + 40_000, "notes", "n", "!");
-        // A session that is still open at the end.
-        l.typ(t2 + 120_000, "chat", "c", "typing now");
-        let mut ing = l.ingester("b.db");
-        run(&mut ing, clock_t0);
-        let c = ing.connection();
-        let log = l.log_path();
-        let at = |id, ts| super::text_at(c, &log, id, ts).unwrap();
-        assert_eq!(
-            at(1, T0 + 2_000),
-            "alpha",
-            "mid-session: only what was typed by then"
-        );
-        assert_eq!(at(1, t + 10_100), "alpha b");
-        assert_eq!(at(1, t2 + 5_000), "alpha beta", "ended: the stored text");
-        // The second session starts from the document the first one left.
-        assert_eq!(at(2, t2 + 39_000), "alpha beta");
-        assert_eq!(at(2, t2 + 41_000), "alpha beta!");
-        // An open session is replayed from the log up to the time asked.
-        assert_eq!(at(3, t2 + 120_000 + 350), "typi");
-        assert_eq!(at(3, t2 + 200_000), "typing now");
-        assert_eq!(sessions(c)[2].2, "open");
     }
 
     #[test]

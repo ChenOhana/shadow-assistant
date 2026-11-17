@@ -90,10 +90,10 @@ enum Query {
         #[arg(long, value_name = "N", default_value_t = 20)]
         limit: usize,
     },
-    /// The reconstructed text of one app as it stood at the end of the
-    /// window: each session active in it, at that moment (in editors, the
-    /// latest state of each document). Without time flags it covers the last
-    /// 10 minutes; --to alone means the 10 minutes ending at T.
+    /// The raw typed stream of an app (no editing applied): characters as
+    /// typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>...
+    /// Without time flags it covers the last 10 minutes; --to alone means the
+    /// 10 minutes ending at T.
     #[command(after_help = TIME_HELP)]
     Text {
         /// The app: its full id or a part of it, case-insensitive (e.g. kate

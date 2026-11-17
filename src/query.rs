@@ -1,14 +1,13 @@
 //! `brain query`: `search` over sessions and `text` over the raw log.
 //!
-//! Both run while `brain run` writes, on a read-only connection that sees one
-//! consistent snapshot of the index (WAL). `search` matches session text;
-//! `text` returns an app's reconstructed text as it stood at the end of a
-//! window, replaying sessions still running then from the log
-//! ([`crate::sessions::text_at`]).
+//! Both run while `brain run` writes. `search` is a single SELECT on a
+//! read-only connection, so it sees one consistent snapshot of the index
+//! (WAL). `text` reads the capture log, whose reader only returns complete
+//! lines, starting at the checkpoint just before its window.
 
 use crate::datadir::DataDir;
-use crate::reconstruct::apps::classify;
-use crate::sessions;
+use crate::event::{EventKind, Mod};
+use crate::eventlog::LogReader;
 use crate::store;
 use crate::timefmt::{self, Millis};
 use anyhow::{Result, bail};
@@ -18,6 +17,9 @@ use serde::Serialize;
 pub const DEFAULT_WINDOW_MS: Millis = 10 * 60 * 1000;
 /// Snippet context on each side of the first match, in characters.
 const SNIPPET_CONTEXT: usize = 40;
+/// `text` keeps reading this far past its window, in case the clock stepped
+/// back while writing the log (timestamps are almost, not strictly, ordered).
+const CLOCK_SLACK_MS: Millis = 60_000;
 
 /// The `--at`, `--from` and `--to` flags, as given (see [`timefmt::parse_user_time_at`]).
 #[derive(Debug, Clone, Default)]
@@ -275,77 +277,60 @@ fn find(hay: &[char], needle: &[char]) -> Option<usize> {
 
 // ---- text -----------------------------------------------------------------
 
-/// One session's part of `text`.
-#[derive(Debug, Serialize)]
-pub struct TextSession {
-    pub session_id: String,
-    pub window: String,
-    pub started_at: String,
-    /// `None` if the session was still open at the end of the window.
-    pub ended_at: Option<String>,
-    pub text: String,
-}
-
 #[derive(Debug, Serialize)]
 pub struct TextOutput {
     pub app: String,
     pub at: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    /// The sessions' texts, in order, one per line.
     pub text: String,
-    pub sessions: Vec<TextSession>,
 }
 
-/// The reconstructed text of one app as it stood at the end of the window:
-/// every session of the app active in the window, each as it was at that
-/// moment (a session still running is replayed up to it). In editors and
-/// other multi-line apps a later session continues the previous one's
-/// document, so only the latest session per window is kept; single-line
-/// fields (commands, searches, messages) are all kept. `app` may be part of
-/// the app id; see [`resolve_app`].
+/// The raw typed stream of one app over the window: every key as captured,
+/// with no editing applied (see [`render_key`]), and pasted text inline.
+/// `app` may be part of the app id; see [`resolve_app`].
 pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
     let w = resolve(flags, Command::Text, now)?;
     let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));
     let conn = store::open_reader(&dir.db_path())?;
-    let known: Vec<String> = conn
+    let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;
+    let needle = app.to_lowercase();
+    let mut known: Vec<String> = conn
         .prepare("SELECT DISTINCT app FROM sessions")?
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let full = resolve_app(app, &known)?;
-    // Sessions overlapping the window (open ones "end" now).
-    let rows: Vec<(i64, String, String, Option<String>)> = conn
-        .prepare(
-            "SELECT id, window, started_at, ended_at FROM sessions
-             WHERE app = ?1 AND started_at <= ?2 AND COALESCE(ended_at, ?3) >= ?4
-             ORDER BY started_at, id",
-        )?
-        .query_map(
-            rusqlite::params![
-                full,
-                timefmt::format_ms(to),
-                timefmt::format_ms(now),
-                timefmt::format_ms(from)
-            ],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?
-        .collect::<rusqlite::Result<_>>()?;
-    let mut parts: Vec<TextSession> = Vec::new();
-    for (id, window, started_at, ended_at) in rows {
-        let text = sessions::text_at(&conn, &dir.log_path(), id, to)?;
-        let ended = ended_at.filter(|e| timefmt::parse_rfc3339_ms(e).is_ok_and(|e| e <= to));
-        if !classify(&full).single_line() {
-            // The document's latest state supersedes its earlier sessions.
-            parts.retain(|p| p.window != window);
+    drop(conn);
+    // Events of every app matching `app` in the window, in log order; the
+    // app is resolved once the window's apps are known too.
+    let mut matching: Vec<(String, EventKind)> = Vec::new();
+    if dir.log_path().exists() {
+        let mut reader = LogReader::open(&dir.log_path(), start)?;
+        while let Some(line) = reader.next_line()? {
+            let Some(ev) = line.event else { continue };
+            if ev.ts > to.saturating_add(CLOCK_SLACK_MS) {
+                break;
+            }
+            let typed = matches!(ev.kind, EventKind::Key { .. } | EventKind::Paste { .. });
+            if typed && ev.ts >= from && ev.ts <= to && ev.app.to_lowercase().contains(&needle) {
+                if !known.contains(&ev.app) {
+                    known.push(ev.app.clone());
+                }
+                matching.push((ev.app, ev.kind));
+            }
         }
-        if !text.trim().is_empty() {
-            parts.push(TextSession {
-                session_id: id.to_string(),
-                window,
-                started_at: timefmt::to_local(&started_at),
-                ended_at: ended.map(|e| timefmt::to_local(&e)),
-                text,
-            });
+    }
+    let full = resolve_app(app, &known)?;
+    let mut out = String::new();
+    for (a, kind) in matching {
+        if a != full {
+            continue;
+        }
+        match kind {
+            EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),
+            EventKind::Paste {
+                text: Some(text), ..
+            } => out.push_str(&text),
+            _ => {}
         }
     }
     Ok(TextOutput {
@@ -353,19 +338,14 @@ pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<
         at: fmt_opt(w.at),
         from: fmt_opt(w.from),
         to: fmt_opt(w.to),
-        text: parts
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        sessions: parts,
+        text: out,
     })
 }
 
 /// The full app id `given` refers to, among the `known` ones (all apps with
-/// sessions): an exact match (ignoring case) wins; otherwise the one id
-/// containing it. Several candidates, or none, are an error, so text from
-/// different apps is never mixed.
+/// sessions, plus those with keys or pastes in the queried window): an exact match (ignoring
+/// case) wins; otherwise the one id containing it. Several candidates, or
+/// none, are an error, so text from different apps is never mixed.
 fn resolve_app(given: &str, known: &[String]) -> Result<String> {
     let g = given.to_lowercase();
     if let Some(exact) = known.iter().find(|a| a.to_lowercase() == g) {
@@ -397,6 +377,41 @@ fn resolve_app(given: &str, known: &[String]) -> Result<String> {
             )
         }
     }
+}
+
+/// One key of the raw stream: a typed character as itself, Enter as a
+/// newline, Tab as a tab, and every other key or shortcut by name in angle
+/// brackets: `<Backspace>`, `<Left>`, `<Ctrl+C>`, `<Ctrl+Shift+V>`.
+fn render_key(key: &str, mods: &[Mod], out: &mut String) {
+    let shortcut = mods
+        .iter()
+        .any(|m| matches!(m, Mod::Ctrl | Mod::Alt | Mod::Super));
+    let single_char = key.chars().nth(1).is_none();
+    match key {
+        _ if shortcut => {}
+        "Enter" => return out.push('\n'),
+        "Tab" => return out.push('\t'),
+        _ if single_char => return out.push_str(key),
+        _ => {}
+    }
+    out.push('<');
+    for (m, name) in [
+        (Mod::Ctrl, "Ctrl"),
+        (Mod::Alt, "Alt"),
+        (Mod::Super, "Super"),
+        (Mod::Shift, "Shift"),
+    ] {
+        if shortcut && mods.contains(&m) {
+            out.push_str(name);
+            out.push('+');
+        }
+    }
+    if shortcut && single_char {
+        out.extend(key.chars().flat_map(char::to_uppercase));
+    } else {
+        out.push_str(key);
+    }
+    out.push('>');
 }
 
 #[cfg(test)]
@@ -454,6 +469,26 @@ mod tests {
         assert!(resolve(&flags(Some("-1h"), Some("-2h"), None), Command::Text, NOW).is_err());
         assert!(resolve(&flags(None, Some("-1h"), Some("-2h")), Command::Text, NOW).is_err());
         assert!(resolve(&flags(None, Some("yesterday"), None), Command::Text, NOW).is_err());
+    }
+
+    #[test]
+    fn renders_raw_keys() {
+        let mut s = String::new();
+        for (k, m) in [
+            ("H", vec![Mod::Shift]),
+            ("i", vec![]),
+            ("Enter", vec![]),
+            ("ש", vec![]),
+            ("Backspace", vec![]),
+            ("Left", vec![Mod::Shift]),
+            ("v", vec![Mod::Shift, Mod::Ctrl]),
+            ("Tab", vec![Mod::Alt]),
+            ("€", vec![Mod::Altgr]),
+            ("Tab", vec![]),
+        ] {
+            render_key(k, &m, &mut s);
+        }
+        assert_eq!(s, "Hi\nש<Backspace><Left><Ctrl+Shift+V><Alt+Tab>€\t");
     }
 
     #[test]

@@ -7,8 +7,8 @@
 //!
 //! Every event carries the app it belongs to. Events that relate to a text
 //! context (keys, pastes) also carry the window title, so each line is
-//! self-describing: a reader can start at any line (for example a session's
-//! first event, to replay it) without replaying earlier focus events.
+//! self-describing: a reader can start at any line (for example after a
+//! checkpoint seek) without replaying earlier focus events.
 
 use crate::timefmt::{self, Millis};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
