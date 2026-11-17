@@ -15713,3 +15713,1484 @@ exit 1
 
 </details>
 
+## Assistant  <sub>2026-11-17T11:08:57.087Z</sub>
+
+Everything behaved as documented. Committing the review fixes and refreshing `ai-logs/`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nTidy docs after the query text change\n\nThe final review found only wording: README and PLAN.md used \"window\"\nfor both the time range and an app window when describing\n`query text`; the README's two JSON examples were not labelled; PLAN.md\nstill said the CLI tests cover \"raw text\"; module docs did not say that\n`query text` uses tiers 0/1 too; and two doc comments linked to private\nfunctions (cargo doc warned).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2 && git status --short",
+  "description": "Commit review fixes, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+34a9ca4 Refresh AI logs
+0c44435 Tidy docs after the query text change
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:09:18.656Z</sub>
+
+The final review is done and pushed (`0c44435`, then the `ai-logs/` refresh `34a9ca4`). It found no bugs, only wording to tidy, and every test passes, including all the opt-in ones.
+
+**What the review checked:**
+- **CLI help vs. behavior:** all four help screens (`brain`, `run`, `query search`, `query text`) match the current behavior, including the reconstructed `text`, local times and full app ids.
+- **Stale wording:** I searched code and docs for raw rendering, `<Backspace>`, stage references, clicks, porter and migrations. The only hits describe past decisions or the history in "Where the agent failed", which is intended.
+- **Dead code:** every public function, constant, struct and enum is used.
+- **Generated docs:** `cargo doc` gave two warnings for links to private functions. Fixed; now none.
+
+**What I fixed (all wording):**
+- **README and PLAN.md:** "window" was used both for the time range and for an app window when describing `text`. They now say "time range" and "app window".
+- **README:** the two JSON examples are labelled `search` output and `text` output.
+- **PLAN.md:** the testing section said the CLI tests cover "raw text". It now says reconstructed text, including the README's example.
+- **Module docs:** the reconstruction module now says tiers 0/1 are also used by `query text`.
+- **CLAUDE.md:** the `query text` decision is rewrapped and uses the same terms.
+
+**Test results on the final build:**
+
+| Suite | Result |
+|---|---|
+| Unit tests | 123 pass |
+| `crash_safety` (25 random `kill -9`s, compared to a rebuild) | passes |
+| `query_cli` (6 tests, including the README's `text` example and thousands of queries while writing) | pass |
+| `perf_budget` | passes: 0.1% CPU, 8 MB |
+| `real_keyboard_e2e` (Kate) | passes: Kate and `brain` both give `hello שלום world againx` / `beta`, layout restored |
+| `repeat_e2e` (Kate) | passes: `brain`'s log follows KDE's schedule; Kate within one character per hold |
+| VS Code (12 replay tests + the tier-2 end-to-end test) | pass |
+
+**Smoke run on your desktop:** capture started with the keyboard and KWin, a second `run` was refused, queries returned JSON, and the error cases (nothing typed yet, an empty time range, a missing folder) all exited 1 with clear messages. Stopping was clean and returned exit 0.
+
+**Checklist:** the code, README (build and run, supported OS, permissions, decisions and edge cases, "Where the agent failed"), PLAN.md, CLAUDE.md and `ai-logs/` (with your email redacted) are all current, and the working tree is clean. What remains is yours: give the reviewers access to the private repo and read it through once.
+
+## User  <sub>2026-11-17T11:58:42.656Z</sub>
+
+i want to run all of the tests myself, give me commands for each of test suite including manual ones
+
+## Assistant  <sub>2026-11-17T11:59:31.182Z</sub>
+
+Run everything from the repo root (`~/Documents/shadow-assistant`). The first build takes about a minute; after that, each suite's time is listed.
+
+## Automated: run by default
+
+```sh
+# Everything in one go: unit tests + crash_safety + query_cli + perf_budget (~1 min)
+cargo test --release
+
+# Or one suite at a time:
+cargo test --release --lib                                # 123 unit tests (<1 s)
+cargo test --release --test crash_safety -- --nocapture   # 25 random kill -9s (~20 s)
+cargo test --release --test query_cli -- --nocapture      # query commands through the binary (~8 s)
+cargo test --release --test perf_budget -- --nocapture    # CPU/memory budget, prints the numbers (~32 s)
+
+# Lint, as required before each commit:
+cargo fmt --check && cargo clippy --all-targets
+```
+
+## Automated: opt-in, against real software
+
+**Before the Kate tests:** they need the permission script (run once; you already did) and an **unlocked screen**. Keep your **hands off the keyboard and mouse** while they run, because they type into real Kate windows.
+```sh
+sudo sh scripts/setup-test-permissions.sh          # once; undo with --undo
+
+# Held-key repeats vs. a real Kate window (~22 s), prints a per-hold table:
+cargo test --release --test repeat_e2e -- --ignored --nocapture
+
+# Hebrew via Alt+Shift, focus between two Kate windows, keyboard unplug/replug (~13 s):
+cargo test --release --test real_keyboard_e2e -- --ignored --nocapture
+```
+
+**VS Code tests:** these need VS Code installed. They run headless, so nothing appears on screen and you can keep working.
+```sh
+cargo test --release --test vscode_replay -- --ignored --test-threads=1   # 12 tests (~4 min)
+cargo test --release --test tier2_e2e -- --ignored --nocapture            # end to end through ingest (~25 s)
+```
+
+## Manual tests
+
+For each of these, start a test instance in **terminal 1** and leave it running:
+```sh
+cargo build --release
+./target/release/brain run --data-dir /tmp/brain-manual
+```
+Use **terminal 2** for the steps. In every case, Ctrl+C in terminal 1 should stop it with exit code 0.
+
+**1. Real typing and both queries**
+1. Type in a few apps: Konsole (commands with Enter, Backspace, Up), Kate (several lines, Ctrl+Z), Chrome (a search), and some Hebrew via Alt+Shift.
+2. Check:
+```sh
+tail -f /tmp/brain-manual/events.jsonl                       # every key, with app and window
+./target/release/brain query search "<a word you typed>" --data-dir /tmp/brain-manual
+./target/release/brain query text --app kate --from -10m --data-dir /tmp/brain-manual
+./target/release/brain query text --app konsole --data-dir /tmp/brain-manual
+```
+Expected: `search` finds the session, and `text` shows the edited text per window, with local times and the full app id.
+
+**2. Paste (Klipper)**
+1. Copy some text, then press Ctrl+V in Kate.
+2. Check: `grep '"paste"' /tmp/brain-manual/events.jsonl | tail -1`. It should show the clipboard text.
+3. In Konsole, plain Ctrl+V shouldn't add text to the session; Ctrl+Shift+V should.
+
+**3. Screen lock**
+1. Type a few keys, lock with Meta+L, unlock by typing your password, then type a few more keys.
+2. Check: `grep -E '"lock"|"unlock"' /tmp/brain-manual/events.jsonl`. There should be a `lock` and an `unlock` event with **no key events between them**, so your password isn't recorded.
+
+**4. Sleep/wake**
+1. Suspend:
+```sh
+sudo rtcwake -m no -s 30 && systemctl suspend      # wakes by itself after ~30 s
+```
+2. Unlock and type a few keys.
+3. Check: terminal 1 shows `brain: resumed: reopened 1 keyboard(s)`, and `grep '"system"' /tmp/brain-manual/events.jsonl` shows `sleep`, `lock`, `wake`, `unlock`. The keys typed after unlocking should be in the log.
+
+**5. Keyboard layout from the tray**
+Switch layout with the tray's keyboard icon (not Alt+Shift). Terminal 1 should print `brain: keyboard layout switched to #1`, and typing should log Hebrew characters.
+
+**6. Keyboard hotplug** (if you have a USB keyboard)
+Plug it in, type on it, unplug it, and type on the laptop keyboard. Keys from both should appear in the log, and none should be stuck as Shift.
+
+**7. `kill -9` and restart**
+1. Run `pkill -9 -f 'brain run --data-dir /tmp/brain-manual'`.
+2. Start terminal 1's command again and type.
+3. Check:
+   - capture continues;
+   - `grep -c '"start"' /tmp/brain-manual/events.jsonl` went up by one;
+   - `query search` still finds the text typed before the kill.
+
+**8. Crash-safe rebuild**
+1. Stop `brain`, then run `rm /tmp/brain-manual/brain.db`.
+2. Start it again.
+3. Running the same `query search` and `query text` again should give the same results, rebuilt from the log.
+
+**9. VS Code tier 2** (real typing; this was only tested with generated keystrokes)
+1. Restart terminal 1 with replay on: `./target/release/brain run --vscode-replay --data-dir /tmp/brain-manual`
+2. Open a **saved** file in VS Code and type a function with braces and Enter. Stop typing for 30 s or more, so the session closes. The first replay takes about 25 s to start VS Code.
+3. Check (`sudo apt install sqlite3` if you don't have it):
+```sh
+sqlite3 /tmp/brain-manual/brain.db "SELECT id, tier_used, tier2_status, reconstructed_text FROM sessions WHERE app LIKE '%VSCode%'"
+```
+Expected: `tier_used = 2` and `tier2_status = done`, with the text as VS Code would have formatted it. If it says `skipped: …` or `failed: …`, the reason is in that column.
+
+**10. systemd service** (stop terminal 1's `brain` first)
+```sh
+make install-service                              # installs /usr/bin/brain + the unit, enables it
+systemctl --user status brain                     # active (running)
+journalctl --user -u brain -n 20                  # its messages
+kill -9 $(systemctl --user show -p MainPID --value brain); sleep 7
+systemctl --user status brain                     # running again, new PID (restarted)
+systemctl --user stop brain                       # clean stop
+make uninstall-service                            # remove it, unless you want to keep it
+```
+The service writes to `~/brain-data`. If that folder is from an older build, delete its `brain.db` first.
+
+**Clean up:** `rm -rf /tmp/brain-manual`
+
+## User  <sub>2026-11-17T13:03:15.458Z</sub>
+
+i ran everything. a few notes:
+install-service should have service folder for data dir like brain.service.d and not under home foler
+uninstall-service should delete the data-dir of the service, now it doesn't do that
+
+tell me what you are going to change before making any changes
+
+## Assistant  <sub>2026-11-17T13:03:53.656Z</sub>
+
+Here's what I'd change. Nothing is touched yet.
+
+**1. Where the service keeps its data**
+
+There's a constraint first: the service runs as you, without root, so it can only write where your user can. A folder outside your home, such as `/var/lib/brain`, would have to be created by root once and handed to your user. A drop-in folder like `~/.config/systemd/user/brain.service.d/` is meant for configuration overrides, not data, so I wouldn't put the capture log there. Two options:
+
+- **A. A state folder that systemd manages** (recommended): `~/.local/state/brain`.
+  - The unit declares `StateDirectory=brain` with `StateDirectoryMode=0700`. systemd creates the folder, private to you, before starting `brain`, and passes its path in, so the unit uses `--data-dir %S/brain`.
+  - It's the standard place for service data (the XDG state directory), out of sight. Nothing gets added to the top of your home folder.
+  - systemd can also remove it itself: `systemctl --user clean brain --what=state`.
+- **B. Really outside your home:** `/var/lib/brain-<user>`.
+  - `make install-service` would create it once with `sudo` (owned by you, mode 0700), and the unit would point there.
+  - It means one more root step, and the folder survives a deleted home directory, which might not be what you want for a keylogger's data.
+
+**2. `make uninstall-service` deletes the data folder**
+
+It would stop and disable the service, then remove the unit file and **the service's data folder** (A: `systemctl --user clean brain --what=state`; B: `sudo rm -rf /var/lib/brain-<user>`). It prints the folder path first, so it's clear what was deleted. `make uninstall`, which removes the binary, stays separate. For keeping the data while removing the service, `make uninstall-service KEEP_DATA=1` would skip the delete.
+
+**3. Docs and tests**
+- The README's service section gets the new location and the fact that uninstalling deletes the captured data. The test instructions get updated steps for the service check.
+- PLAN.md, the security section, gets the data location.
+- I'd test it with a temporary copy of the unit, as before: start, `kill -9` and restart, check the folder is created 0700, then uninstall and check the folder is gone. Your real service install isn't touched.
+
+Which location do you want, A or B? And should `KEEP_DATA=1` exist, or should uninstalling always delete?
+
+## User  <sub>2026-11-17T13:06:12.693Z</sub>
+
+option A with KEEP_DATA option
+
+## Assistant  <sub>2026-11-17T13:06:26.697Z</sub>
+
+Implementing option A with `KEEP_DATA`. First, the unit and the Makefile targets as they are now:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat packaging/brain.service; sed -n '/UNITDIR/,$p' Makefile; systemctl --version | head -1",
+  "description": "Read the unit file and service make targets"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+# systemd *user* service: runs `brain run` as you, inside your desktop
+# session (it needs your session D-Bus for KWin focus, Klipper, screen lock
+# and keyboard layouts). No root: keyboards are read through the `input`
+# group. Install with `make install-service`.
+[Unit]
+Description=brain: capture what you type and make it searchable
+Documentation=https://github.com/ChenOhana/shadow-assistant
+# Start with the Plasma session, after the compositor, and stop at logout.
+PartOf=graphical-session.target
+After=graphical-session.target plasma-kwin_wayland.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/brain run --data-dir /tmp/service-brain-data
+# SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+# stderr (warnings, layout switches, tier 2 failures) goes to the journal:
+#   journalctl --user -u brain -f
+
+[Install]
+WantedBy=graphical-session.target
+UNITDIR ?= $(HOME)/.config/systemd/user
+
+install-service: install
+	install -Dm 0644 packaging/brain.service $(UNITDIR)/brain.service
+	systemctl --user daemon-reload
+	systemctl --user enable --now brain.service
+
+uninstall-service:
+	-systemctl --user disable --now brain.service
+	rm -f $(UNITDIR)/brain.service
+	systemctl --user daemon-reload
+systemd 259 (259.5-0ubuntu3.4)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:06:35.549Z</sub>
+
+The repo's unit file has `ExecStart=… --data-dir /tmp/service-brain-data`, but I committed `%h/brain-data`. It looks like you edited it while testing. Checking:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git status --short; git diff --stat; git diff packaging/ Makefile | head -20",
+  "description": "Check uncommitted local changes"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ M packaging/brain.service
+ packaging/brain.service | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+diff --git a/packaging/brain.service b/packaging/brain.service
+index f65a7ef..fef14d1 100644
+--- a/packaging/brain.service
++++ b/packaging/brain.service
+@@ -13,7 +13,7 @@ StartLimitBurst=5
+ 
+ [Service]
+ Type=exec
+-ExecStart=/usr/bin/brain run --data-dir %h/brain-data
++ExecStart=/usr/bin/brain run --data-dir /tmp/service-brain-data
+ # SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
+ KillSignal=SIGTERM
+ TimeoutStopSec=20
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:06:43.253Z</sub>
+
+Yes, that's your uncommitted local edit. The new `ExecStart` replaces that line anyway, so I'll overwrite it with the state-directory version.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='packaging/brain.service'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"# group. Install with `make install-service`.\"\"\",\"\"\"# group. Install with `make install-service`; `make uninstall-service`\n# removes it together with its data (KEEP_DATA=1 keeps the data).\"\"\")\nrep(\"\"\"Type=exec\nExecStart=/usr/bin/brain run --data-dir /tmp/service-brain-data\"\"\",\"\"\"Type=exec\n# The data directory is the service's state directory, created by systemd\n# before start, private to the user: ~/.local/state/brain (%S/brain).\n# `systemctl --user clean --what=state brain` deletes it.\nStateDirectory=brain\nStateDirectoryMode=0700\nExecStart=/usr/bin/brain run --data-dir %S/brain\"\"\")\nopen(p,'w').write(s)\np='Makefile'; s=open(p).read()\nrep(\"\"\"#   make install-service    install + enable the systemd user service\n#   make uninstall-service  stop, disable and remove the service\"\"\",\"\"\"#   make install-service    install + enable the systemd user service\n#   make uninstall-service  stop and remove the service and its data\n#                           (KEEP_DATA=1: keep the data)\"\"\")\nrep(\"\"\"# The service runs as you (no root); see packaging/brain.service.\nUNITDIR ?= $(HOME)/.config/systemd/user\n\ninstall-service: install\n\tinstall -Dm 0644 packaging/brain.service $(UNITDIR)/brain.service\n\tsystemctl --user daemon-reload\n\tsystemctl --user enable --now brain.service\n\nuninstall-service:\n\t-systemctl --user disable --now brain.service\n\trm -f $(UNITDIR)/brain.service\n\tsystemctl --user daemon-reload\"\"\",\"\"\"# The service runs as you (no root); see packaging/brain.service. Its data\n# lives in its systemd state directory.\nUNITDIR  ?= $(HOME)/.config/systemd/user\nSTATEDIR := $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/brain\n\ninstall-service: install\n\tinstall -Dm 0644 packaging/brain.service $(UNITDIR)/brain.service\n\tsystemctl --user daemon-reload\n\tsystemctl --user enable --now brain.service\n\t@echo \"brain service running; data in $(STATEDIR)\"\n\nuninstall-service:\n\t-systemctl --user disable --now brain.service\nifeq ($(KEEP_DATA),1)\n\t@echo \"keeping the service's data in $(STATEDIR)\"\nelse\n\t@echo \"deleting the service's data in $(STATEDIR)\"\n\t-systemctl --user clean --what=state brain.service\nendif\n\trm -f $(UNITDIR)/brain.service\n\tsystemctl --user daemon-reload\"\"\")\nopen(p,'w').write(s)\nEOF\necho '--- default'; make -n uninstall-service; echo '--- KEEP_DATA=1'; make -n uninstall-service KEEP_DATA=1; systemd-analyze --user verify packaging/brain.service 2>&1 | grep -v spice",
+  "description": "Use a systemd state directory; uninstall deletes data unless KEEP_DATA=1"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+--- default
+systemctl --user disable --now brain.service
+echo "deleting the service's data in /home/juan/.local/state/brain"
+systemctl --user clean --what=state brain.service
+rm -f /home/juan/.config/systemd/user/brain.service
+systemctl --user daemon-reload
+--- KEEP_DATA=1
+systemctl --user disable --now brain.service
+echo "keeping the service's data in /home/juan/.local/state/brain"
+rm -f /home/juan/.config/systemd/user/brain.service
+systemctl --user daemon-reload
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The unit passes verification and the dry runs look right, so I'm now testing the real mechanics on a temporary brain-test copy, without touching your installed brain service.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "echo \"real service: $(systemctl --user is-enabled brain 2>&1) / $(systemctl --user is-active brain 2>&1)\"; cargo build --release 2>&1 | tail -1; U=~/.config/systemd/user; sed -e \"s|/usr/bin/brain run --data-dir %S/brain|$PWD/target/release/brain run --data-dir %S/brain-test|\" -e \"s|^StateDirectory=brain$|StateDirectory=brain-test|\" packaging/brain.service > $U/brain-test.service; grep -E '^(StateDirectory|ExecStart)' $U/brain-test.service; systemctl --user daemon-reload; systemctl --user start brain-test; sleep 3; S=~/.local/state/brain-test; stat -c '%A %n' $S; ls $S; head -1 $S/events.jsonl; P=$(systemctl --user show -p MainPID --value brain-test); kill -9 $P; sleep 7; echo \"after kill -9: $(systemctl --user is-active brain-test), restarts $(systemctl --user show -p NRestarts --value brain-test)\"; systemctl --user stop brain-test; systemctl --user clean --what=state brain-test.service; ls -d $S 2>&1; rm -f $U/brain-test.service; systemctl --user daemon-reload; systemctl --user reset-failed brain-test 2>/dev/null; echo \"unit gone: $(systemctl --user list-unit-files | grep -c brain-test)\"",
+  "description": "Test state directory, restart and clean with a test copy"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+real service: not-found / inactive
+    Finished `release` profile [optimized] target(s) in 0.06s
+StateDirectory=brain-test
+StateDirectoryMode=0700
+ExecStart=/home/juan/Documents/shadow-assistant/target/release/brain run --data-dir %S/brain-test
+drwx------ /home/juan/.local/state/brain-test
+brain.db
+brain.db-shm
+brain.db-wal
+events.jsonl
+kwin
+run.lock
+{"ts":"2026-11-17T13:07:03.862Z","app":"unknown","type":"system","state":"start"}
+after kill -9: active, restarts 1
+ls: cannot access '/home/juan/.local/state/brain-test': No such file or directory
+unit gone: 0
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The state folder was created private and capture wrote into it, systemd restarted the service after kill -9, and the uninstall step removed the folder. No brain service is installed now, so I'm moving on to the docs.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'brain-data\\|install-service\\|uninstall-service\\|service' README.md PLAN.md CLAUDE.md | grep -iv 'session\\|services' | cut -c1-150",
+  "description": "Find docs about the service and its data dir"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+CLAUDE.md:29:- Both commands take `--data-dir` (default `./brain-data`) and exit non-zero
+README.md:53:target/release/brain run --data-dir ~/brain-data
+README.md:63:### As a service
+README.md:65:`brain` can run as a **systemd user service**: it starts with your Plasma
+README.md:70:make install-service          # installs /usr/bin/brain + the unit, enables it
+README.md:73:make uninstall-service        # remove it
+README.md:76:The service uses `~/brain-data`. Stop it before running `brain run` by hand
+README.md:78:service runs without `--vscode-replay`; add it to `ExecStart` in
+README.md:79:`~/.config/systemd/user/brain.service` to turn it on.
+README.md:253:sqlite3 ~/brain-data/brain.db \
+README.md:365:* **Service as you, not root**: a systemd user service, because desktop
+PLAN.md:165:  as a service, the script is loaded as soon as KWin's name appears. A
+PLAN.md:481:- **Privilege**: brain runs as the user, as a systemd *user* service if
+PLAN.md:482:  wanted (`make install-service`), never as root. Reading keyboards needs
+PLAN.md:518:  unlock, the systemd service (start, restart after `kill -9`, clean stop).
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 63,80p README.md",
+  "description": "Read README service section"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+### As a service
+
+`brain` can run as a **systemd user service**: it starts with your Plasma
+session, restarts if it crashes, stops at logout, and runs as you (no
+root; it needs your desktop session for focus tracking):
+
+```sh
+make install-service          # installs /usr/bin/brain + the unit, enables it
+journalctl --user -u brain -f # its messages
+systemctl --user stop brain   # pause capture
+make uninstall-service        # remove it
+```
+
+The service uses `~/brain-data`. Stop it before running `brain run` by hand
+on the same directory (only one `brain run` per data directory). The
+service runs without `--vscode-replay`; add it to `ExecStart` in
+`~/.config/systemd/user/brain.service` to turn it on.
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70]); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[(\"\"\"```sh\nmake install-service          # installs /usr/bin/brain + the unit, enables it\njournalctl --user -u brain -f # its messages\nsystemctl --user stop brain   # pause capture\nmake uninstall-service        # remove it\n```\n\nThe service uses `~/brain-data`. Stop it before running `brain run` by hand\non the same directory (only one `brain run` per data directory). The\nservice runs without `--vscode-replay`; add it to `ExecStart` in\n`~/.config/systemd/user/brain.service` to turn it on.\"\"\",\"\"\"```sh\nmake install-service                 # installs /usr/bin/brain + the unit, enables it\njournalctl --user -u brain -f        # its messages\nsystemctl --user stop brain          # pause capture\nbrain query search \"words\" --data-dir ~/.local/state/brain\nmake uninstall-service               # remove the service AND its captured data\nmake uninstall-service KEEP_DATA=1   # remove the service, keep the data\n```\n\nThe service keeps its data in its systemd **state directory**,\n`~/.local/state/brain` (`$XDG_STATE_HOME/brain`), which systemd creates\nprivate to you (mode 0700) before starting it. Pass that directory to\n`brain query`. `make uninstall-service` deletes it with\n`systemctl --user clean --what=state brain`, unless `KEEP_DATA=1` is given.\nOnly one `brain run` can use a data directory at a time. The service runs\nwithout `--vscode-replay`; add it to `ExecStart` in\n`~/.config/systemd/user/brain.service` to turn it on.\"\"\")])\nedit('PLAN.md',[(\"\"\"- **Privilege**: brain runs as the user, as a systemd *user* service if\n  wanted (`make install-service`), never as root.\"\"\",\"\"\"- **Privilege**: brain runs as the user, as a systemd *user* service if\n  wanted (`make install-service`), never as root. The service's data is its\n  systemd state directory (`~/.local/state/brain`, mode 0700), deleted by\n  `make uninstall-service` unless `KEEP_DATA=1`.\"\"\")])\nEOF\nsed -n 13,24p packaging/brain.service; git add -A packaging Makefile README.md PLAN.md && git commit -q -F - <<'EOF'\nKeep the service's data in its state directory\n\nThe service wrote to ~/brain-data, a folder at the top of the home\ndirectory. It now uses its systemd state directory (StateDirectory=brain,\nmode 0700): systemd creates ~/.local/state/brain before starting brain\nand passes it as %S/brain.\n\n`make uninstall-service` now also deletes that data directory, through\n`systemctl --user clean --what=state`, and says so; `KEEP_DATA=1` keeps\nit. Tested with a copy of the unit: the directory is created private,\ncapture writes into it, a kill -9 restarts the service, and the clean\nstep removes the directory.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1",
+  "description": "Update docs, commit and push"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+StartLimitBurst=5
+
+[Service]
+Type=exec
+# The data directory is the service's state directory, created by systemd
+# before start, private to the user: ~/.local/state/brain (%S/brain).
+# `systemctl --user clean --what=state brain` deletes it.
+StateDirectory=brain
+StateDirectoryMode=0700
+ExecStart=/usr/bin/brain run --data-dir %S/brain
+# SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
+KillSignal=SIGTERM
+bd18e51 Keep the service's data in its state directory
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:07:58.475Z</sub>
+
+Done and pushed (`bd18e51`). The service now keeps its data in its own systemd state folder, and `make uninstall-service` deletes it unless you pass `KEEP_DATA=1`.
+
+**What changed:**
+- **`packaging/brain.service`:** `StateDirectory=brain` with mode `0700`. Before each start, systemd creates `~/.local/state/brain`, private to you, and the unit passes it as `--data-dir %S/brain`. Your local edit to that line (`/tmp/service-brain-data`) is replaced by this.
+- **`make uninstall-service`:** stops and disables the service, prints the data folder it's deleting, and deletes it with `systemctl --user clean --what=state brain`. Then it removes the unit file.
+- **`make uninstall-service KEEP_DATA=1`:** the same, but keeps the data and says so.
+- **`make install-service`:** now prints where the data goes.
+- **README and PLAN.md:** describe the location, how to point `brain query` at it, and that uninstalling deletes the data.
+
+**Tested** with a temporary copy of the unit (now removed):
+- The folder was created as `drwx------`.
+- Capture wrote its log and database into it.
+- After `kill -9`, systemd restarted the service.
+- The clean step deleted the folder.
+
+I also checked both uninstall variants with `make -n`. I didn't run the real `make install-service`, because it needs your sudo password.
+
+Folders from your earlier service runs (`~/brain-data`, `/tmp/service-brain-data`) aren't moved or deleted. Remove them yourself if you don't need them.
+
+**To check it yourself:**
+```sh
+make install-service
+systemctl --user status brain                       # active (running)
+ls -ld ~/.local/state/brain                         # drwx------
+brain query search "<a word you typed>" --data-dir ~/.local/state/brain
+make uninstall-service KEEP_DATA=1                  # service gone, data kept
+ls ~/.local/state/brain                             # still there
+make install-service && make uninstall-service      # service and data gone
+ls ~/.local/state/brain                             # No such file or directory
+```
+
+## User  <sub>2026-11-17T13:17:21.248Z</sub>
+
+awesome, it works. but in the vscode tier2 it skipped when opening a saved txt file. I opened test.txt under desktop and it didn't use the tier2 adapter. check why and explain before fixing
+
+## Assistant  <sub>2026-11-17T13:17:30.189Z</sub>
+
+I'll start with the database from your test, which records why tier 2 was skipped.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for db in $(find /tmp ~/.local/state ~/brain-data -maxdepth 3 -name brain.db 2>/dev/null); do echo \"== $db\"; python3 -c \"\nimport sqlite3,sys; c=sqlite3.connect('file:$db?mode=ro',uri=True)\nfor r in c.execute(\\\"select id,app,window,started_at,status,tier_used,tier2_status,tier2_file,substr(reconstructed_text,1,60) from sessions where lower(app) like '%code%' order by id desc limit 8\\\"): print(r)\" 2>&1; done",
+  "description": "Find VS Code sessions and their tier 2 status"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== /home/juan/brain-data/brain.db
+(121, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T12:57:16.772Z', 'closed', 1, None, None, 'checking writing with service in the background\n\nnice :)\nwor')
+(79, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T12:37:06.647Z', 'closed', 1, None, None, 'editing a saved file\n\n')
+(78, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T12:36:07.675Z', 'closed', 1, None, None, 'testing normal file in vscode\nnew line\n')
+(3, 'com.microsoft.VSCode', 'Untitled-2 - ai-logs - Visual Studio Code', '2026-11-17T10:21:57.377Z', 'closed', 1, None, None, 'testing copy data\npasted')
+(2, 'com.microsoft.VSCode', 'testing again • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T10:21:46.139Z', 'closed', 1, None, None, 'testing again\nnew\nline\ntesting copy data')
+(1, 'com.microsoft.VSCode', 'testing new • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T10:17:11.076Z', 'closed', 1, None, None, 'testing again\nnew\nline\n')
+== /tmp/brain-manual/brain.db
+(40, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T12:37:06.647Z', 'closed', 1, 'skipped: could not identify the file from the window title', None, 'editing a saved file\n\n')
+(39, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T12:36:07.675Z', 'closed', 1, 'skipped: could not identify the file from the window title', None, 'testing normal file in vscode\nnew line\n')
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:17:44.499Z</sub>
+
+The database records the reason: **`skipped: could not identify the file from the window title`**. Let me see what VS Code itself records about that file.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls -la ~/Desktop/test.txt 2>&1; C=~/.config/Code; python3 - <<'EOF'\nimport sqlite3, json, os, glob\nC=os.path.expanduser('~/.config/Code')\ndb=C+'/User/globalStorage/state.vscdb'\nc=sqlite3.connect(f'file:{db}?mode=ro',uri=True)\nv=c.execute(\"select value from ItemTable where key='history.recentlyOpenedPathsList'\").fetchone()\nif v:\n    d=json.loads(v[0])\n    for e in d.get('entries',[])[:12]: print(e)\nfor ws in glob.glob(C+'/User/workspaceStorage/*/workspace.json'):\n    w=json.load(open(ws))\n    if 'ai-logs' in json.dumps(w):\n        print('WS', ws, w)\n        s=sqlite3.connect('file:'+ws.replace('workspace.json','state.vscdb')+'?mode=ro',uri=True)\n        for k,val in s.execute(\"select key, value from ItemTable where key like '%editor%' or key like '%history%'\"):\n            if 'test.txt' in val: print(' ', k, val[:600])\nEOF\ngrep -n 'fn resolve_file' -A40 /home/juan/Documents/shadow-assistant/src/reconstruct/vscode/title.rs | head -60",
+  "description": "Inspect VS Code recent files and workspace state for test.txt"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+-rw-rw-r-- 1 juan juan 62 Nov 17 14:57 /home/juan/Desktop/test.txt
+WS /home/juan/.config/Code/User/workspaceStorage/9fefe3d715715c2a60a4760fcb45b720/workspace.json {'folder': 'file:///home/juan/Documents/shadow-assistant/ai-logs'}
+  history.entries [{"editor":{"resource":"file:///home/juan/Desktop/test.txt","forceFile":true,"options":{"override":"default"}}},{"editor":{"resource":"file:///home/juan/Documents/shadow-assistant/ai-logs/subagent-aa6364f0e0124dab2.md","forceFile":true,"options":{"override":"default"}}},{"editor":{"resource":"file:///home/juan/Documents/shadow-assistant/ai-logs/subagent-a8e3c9e477e3774ff.md","forceFile":true,"options":{"override":"default"}}},{"editor":{"resource":"file:///home/juan/Documents/shadow-assistant/ai-logs/session-2.md","forceFile":true,"options":{"override":"default"}}},{"editor":{"resource":"file:
+  memento/workbench.editors.files.textFileEditor {"textEditorViewState":[["file:///home/juan/Desktop/test.txt",{"0":{"cursorState":[{"inSelectionMode":false,"selectionStart":{"lineNumber":4,"column":6},"position":{"lineNumber":4,"column":6}}],"viewState":{"scrollLeft":0,"firstPosition":{"lineNumber":1,"column":1},"firstPositionDeltaTop":0},"contributionsState":{"editor.contrib.folding":{"lineCount":4,"provider":"indent","foldedImports":false},"editor.contrib.wordHighlighter":false}}}]]}
+  memento/workbench.parts.editor {"editorpart.state":{"serializedGrid":{"root":{"type":"branch","data":[{"type":"leaf","data":{"id":0,"editors":[{"id":"workbench.editors.files.fileEditorInput","value":"{\"resourceJSON\":{\"$mid\":1,\"fsPath\":\"/home/juan/Desktop/test.txt\",\"external\":\"file:///home/juan/Desktop/test.txt\",\"path\":\"/home/juan/Desktop/test.txt\",\"scheme\":\"file\"},\"encoding\":\"utf8\"}"}],"mru":[0]},"size":831.3333333995607}],"size":946.3333333995607},"orientation":0,"width":946.3333333995607,"height":831.3333333995607},"activeGroup":0,"mostRecentActiveGroups":[0]}}
+98:pub fn resolve_file(window_title: &str) -> Option<PathBuf> {
+99-    let parsed = parse_title(window_title)?;
+100-    let home = std::env::var_os("HOME").map(PathBuf::from);
+101-    // (1) A custom window.title that contains a full path.
+102-    for seg in &parsed.segments {
+103-        if let Some(p) = expand_path(seg, home.as_deref())
+104-            && p.is_file()
+105-        {
+106-            return Some(p);
+107-        }
+108-    }
+109-    // (2) The default "<file> - <rootName> - Visual Studio Code".
+110-    let name = parsed.editor.as_str();
+111-    if name.contains('/') || name == "." || name == ".." {
+112-        return None;
+113-    }
+114-    let config = vscode_config_dir()?;
+115-    let history = RecentHistory::load(&config);
+116-    let mut found: BTreeSet<PathBuf> = BTreeSet::new();
+117-    match &parsed.root {
+118-        Some(root) => {
+119-            for folder in history.folders.iter().filter(|f| {
+120-                f.file_name().and_then(|n| n.to_str()) == Some(root.as_str()) && f.is_dir()
+121-            }) {
+122-         
+… [550 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:18:31.691Z</sub>
+
+I found the cause. Nothing is changed yet.
+
+**Why it was skipped**
+
+In your test database, both VS Code sessions say `skipped: could not identify the file from the window title`:
+
+| Session | Window title | Why |
+|---|---|---|
+| 40 | `test.txt - ai-logs - Visual Studio Code` | `test.txt` is **outside** the window's folder |
+| 39 | `Untitled-1 - ai-logs - Visual Studio Code` | a new, never-saved file: nothing on disk to replay from (correct, but the message is misleading) |
+
+The other sessions, from your normal runs and the service, show no tier-2 status at all. That's expected: those ran without `--vscode-replay`.
+
+**How the file lookup works today:** VS Code's default title gives only the file name and the folder name (`test.txt` and `ai-logs`), not a path. So `resolve_file` takes the folder name, finds the matching folder in VS Code's recently opened list (`~/Documents/shadow-assistant/ai-logs`), and searches inside it for a single `test.txt`. Your file is `~/Desktop/test.txt`: you opened it in the `ai-logs` window, but it isn't inside that folder. The search finds nothing, so tier 2 is skipped.
+
+**VS Code does know the real path.** It keeps per-window state in `~/.config/Code/User/workspaceStorage/<id>/state.vscdb`, and for your `ai-logs` window it lists:
+- the open editors: `"path":"/home/juan/Desktop/test.txt"` (in `memento/workbench.parts.editor`)
+- the editor history: `"resource":"file:///home/juan/Desktop/test.txt"` (in `history.entries`)
+
+**Proposed fix:**
+1. **Read that per-window state too.** `resolve_file` would find the window's state by its folder name (each workspace has a `workspace.json` naming its folder) and look for a file with the title's name:
+   - First among the **open editors**, which is exact.
+   - Then inside the folder, as today.
+   - Then in that window's **editor history**.
+   - If exactly one existing file matches, that's the path. If two different files with the same name match, it's still skipped, rather than guessing.
+2. **Handle VS Code saving that state late.** As far as I know, VS Code writes this state periodically rather than the moment you open a file, possibly up to about a minute later. I'd verify the actual delay before relying on it. A file opened seconds before you start typing may not be listed yet when the session opens. So instead of giving up on the first try, `brain` would retry the lookup on each ingest pass, about once a second, while the session is open, for up to 2 minutes.
+   - It takes the snapshot as soon as the file is found, but only if the file hasn't changed on disk since the session started. In that case the disk copy is still exactly what you started from.
+   - If you saved before the lookup succeeded, it's skipped with a clear reason ("the file was saved before it could be identified"). It never replays from the wrong starting text.
+3. **Clearer skip reasons:** `Untitled-1` would say `skipped: unsaved new file (nothing on disk to replay)` instead of "could not identify the file".
+4. **Docs:** the README would recommend one VS Code setting that makes this instant and exact, a full path in the title:
+   `"window.title": "${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"`
+   `resolve_file` already handles that form.
+
+**Tests:**
+- **Unit tests for `resolve_file`** against a fake VS Code config folder:
+  - a file outside the workspace, found through the open editors;
+  - one found through the editor history;
+  - two different files with the same name, which must give "ambiguous";
+  - an untitled file.
+- **A session test** where the lookup fails at first and succeeds a few passes later, both with the file unchanged and with it saved in between.
+- **The existing tier-2 end-to-end test**, extended with a file outside the workspace folder.
+
+Should I go ahead?
+
+## User  <sub>2026-11-17T13:25:09.493Z</sub>
+
+yes go ahead and fix it don't break the current design
+
+## Assistant  <sub>2026-11-17T13:25:42.359Z</sub>
+
+I'll read the current lookup code first, to fit the change into it.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,40p src/reconstruct/vscode/title.rs; sed -n 48,98p src/reconstruct/vscode/title.rs; sed -n 138,330p src/reconstruct/vscode/title.rs",
+  "description": "Read the VS Code title resolution module"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! VS Code window titles: which app ids are VS Code, the dirty marker, and
+//! which file on disk a title refers to.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+/// App ids VS Code reports under KDE/Wayland (desktop file name, or the
+/// resource class when there is none), plus the OSS builds and Flatpak id.
+const VSCODE_APP_IDS: &[&str] = &[
+    "code",
+    "code-url-handler",
+    "code-insiders",
+    "visual-studio-code",
+    "com.visualstudio.code",
+    "com.microsoft.vscode", // Microsoft's .deb/.rpm package on KDE Wayland
+    "com.visualstudio.code.oss",
+    "code-oss",
+    "codium",
+    "vscodium",
+    "com.vscodium.codium",
+];
+
+/// App-name suffixes VS Code puts last in its title, longest first so
+/// "Visual Studio Code - Insiders" wins over "Visual Studio Code".
+const APP_NAMES: &[&str] = &[
+    "Visual Studio Code - Insiders",
+    "Visual Studio Code",
+    "Code - OSS",
+    "VSCodium",
+];
+
+/// VS Code's `${dirty}` marker.
+const DIRTY_MARKER: char = '●';
+
+/// Directories never descended into when looking for a file by name.
+const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "dist", "build"];
+const MAX_DEPTH: usize = 8;
+const MAX_ENTRIES: usize = 20_000;
+
+pub fn is_vscode(app: &str) -> bool {
+
+/// A VS Code title split into its parts.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ParsedTitle {
+    /// First segment: `${activeEditorShort}` or, with a custom
+    /// `window.title`, possibly a path.
+    pub editor: String,
+    /// Second segment, normally `${rootName}`.
+    pub root: Option<String>,
+    /// All segments (editor first), for finding an absolute path anywhere.
+    pub segments: Vec<String>,
+}
+
+/// Splits a VS Code title on its separator (" - " by default, " — " is also
+/// accepted), dropping the dirty marker and the trailing app name. Returns
+/// `None` if the title does not end with a VS Code app name.
+pub(crate) fn parse_title(title: &str) -> Option<ParsedTitle> {
+    let mut t = title.trim();
+    if let Some(rest) = t.strip_prefix(DIRTY_MARKER) {
+        t = rest.trim_start();
+    }
+    let mut body = None;
+    for name in APP_NAMES {
+        for sep in [" - ", " — "] {
+            if let Some(b) = t.strip_suffix(name).and_then(|b| b.strip_suffix(sep)) {
+                body = Some(b);
+                break;
+            }
+        }
+        if body.is_some() {
+            break;
+        }
+    }
+    let body = body?;
+    let segments: Vec<String> = body
+        .split(" - ")
+        .flat_map(|s| s.split(" — "))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let editor = segments.first()?.clone();
+    Some(ParsedTitle {
+        editor,
+        root: segments.get(1).cloned(),
+        segments,
+    })
+}
+
+/// Absolute path of the file being edited, from the window title; see the
+/// module docs of `vscode` for the two supported title shapes.
+pub fn resolve_file(window_title: &str) -> Option<PathBuf> {
+    }
+    if found.len() == 1 
+… [6373 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 330,450p src/reconstruct/vscode/title.rs",
+  "description": "Read the rest of title.rs including tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+            } else if ft.is_file() && fname == name {
+                found.insert(e.path());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vscode_app_ids() {
+        assert!(is_vscode("code"));
+        assert!(is_vscode("Code"));
+        assert!(is_vscode("code-url-handler"));
+        assert!(is_vscode("com.visualstudio.code"));
+        assert!(is_vscode("com.microsoft.VSCode"));
+        assert!(!is_vscode("org.kde.kate"));
+        assert!(!is_vscode("google-chrome"));
+    }
+
+    #[test]
+    fn dirty_marker() {
+        assert!(title_is_dirty("● main.rs - brain - Visual Studio Code"));
+        assert!(!title_is_dirty("main.rs - brain - Visual Studio Code"));
+    }
+
+    #[test]
+    fn parses_default_titles() {
+        let p = parse_title("● main.rs - brain - Visual Studio Code").unwrap();
+        assert_eq!(p.editor, "main.rs");
+        assert_eq!(p.root.as_deref(), Some("brain"));
+        let p = parse_title("main.rs — brain — Visual Studio Code").unwrap();
+        assert_eq!(p.editor, "main.rs");
+        assert_eq!(p.root.as_deref(), Some("brain"));
+        let p = parse_title("notes.md - Visual Studio Code").unwrap();
+        assert_eq!(p.editor, "notes.md");
+        assert_eq!(p.root, None);
+        let p = parse_title("a.rs - proj - Work - Visual Studio Code - Insiders").unwrap();
+        assert_eq!(p.segments, vec!["a.rs", "proj", "Work"]);
+        assert!(parse_title("New tab - Google Chrome").is_none());
+        assert!(parse_title("Visual Studio Code").is_none());
+    }
+
+    #[test]
+    fn resolves_absolute_path_titles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("x.rs");
+        std::fs::write(&f, "fn main() {}").unwrap();
+        let title = format!("● {} - proj - Visual Studio Code", f.display());
+        assert_eq!(resolve_file(&title), Some(f.clone()));
+        let missing = format!("{}/nope.rs - Visual Studio Code", tmp.path().display());
+        assert_eq!(resolve_file(&missing), None);
+    }
+
+    #[test]
+    fn file_uris() {
+        assert_eq!(
+            file_uri_to_path("file:///home/u/my%20proj"),
+            Some(PathBuf::from("/home/u/my proj"))
+        );
+        assert_eq!(file_uri_to_path("vscode-remote://ssh/x"), None);
+        assert_eq!(file_uri_to_path("file://host/x"), None);
+    }
+
+    #[test]
+    fn history_from_storage_json() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"backupWorkspaces":{"folders":[{"folderUri":"file:///a/proj"}]},
+                "windowsState":{"lastActiveWindow":{"folder":"file:///b/other"},"openedWindows":[]},
+                "history.recentlyOpenedPathsList":{"entries":[{"fileUri":"file:///c/n.md"},{"folderUri":"file:///d/x"}]}}"#,
+        )
+        .unwrap();
+        let mut h = RecentHistory::default();
+        h.add_storage_json(&v);
+        let folders: Vec<_> = h.folders.iter().map(|p| p.to_str().unwrap()).collect();
+        assert_eq!(folders, vec!["/a/proj", "/b/othe
+… [918 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The window-title lookup only searches inside the project folder, which is why the session can't be matched. I'm adding the open editors and history to that lookup, and retrying it on each ingest pass while the session is open.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n '^pub use\\|^pub mod\\|^mod \\|pub fn is_vscode\\|pub use title' src/reconstruct/vscode/mod.rs | head; grep -n 'impl Tier2Snapshotter for VsCodeSnapshots' -A45 src/reconstruct/tier2.rs | head -50; grep -n 'MAX_SNAPSHOT_DELAY_MS' src/reconstruct/tier2.rs; grep -n 'pub enum Tier2Start' -A10 src/sessions.rs; grep -n 'if let Some(t2) = &self.tier2 {' -A22 src/sessions.rs",
+  "description": "Read tier2 snapshot logic and session hooks"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+66:mod cdp;
+67:mod diff;
+68:mod keys;
+69:mod title;
+71:pub use diff::changed_lines;
+72:pub use title::{is_vscode, resolve_file, title_is_dirty};
+1124:mod tests {
+71:impl Tier2Snapshotter for VsCodeSnapshots {
+72-    fn snapshot(&self, app: &str, raw_title: &str, started_at: Millis, id: i64) -> Tier2Start {
+73-        if !vscode::is_vscode(app) {
+74-            return Tier2Start::NotApplicable;
+75-        }
+76-        let skip = |why: &str| Tier2Start::Skipped(why.to_string());
+77-        if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
+78-            return skip("session ingested too late to snapshot its file");
+79-        }
+80-        if vscode::title_is_dirty(raw_title) {
+81-            return skip("the file had unsaved changes when the session started");
+82-        }
+83-        let Some(file) = vscode::resolve_file(raw_title) else {
+84-            return skip("could not identify the file from the window title");
+85-        };
+86-        let meta = match std::fs::metadata(&file) {
+87-            Ok(m) if m.is_file() => m,
+88-            _ => return skip("the file is not readable"),
+89-        };
+90-        if meta.len() > MAX_FILE_BYTES {
+91-            return skip("the file is too large to replay");
+92-        }
+93-        let modified_ms = meta
+94-            .modified()
+95-            .ok()
+96-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+97-            .map(|d| d.as_millis() as Millis);
+98-        if modified_ms.is_some_and(|m| m > started_at) {
+99-            return skip("the file changed on disk after the session started");
+100-        }
+101-        match std::fs::copy(&file, snapshot_path(&self.dir, id)) {
+102-            Ok(_) => Tier2Start::Snapshot { file },
+103-            Err(_) => skip("could not copy the file"),
+104-        }
+105-    }
+106-
+107-    fn discard(&self, id: i64) {
+108-        let _ = std::fs::remove_file(snapshot_path(&self.dir, id));
+109-    }
+110-}
+111-
+112-/// A finished replay: the session id and its text, or why it failed.
+113-pub type Tier2Result = (i64, std::result::Result<String, String>);
+114-
+115-/// The background worker running tier 2 replays.
+116-pub struct Tier2Worker {
+28:const MAX_SNAPSHOT_DELAY_MS: Millis = 10_000;
+77:        if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
+66:pub enum Tier2Start {
+67-    /// Not a VS Code session, or replay is off.
+68-    NotApplicable,
+69-    /// The edited file was copied to the snapshot path for this session.
+70-    Snapshot { file: PathBuf },
+71-    /// Replay is impossible; the reason is recorded.
+72-    Skipped(String),
+73-}
+74-
+75-/// Takes the file snapshot a tier 2 replay starts from, when a session opens.
+76-pub trait Tier2Snapshotter: Send {
+434:        if let Some(t2) = &self.tier2 {
+435-            let (status, file) = match t2.snapshot(&k.0, raw_window, ts, id) {
+436-                Tier2Start::NotApplicable => (None, None),
+437-                Tier2Start::Snapshot { file } => {
+438-                    tier2_snapshot = true
+… [1562 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:26:33.525Z</sub>
+
+Part 1, the file lookup in `vscode/title.rs`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/vscode/title.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\n# resolve_file -> wrapper + resolve_file_in(config)\nold=s[s.index(\"/// Absolute path of the file being edited, from the window title; see the\"):s.index(\"fn expand_path(\")]\nnew='''/// Absolute path of the file being edited, from the window title; see the\n/// module docs of `vscode` for the two supported title shapes.\npub fn resolve_file(window_title: &str) -> Option<PathBuf> {\n    resolve_file_in(window_title, vscode_config_dir().as_deref())\n}\n\n/// [`resolve_file`] with VS Code's config directory given (tests use a fake).\n///\n/// With the default title (`<file> - <rootName> - Visual Studio Code`) the\n/// file name is looked up, in order, among: the editors open in the window\n/// for folder `<rootName>` (VS Code's per-workspace state), files under that\n/// folder, and that window's editor history. The first place with exactly\n/// one existing file of that name wins; two different files of the same name\n/// in one place make the title ambiguous (`None`). The per-workspace state\n/// is what finds files opened from outside the folder.\npub(crate) fn resolve_file_in(window_title: &str, config: Option<&Path>) -> Option<PathBuf> {\n    let parsed = parse_title(window_title)?;\n    let home = std::env::var_os(\"HOME\").map(PathBuf::from);\n    // (1) A custom window.title that contains a full path.\n    for seg in &parsed.segments {\n        if let Some(p) = expand_path(seg, home.as_deref())\n            && p.is_file()\n        {\n            return Some(p);\n        }\n    }\n    // (2) The default \"<file> - <rootName> - Visual Studio Code\".\n    let name = parsed.editor.as_str();\n    if name.contains('/') || name == \".\" || name == \"..\" {\n        return None;\n    }\n    let config = config?;\n    let history = RecentHistory::load(config);\n    match &parsed.root {\n        Some(root) => {\n            let ws = WorkspaceEditors::load(config, root);\n            match pick(&ws.open, name) {\n                Pick::One(p) => return Some(p),\n                Pick::Many => return None,\n                Pick::None => {}\n            }\n            let mut found: BTreeSet<PathBuf> = BTreeSet::new();\n            for folder in history.folders.iter().filter(|f| {\n                f.file_name().and_then(|n| n.to_str()) == Some(root.as_str()) && f.is_dir()\n            }) {\n                find_named(folder, name, &mut found);\n                if found.len() > 1 {\n                    return None;\n                }\n            }\n            if let Some(p) = found.into_iter().next() {\n                return Some(p);\n            }\n            match pick(&ws.history, name) {\n                Pick::One(p) => Some(p),\n                _ => None,\n            }\n        }\n        // A single file opened without a folder.\n        None => match pick(&history.files.iter().cloned().collect::<Vec<_>>(), name) {\n            Pick::One(p) => Some(p),\n            _ => None,\n        },\n    }\n}\n\nenum Pick {\n    One(PathBuf),\n    Many,\n    None,\n}\n\n/// The one existing regular file named `name` among `candidates`.\nfn pick(candidates: &[PathBuf], name: &str) -> Pick {\n    let found: BTreeSet<&PathBuf> = candidates\n        .iter()\n        .filter(|p| p.file_name().and_then(|n| n.to_str()) == Some(name) && p.is_file())\n        .collect();\n    let mut it = found.into_iter();\n    match (it.next(), it.next()) {\n        (Some(p), None) => Pick::One(p.clone()),\n        (Some(_), Some(_)) => Pick::Many,\n        _ => Pick::None,\n    }\n}\n\n/// Whether the title is an unsaved new file (`Untitled-1`, or VS Code's\n/// `first line • Untitled-1` form): there is no file on disk to replay from.\npub fn title_is_untitled(window_title: &str) -> bool {\n    parse_title(window_title).is_some_and(|p| {\n        let last = p.edito
+… [3892 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:27:04.284Z</sub>
+
+It builds. Now unit tests for the lookup against a fake VS Code config folder. They use the escaped JSON format I saw in your real state file.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/vscode/title.rs'; s=open(p).read()\nanchor=\"\"\"    #[test]\n    fn finds_unique_file_by_name() {\"\"\"\ntest=r'''    /// A fake VS Code config dir with one workspace (folder `ai-logs`) whose\n    /// state lists `open` as open editors and `history` as editor history,\n    /// in the JSON shapes VS Code writes.\n    fn fake_config(dir: &Path, folder: &Path, open: &[&Path], history: &[&Path]) -> PathBuf {\n        let config = dir.join(\"Code\");\n        let ws = config.join(\"User/workspaceStorage/0123abcd\");\n        std::fs::create_dir_all(&ws).unwrap();\n        std::fs::write(\n            ws.join(\"workspace.json\"),\n            format!(r#\"{{\"folder\":\"file://{}\"}}\"#, folder.display()),\n        )\n        .unwrap();\n        let editors: Vec<String> = open\n            .iter()\n            .map(|p| {\n                format!(\n                    r#\"{{\"id\":\"workbench.editors.files.fileEditorInput\",\"value\":\"{{\\\"resourceJSON\\\":{{\\\"$mid\\\":1,\\\"fsPath\\\":\\\"{p}\\\",\\\"external\\\":\\\"file://{p}\\\",\\\"path\\\":\\\"{p}\\\",\\\"scheme\\\":\\\"file\\\"}}}}\"}}\"#,\n                    p = p.display()\n                )\n            })\n            .collect();\n        let parts = format!(\n            r#\"{{\"editorpart.state\":{{\"serializedGrid\":{{\"root\":{{\"type\":\"branch\",\"data\":[{{\"type\":\"leaf\",\"data\":{{\"id\":0,\"editors\":[{}]}}}}]}}}}}}}}\"#,\n            editors.join(\",\")\n        );\n        let entries: Vec<String> = history\n            .iter()\n            .map(|p| format!(r#\"{{\"editor\":{{\"resource\":\"file://{}\",\"forceFile\":true}}}}\"#, p.display()))\n            .collect();\n        let db = rusqlite::Connection::open(ws.join(\"state.vscdb\")).unwrap();\n        db.execute_batch(\"CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)\")\n            .unwrap();\n        db.execute(\n            \"INSERT INTO ItemTable VALUES ('memento/workbench.parts.editor', ?1), ('history.entries', ?2)\",\n            [parts, format!(\"[{}]\", entries.join(\",\"))],\n        )\n        .unwrap();\n        config\n    }\n\n    #[test]\n    fn finds_files_opened_from_outside_the_folder() {\n        let tmp = tempfile::tempdir().unwrap();\n        let folder = tmp.path().join(\"ai-logs\");\n        let desktop = tmp.path().join(\"Desktop\");\n        std::fs::create_dir_all(&folder).unwrap();\n        std::fs::create_dir_all(&desktop).unwrap();\n        let outside = desktop.join(\"test.txt\");\n        std::fs::write(&outside, \"hello\").unwrap();\n        let title = \"test.txt - ai-logs - Visual Studio Code\";\n\n        // Not under the folder: only the window's open editors know it.\n        let config = fake_config(tmp.path(), &folder, &[&outside], &[]);\n        assert_eq!(resolve_file_in(title, Some(&config)), Some(outside.clone()));\n        assert_eq!(resolve_file_in(&format!(\"● {title}\"), Some(&config)), Some(outside.clone()));\n\n        // Only in the editor history: still found.\n        let tmp2 = tempfile::tempdir().unwrap();\n        let config = fake_config(tmp2.path(), &folder, &[], &[&outside]);\n        assert_eq!(resolve_file_in(title, Some(&config)), Some(outside.clone()));\n\n        // Not listed anywhere yet (VS Code saves this state late): not found.\n        let tmp3 = tempfile::tempdir().unwrap();\n        let config = fake_config(tmp3.path(), &folder, &[], &[]);\n        assert_eq!(resolve_file_in(title, Some(&config)), None);\n    }\n\n    #[test]\n    fn same_file_name_open_twice_is_ambiguous() {\n        let tmp = tempfile::tempdir().unwrap();\n        let folder = tmp.path().join(\"ai-logs\");\n        let (a, b) = (tmp.path().join(\"a\"), tmp.path().join(\"b\"));\n        for d in [&folder, &a, &b] {\n            std::fs::create_dir_all(d).unwrap();\n        }\n        std::fs::write(a.join(\"test.txt\"), \"\").unwrap();\n        std::fs::write(b.join(\"test.txt\"), \"\")
+… [1468 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test reconstruct::vscode::title::tests::file_uris ... ok
+test reconstruct::vscode::title::tests::dirty_marker ... ok
+test reconstruct::vscode::title::tests::parses_default_titles ... ok
+test reconstruct::vscode::title::tests::untitled_titles ... ok
+test reconstruct::vscode::title::tests::history_from_storage_json ... ok
+test reconstruct::vscode::title::tests::vscode_app_ids ... ok
+test reconstruct::vscode::title::tests::finds_unique_file_by_name ... ok
+test reconstruct::vscode::title::tests::resolves_absolute_path_titles ... ok
+test reconstruct::vscode::title::tests::same_file_name_open_twice_is_ambiguous ... ok
+test reconstruct::vscode::title::tests::finds_files_opened_from_outside_the_folder ... ok
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 116 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:27:29.203Z</sub>
+
+All lookup tests pass. Now the real case: `resolve_file` on your actual title, against your actual VS Code config:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat > tests/zz_real_resolve.rs <<'EOF'\n#[test]\nfn real() {\n    for t in [\"test.txt - ai-logs - Visual Studio Code\", \"Untitled-1 - ai-logs - Visual Studio Code\"] {\n        println!(\"{t:?} -> {:?} (untitled: {})\", brain::reconstruct::vscode::resolve_file(t), brain::reconstruct::vscode::title_is_untitled(t));\n    }\n}\nEOF\ncargo test --test zz_real_resolve -- --nocapture 2>&1 | grep -- '->'; rm tests/zz_real_resolve.rs",
+  "description": "Check resolution of the real title against the real VS Code config"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+"test.txt - ai-logs - Visual Studio Code" -> Some("/home/juan/Desktop/test.txt") (untitled: false)
+"Untitled-1 - ai-logs - Visual Studio Code" -> None (untitled: true)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The real title now resolves to `/home/juan/Desktop/test.txt`, and `Untitled-1` is identified as an unsaved file. Next I'm taking on parts 2 to 4: the snapshot step's `NotYet` outcome, the session engine's retries, and the skip reasons.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'struct OpenSession' -A16 src/sessions.rs; grep -n 'OpenSession {' src/sessions.rs; grep -n 'fn close(&mut self' -A40 src/sessions.rs | head -45; grep -n 'sessions.close_idle' -B2 -A3 src/ingest.rs",
+  "description": "Locate OpenSession construction, close and ingest hook"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+88:struct OpenSession {
+89-    id: i64,
+90-    editor: FieldEditor,
+91-    last_activity: Millis,
+92-    end_offset: u64,
+93-    tier2_snapshot: bool,
+94-    dirty: bool,
+95-    /// Hash of the document when the session opened: a session that ends
+96-    /// with the same text changed nothing.
+97-    start_hash: u64,
+98-    /// The window's latest title, when typing renamed it (see `aliases`).
+99-    latest: Option<Key>,
+100-}
+101-
+102-fn text_hash(s: &str) -> u64 {
+103-    use std::hash::{Hash, Hasher};
+104-    let mut h = std::collections::hash_map::DefaultHasher::new();
+88:struct OpenSession {
+174:                OpenSession {
+456:            OpenSession {
+592:impl OpenSession {
+494:    fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
+495-        let Some(s) = self.open.remove(k) else {
+496-            return Ok(());
+497-        };
+498-        self.aliases.retain(|_, v| v != k);
+499-        if self.last_key.as_ref().is_some_and(|(lk, _)| lk == k) {
+500-            self.last_key = None;
+501-        }
+502-        let text = s.editor.buf.text();
+503-        let changed = text_hash(&text) != s.start_hash;
+504-        let keep = (changed || reason == "commit") && !text.trim().is_empty();
+505-        if keep {
+506-            tx.prepare_cached(
+507-                "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
+508-                    end_offset = ?3, end_reason = ?4,
+509-                    tier2_status = CASE WHEN tier2_status = 'snapshot' THEN 'pending'
+510-                                        ELSE tier2_status END
+511-                 WHERE id = ?5",
+512-            )?
+513-            .execute(params![
+514-                timefmt::format_ms(s.last_activity),
+515-                text,
+516-                s.end_offset as i64,
+517-                reason,
+518-                s.id
+519-            ])?;
+520-            if s.tier2_snapshot {
+521-                self.staged_jobs.push(s.id);
+522-            }
+523-        } else {
+524-            tx.prepare_cached("DELETE FROM sessions WHERE id = ?1")?
+525-                .execute([s.id])?;
+526-            if s.tier2_snapshot {
+527-                self.staged_discards.push(s.id);
+528-            }
+529-        }
+530-        // The document is saved under the session's key and, if typing
+531-        // renamed the window, under its current title too: the next session
+532-        // in this window will be keyed by that title.
+533-        let keys: Vec<&Key> = std::iter::once(k).chain(s.latest.as_ref()).collect();
+534-        for k in keys {
+157-        if stats.lines < MAX_LINES_PER_STEP {
+158-            // Caught up with the log: idle sessions can close on the wall clock.
+159:            sessions.close_idle(&tx, clock())?;
+160-        }
+161-        let results = std::mem::take(&mut self.tier2_results);
+162-        for (id, result) in &results {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nS='src/sessions.rs'\nedit(S,[\n(\"\"\"    /// The edited file was copied to the snapshot path for this session.\n    Snapshot { file: PathBuf },\n    /// Replay is impossible; the reason is recorded.\n    Skipped(String),\n}\"\"\",\"\"\"    /// The edited file was copied to the snapshot path for this session.\n    Snapshot { file: PathBuf },\n    /// The file cannot be identified yet (VS Code records newly opened files\n    /// with a delay); ask again later.\n    NotYet(String),\n    /// Replay is impossible; the reason is recorded.\n    Skipped(String),\n}\"\"\"),\n(\"\"\"/// Takes the file snapshot a tier 2 replay starts from, when a session opens.\"\"\",\"\"\"/// Takes the file snapshot a tier 2 replay starts from, when a session opens\n/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).\"\"\"),\n(\"\"\"    /// The window's latest title, when typing renamed it (see `aliases`).\n    latest: Option<Key>,\n}\n\nfn text_hash\"\"\",\"\"\"    /// The window's latest title, when typing renamed it (see `aliases`).\n    latest: Option<Key>,\n    /// While the tier 2 file is not identified yet: the window title the\n    /// session started with, and when it started, to ask again.\n    tier2_retry: Option<(String, Millis)>,\n}\n\nfn text_hash\"\"\"),\n])\ns=open(S).read()\n# both OpenSession constructions: add tier2_retry\ns=s.replace(\"\"\"                    start_hash,\n                    latest: None,\n                },\"\"\",\"\"\"                    start_hash,\n                    latest: None,\n                    tier2_retry: None,\n                },\"\"\")\ns=s.replace(\"\"\"                start_hash,\n                latest: None,\n            },\"\"\",\"\"\"                start_hash,\n                latest: None,\n                tier2_retry,\n            },\"\"\")\nopen(S,'w').write(s)\nedit(S,[\n(\"\"\"        let mut tier2_snapshot = false;\n        if let Some(t2) = &self.tier2 {\n            let (status, file) = match t2.snapshot(&k.0, raw_window, ts, id) {\n                Tier2Start::NotApplicable => (None, None),\n                Tier2Start::Snapshot { file } => {\n                    tier2_snapshot = true;\n                    (\n                        Some(\"snapshot\".to_string()),\n                        Some(file.to_string_lossy().into_owned()),\n                    )\n                }\n                Tier2Start::Skipped(why) => (Some(format!(\"skipped: {why}\")), None),\n            };\n            if status.is_some() {\n                tx.execute(\n                    \"UPDATE sessions SET tier2_status = ?1, tier2_file = ?2 WHERE id = ?3\",\n                    params![status, file, id],\n                )?;\n            }\n        }\"\"\",\"\"\"        let mut tier2_snapshot = false;\n        let mut tier2_retry = None;\n        if let Some(t2) = &self.tier2 {\n            let outcome = t2.snapshot(&k.0, raw_window, ts, id);\n            if matches!(outcome, Tier2Start::NotYet(_)) {\n                tier2_retry = Some((raw_window.to_string(), ts));\n            }\n            tier2_snapshot = record_tier2(tx, id, outcome)?;\n        }\"\"\"),\n(\"\"\"    /// Writes the current text of open sessions that changed, so live\"\"\",\"\"\"    /// Asks again for the tier 2 snapshot of open sessions whose file could\n    /// not be identified yet. Call once per ingest step, when caught up.\n    pub fn retry_tier2(&mut self, tx: &Connection) -> Result<()> {\n        let Some(t2) = &self.tier2 else {\n            return Ok(());\n        };\n        for (k, s) in self.open.iter_mut() {\n            let Some((raw, started)) = &s.tier2_retry else {\n                continue;\n            };\n            let outcome = t2.snapshot(&k.0, raw, *started, s.id);\n            if !match
+… [5274 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:28:21.322Z</sub>
+
+Builds. One more wording fix: when the file is found late but was saved in the meantime, the reason should say that.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/tier2.rs'; s=open(p).read()\nold=\"\"\"            return skip(\"the file changed on disk after the session started\");\"\"\"\nnew=\"\"\"            return skip(\n                \"the file changed on disk after the session started \\\\\n                 (saved before it could be snapshotted)\",\n            );\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ngrep -n 'mod tests' src/sessions.rs | head -2; grep -n 'fn ingester(&self' -A4 src/sessions.rs",
+  "description": "Clarify the late-save reason; locate session test helpers"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+717:mod tests {
+790:        fn ingester(&self, db: &str) -> Ingester {
+791-            Ingester::new(
+792-                store::open_writer(&self.dir.join(db)).unwrap(),
+793-                &self.log_path(),
+794-            )
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:28:33.801Z</sub>
+
+Now session tests with a fake snapshotter that answers "not yet" a few times. They cover a late success, never finding the file, and a final skip (e.g. the file was saved in between).
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/sessions.rs'; s=open(p).read()\nanchor=\"\"\"    #[test]\n    fn enter_commits_single_line_fields() {\"\"\"\ntest='''    /// A tier 2 snapshotter that cannot identify the file for the first\n    /// `not_yet` calls, then answers `then`.\n    struct LateSnapshots {\n        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,\n        not_yet: usize,\n        then: super::Tier2Start,\n    }\n    impl super::Tier2Snapshotter for LateSnapshots {\n        fn snapshot(&self, _: &str, _: &str, _: Millis, _: i64) -> super::Tier2Start {\n            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);\n            if n < self.not_yet {\n                super::Tier2Start::NotYet(\"not identified yet\".into())\n            } else {\n                self.then.clone()\n            }\n        }\n        fn discard(&self, _: i64) {}\n    }\n\n    fn tier2_status(ing: &Ingester) -> Option<String> {\n        ing.connection()\n            .query_row(\"SELECT tier2_status FROM sessions\", [], |r| r.get(0))\n            .unwrap()\n    }\n\n    #[test]\n    fn tier2_file_identified_late_is_retried() {\n        let mut l = Log::new();\n        l.typ(T0, \"code\", \"test.txt - ai-logs - Visual Studio Code\", \"abc\");\n        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));\n        let late = |not_yet, then| -> Box<dyn super::Tier2Snapshotter> {\n            Box::new(LateSnapshots {\n                calls: calls.clone(),\n                not_yet,\n                then,\n            })\n        };\n        let snapshot = super::Tier2Start::Snapshot {\n            file: \"/home/u/Desktop/test.txt\".into(),\n        };\n        // Found on the third try (two ingest steps after the session opened).\n        let mut ing = Ingester::with_tier2(\n            store::open_writer(&l.dir.join(\"a.db\")).unwrap(),\n            &l.log_path(),\n            Some(late(2, snapshot.clone())),\n        )\n        .unwrap();\n        ing.step_at(clock_t0).unwrap(); // opens (try 1), retries (try 2)\n        assert_eq!(tier2_status(&ing).as_deref(), Some(\"resolving\"));\n        ing.step_at(clock_t0).unwrap(); // try 3: found\n        assert_eq!(tier2_status(&ing).as_deref(), Some(\"snapshot\"));\n        let file: String = ing\n            .connection()\n            .query_row(\"SELECT tier2_file FROM sessions\", [], |r| r.get(0))\n            .unwrap();\n        assert_eq!(file, \"/home/u/Desktop/test.txt\");\n        ing.step_at(clock_late).unwrap(); // idle close: queued for replay\n        assert_eq!(tier2_status(&ing).as_deref(), Some(\"pending\"));\n        assert_eq!(ing.take_tier2_jobs(), vec![1]);\n\n        // Never identified: the session closes as skipped, with the reason.\n        calls.store(0, std::sync::atomic::Ordering::SeqCst);\n        let mut ing = Ingester::with_tier2(\n            store::open_writer(&l.dir.join(\"b.db\")).unwrap(),\n            &l.log_path(),\n            Some(late(usize::MAX, snapshot.clone())),\n        )\n        .unwrap();\n        ing.step_at(clock_t0).unwrap();\n        ing.step_at(clock_late).unwrap();\n        assert_eq!(tier2_status(&ing).as_deref(), Some(\"skipped: not identified yet\"));\n        assert!(ing.take_tier2_jobs().is_empty());\n\n        // Identified, but impossible to replay (saved in between): skipped\n        // with that reason, and not asked again.\n        calls.store(0, std::sync::atomic::Ordering::SeqCst);\n        let mut ing = Ingester::with_tier2(\n            store::open_writer(&l.dir.join(\"c.db\")).unwrap(),\n            &l.log_path(),\n            Some(late(1, super::Tier2Start::Skipped(\"saved meanwhile\".into()))),\n        )\n        .unwrap();\n        ing.step_at(clock_t0).unwrap();\n        let after_skip = calls.load(std::sync::atomic::Ordering::SeqCst);\n        ing.step_at(clock_t0).unwrap();\n        ing.step_at(clock_late).unwrap();\n        assert_eq!(tier2_status(&ing).as_deref(), Some(\"skip
+… [627 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+64-/// How a VS Code session can be replayed in the real editor (tier 2).
+65-#[derive(Debug, Clone, PartialEq, Eq)]
+66:pub enum Tier2Start {
+test sessions::tests::tier2_file_identified_late_is_retried ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 0.01s
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Late identification works for all three cases. I'm adding an optional config-folder parameter to `VsCodeSnapshots` so the end-to-end test can use a fake VS Code config, then I'll run it on a file outside the workspace.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub struct VsCodeSnapshots' -A12 src/reconstruct/tier2.rs",
+  "description": "Read VsCodeSnapshots struct and constructor"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+42:pub struct VsCodeSnapshots {
+43-    dir: PathBuf,
+44-}
+45-
+46-impl VsCodeSnapshots {
+47-    pub fn new(dir: PathBuf) -> Result<Self> {
+48-        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+49-        Ok(Self { dir })
+50-    }
+51-
+52-    /// Removes snapshots no session needs any more (left behind when `brain
+53-    /// run` died between taking a snapshot and committing its session).
+54-    pub fn prune(&self, conn: &rusqlite::Connection) -> Result<()> {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/reconstruct/tier2.rs',[\n(\"\"\"pub struct VsCodeSnapshots {\n    dir: PathBuf,\n}\n\nimpl VsCodeSnapshots {\n    pub fn new(dir: PathBuf) -> Result<Self> {\n        std::fs::create_dir_all(&dir).with_context(|| format!(\"creating {}\", dir.display()))?;\n        Ok(Self { dir })\n    }\"\"\",\"\"\"pub struct VsCodeSnapshots {\n    dir: PathBuf,\n    /// VS Code's config directory to read window state from; `None` means\n    /// the user's (`~/.config/Code`). Tests give a fake one.\n    vscode_config: Option<PathBuf>,\n}\n\nimpl VsCodeSnapshots {\n    pub fn new(dir: PathBuf) -> Result<Self> {\n        std::fs::create_dir_all(&dir).with_context(|| format!(\"creating {}\", dir.display()))?;\n        Ok(Self {\n            dir,\n            vscode_config: None,\n        })\n    }\n\n    /// Reads VS Code's window state from `config` instead of the user's.\n    pub fn with_vscode_config(mut self, config: PathBuf) -> Self {\n        self.vscode_config = Some(config);\n        self\n    }\"\"\"),\n(\"\"\"        let Some(file) = vscode::resolve_file(raw_title) else {\"\"\",\"\"\"        let resolved = match &self.vscode_config {\n            Some(config) => vscode::resolve_file_in(raw_title, Some(config)),\n            None => vscode::resolve_file(raw_title),\n        };\n        let Some(file) = resolved else {\"\"\"),\n])\nedit('src/reconstruct/vscode/mod.rs',[(\"pub use title::{is_vscode, resolve_file, title_is_dirty, title_is_untitled};\",\"pub use title::{is_vscode, resolve_file, resolve_file_in, title_is_dirty, title_is_untitled};\")])\ns=open('src/reconstruct/vscode/title.rs').read()\ns=s.replace(\"pub(crate) fn resolve_file_in(window_title: &str, config: Option<&Path>) -> Option<PathBuf> {\",\"pub fn resolve_file_in(window_title: &str, config: Option<&Path>) -> Option<PathBuf> {\")\nopen('src/reconstruct/vscode/title.rs','w').write(s)\nEOF\ncargo build 2>&1 | grep -E '^(error|warning)' -A10 | head -20; sed -n 1,40p tests/tier2_e2e.rs",
+  "description": "Allow injecting a VS Code config dir; read the e2e test head"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! End to end through ingest: a VS Code session in the log is snapshotted
+//! when it opens, marked pending when it closes, replayed by the worker in a
+//! real (sandboxed, headless) VS Code, and its tier 2 text written back.
+//!
+//! Needs /usr/bin/code, so it is ignored by default:
+//! `cargo test --release --test tier2_e2e -- --ignored`
+
+use brain::event::{Event, EventKind, Mod, SystemState};
+use brain::eventlog::LogWriter;
+use brain::ingest::Ingester;
+use brain::reconstruct::tier2::{Tier2Worker, VsCodeSnapshots};
+use brain::store;
+use brain::timefmt::now_ms;
+use rusqlite::Connection;
+use std::time::{Duration, Instant};
+
+#[test]
+#[ignore]
+fn vscode_session_is_upgraded_to_tier_2() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join("main.js");
+    std::fs::write(&file, "const a = 1;\n").unwrap();
+    std::thread::sleep(Duration::from_millis(20)); // file mtime < session start
+
+    let data = tmp.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let log_path = data.join("events.jsonl");
+    let db_path = data.join("brain.db");
+    let mut log = LogWriter::open(&log_path).unwrap();
+    // Title with the absolute path (window.title = ${activeEditorLong}).
+    let title = format!("{} - project - Visual Studio Code", file.display());
+    let mut ts = now_ms();
+    let mut key = |log: &mut LogWriter, k: &str, mods: Vec<Mod>| {
+        log.append(&Event {
+            ts,
+            app: "code".into(),
+            kind: EventKind::Key {
+                key: k.into(),
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm running the second end-to-end test, where a file outside the project shows up late, and then the real VS Code replay.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat >> tests/tier2_e2e.rs <<'EOF'\n\n/// Writes a fake VS Code window state for folder `project` listing `open`\n/// as its open editors (the shape VS Code writes in workspaceStorage).\nfn write_window_state(config: &std::path::Path, project: &std::path::Path, open: &[&std::path::Path]) {\n    let ws = config.join(\"User/workspaceStorage/0123abcd\");\n    std::fs::create_dir_all(&ws).unwrap();\n    std::fs::write(\n        ws.join(\"workspace.json\"),\n        format!(r#\"{{\"folder\":\"file://{}\"}}\"#, project.display()),\n    )\n    .unwrap();\n    let editors: Vec<String> = open\n        .iter()\n        .map(|p| {\n            format!(\n                r#\"{{\"id\":\"workbench.editors.files.fileEditorInput\",\"value\":\"{{\\\"resourceJSON\\\":{{\\\"fsPath\\\":\\\"{p}\\\",\\\"external\\\":\\\"file://{p}\\\",\\\"scheme\\\":\\\"file\\\"}}}}\"}}\"#,\n                p = p.display()\n            )\n        })\n        .collect();\n    let db = Connection::open(ws.join(\"state.vscdb\")).unwrap();\n    db.execute_batch(\n        \"CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)\",\n    )\n    .unwrap();\n    db.execute(\n        \"INSERT INTO ItemTable VALUES ('memento/workbench.parts.editor', ?1)\",\n        [format!(r#\"{{\"editorpart.state\":{{\"editors\":[{}]}}}}\"#, editors.join(\",\"))],\n    )\n    .unwrap();\n}\n\n/// The owner's case: VS Code's default title (`notes.js - project - Visual\n/// Studio Code`) for a file opened from outside the window's folder, which\n/// VS Code lists in its window state only a while after it was opened. The\n/// lookup is retried until it appears, then the session is replayed.\n#[test]\n#[ignore]\nfn file_outside_the_folder_is_identified_late_and_replayed() {\n    let tmp = tempfile::tempdir().unwrap();\n    let project = tmp.path().join(\"project\");\n    let desktop = tmp.path().join(\"Desktop\");\n    std::fs::create_dir_all(&project).unwrap();\n    std::fs::create_dir_all(&desktop).unwrap();\n    let file = desktop.join(\"notes.js\");\n    std::fs::write(&file, \"const a = 1;\\n\").unwrap();\n    std::thread::sleep(Duration::from_millis(20)); // file mtime < session start\n    let config = tmp.path().join(\"Code\");\n    write_window_state(&config, &project, &[]); // not listed yet\n\n    let data = tmp.path().join(\"data\");\n    std::fs::create_dir_all(&data).unwrap();\n    let log_path = data.join(\"events.jsonl\");\n    let db_path = data.join(\"brain.db\");\n    let mut log = LogWriter::open(&log_path).unwrap();\n    let title = \"notes.js - project - Visual Studio Code\";\n    let mut ts = now_ms();\n    for c in \"let b = 2;\".chars() {\n        log.append(&Event {\n            ts,\n            app: \"com.microsoft.VSCode\".into(),\n            kind: EventKind::Key {\n                key: c.to_string(),\n                mods: vec![],\n                repeat: false,\n                window: title.into(),\n            },\n        })\n        .unwrap();\n        ts += 50;\n    }\n    let vscode_dir = data.join(\"vscode\");\n    let snaps = VsCodeSnapshots::new(vscode_dir.join(\"snapshots\"))\n        .unwrap()\n        .with_vscode_config(config.clone());\n    let mut ing =\n        Ingester::with_tier2(store::open_writer(&db_path).unwrap(), &log_path, Some(Box::new(snaps)))\n            .unwrap();\n    let c = Connection::open(&db_path).unwrap();\n    let status = || -> Option<String> {\n        c.query_row(\"SELECT tier2_status FROM sessions\", [], |r| r.get(0)).unwrap()\n    };\n    ing.catch_up(10).unwrap();\n    assert_eq!(status().as_deref(), Some(\"resolving\"));\n\n    // VS Code saves its window state: the next ingest pass finds the file.\n    write_window_state(&config, &project, &[&file]);\n    ing.catch_up(10).unwrap();\n    assert_eq!(status().as_deref(), Some(\"snapshot\"));\n    let snapshot_file: String = c\n        .query_row(\"SELECT tier2_file FROM sessions\", [], |r| r.get(0))\n        .unwrap();\n    asser
+… [1525 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test file_outside_the_folder_is_identified_late_and_replayed ... 
+thread 'file_outside_the_folder_is_identified_late_and_replayed' (601734) panicked at tests/tier2_e2e.rs:276:5:
+assertion `left == right` failed
+  left: "let b = 2;"
+ right: "const a = 1;let b = 2;"
+test vscode_session_is_upgraded_to_tier_2 ... tier 2 replay took 27.121017373s: Ok("function f() {\n    return a;\n}")
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 53.95s
+[This command modified 3 files you've previously read: src/sessions.rs, src/reconstruct/vscode/title.rs, tests/tier2_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The pipeline ran end to end and the failure was my expectation, not the code: the trailing newline makes the changed lines exactly `let b = 2;`. I'm correcting the expectation now.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/tier2_e2e.rs'; s=open(p).read()\nold=\"\"\"    // Replayed at the end of the real file: only the new line is the session's.\n    assert_eq!(text, \"const a = 1;let b = 2;\");\"\"\"\nnew=\"\"\"    // Replayed at the end of the real file (after its final newline): the\n    // session's text is the line it added.\n    assert_eq!(text, \"let b = 2;\");\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo test --release --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E '^test |test result|panicked'",
+  "description": "Fix expectation and rerun tier 2 e2e tests",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test file_outside_the_folder_is_identified_late_and_replayed ... ok
+test vscode_session_is_upgraded_to_tier_2 ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 48.60s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:32:18.245Z</sub>
+
+Both end-to-end tests pass. Now the full default suite, then the docs, which still say the snapshot must happen within 10 s.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | head -5; grep -n '10 s\\|within 10\\|resolve\\|window.title\\|activeEditorLong\\|tier2_e2e' README.md PLAN.md CLAUDE.md | cut -c1-150",
+  "description": "Run default suite; find docs to update for tier 2 lookup",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.90s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.52s
+CLAUDE.md:15:(`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon
+CLAUDE.md:36:  range, per app and window title, run through the tier 0/1 adapters from
+CLAUDE.md:41:  `--app` may be part of the id; `text` resolves it to exactly one app and
+CLAUDE.md:43:- Sessions: keyed by (app, normalized window title); close after 30 s idle
+CLAUDE.md:104:  vscode_replay --test tier2_e2e -- --ignored --test-threads=1`.
+README.md:130:  (window title), run through the app's tier 0/1 rules (Backspace,
+README.md:139:  resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
+README.md:160:and the resolved window is echoed (`from`, `to`, `at`). The log and the
+README.md:223:* A session is one `(app, window title)`. Markers that change while you
+README.md:269:  input lag. Focus (app + window title) comes from a small KWin script
+README.md:271:* **Keys are resolved at capture time** with libxkbcommon and your real
+README.md:312:* **Session key `(app, window title)`**, with markers that change while
+README.md:340:  content at session start (snapshot within 10 s, no unsaved changes),
+README.md:348:  adapters the sessions use, per app and window title, from an empty text:
+README.md:362:  `text` must resolve to exactly one app and reports its full id, so two
+README.md:394:cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+PLAN.md:26:  resolves each key to the character the app receives with libxkbcommon and
+PLAN.md:27:  the user's real layouts. Focus (app id and window title) comes from a KWin
+PLAN.md:93:**Decision: evdev (A), passive and never grabbed, with characters resolved by
+PLAN.md:119:  is not Latin in the active layout is resolved in the first layout where it
+PLAN.md:187:window title:
+PLAN.md:262:- A session is one **`(app, window title)`**. The title is normalized first:
+PLAN.md:332:  the file is identified from the window title (an absolute path, or the
+PLAN.md:333:  default title resolved through VS Code's recently opened folders) and
+PLAN.md:434:  (window title) and each app window's events run, from an empty text,
+PLAN.md:443:  every matching app; `text` resolves it to one full id (exact match first,
+PLAN.md:453:  Output times are local with their offset (RFC 3339), and the resolved
+PLAN.md:518:  `vscode_replay` and `tier2_e2e` drive real VS Code.
+PLAN.md:550:  must be taken within 10 s of the session starting).
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 337,344p README.md; sed -n 329,345p PLAN.md; sed -n 544,552p PLAN.md; grep -n 'Tier 2\\*\\* (`--vscode-replay`)' -A8 README.md",
+  "description": "Read tier 2 passages in README and PLAN"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+* **Sessions that changed nothing leave no row** (cursor movement only, a
+  typo typed and deleted, whitespace).
+* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
+  content at session start (snapshot within 10 s, no unsaved changes),
+  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
+  outside brain's budget), and runs with extensions disabled when your
+  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+
+  plain Ctrl+V does not paste in a terminal.
+- **Tier 2, VS Code replayed in VS Code** (`reconstruct/vscode/`,
+  `tier2.rs`, opt-in with `--vscode-replay`): when a VS Code session opens,
+  the file is identified from the window title (an absolute path, or the
+  default title resolved through VS Code's recently opened folders) and
+  copied, unless it had unsaved changes or changed on disk after the session
+  started. When the session closes with its tier 0/1 text, a worker replays
+  the session's own keystrokes from the log into one warm, headless VS Code
+  (Electron's headless mode, no display server) over the DevTools protocol on
+  a pipe, in its own network namespace and a CPU/memory-capped systemd scope,
+  with the user's settings and keybindings. It saves and the session's text
+  becomes the changed lines. Failures and timeouts keep the tier 0/1 text;
+  pending jobs survive restarts.
+
+*Differs from the design*: no Xvfb (headless Electron needs no display), and
+the CDP connection is a pipe, because the network namespace makes a TCP port
+unreachable.
+- **Other password prompts** are captured. AT-SPI's `password text` role
+  would allow skipping them in apps that expose it.
+- **VS Code tier 2** assumes the cursor starts at the end of the file,
+  replays faster than a human (so accepting a suggestion may not replay the
+  same), runs without extensions when they exceed 300 MB, and is the one part
+  of `brain.db` a rebuild from the log does not reproduce (its file snapshot
+  must be taken within 10 s of the session starting).
+- **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
+  be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
+249:* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its
+250-  keystrokes are replayed into a headless VS Code with your settings, in a
+251-  network-less sandbox with capped CPU and memory. The session text then
+252-  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
+253-  The session stores the changed lines. If replay is impossible or fails,
+254-  the tier 0/1 text stays.
+255-
+256-Inspect the result:
+257-
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"  The session stores the changed lines. If replay is impossible or fails,\n  the tier 0/1 text stays.\"\"\",\"\"\"  The session stores the changed lines. If replay is impossible or fails,\n  the tier 0/1 text stays, and the `tier2_status` column says why.\n  The edited file is found from the window title: VS Code's default title\n  only has the file and folder names, so `brain` looks the name up in VS\n  Code's own state for that window (the editors it has open, also for files\n  opened from outside the folder), under the folder, and in the window's\n  editor history. VS Code records a newly opened file there a little late,\n  so the lookup is retried while the session is open (up to 2 minutes).\n  For an instant, exact match, put the full path in the title (VS Code\n  setting `\"window.title\": \"${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}\"`).\"\"\"),\n(\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's\n  content at session start (snapshot within 10 s, no unsaved changes),\"\"\",\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's\n  content at session start, so it is skipped for unsaved new files\n  (`Untitled-1`), files with unsaved changes when the session started, and\n  files saved before they could be identified (within 2 minutes of the\n  session start);\"\"\"),\n(\"\"\"cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1\"\"\",\"\"\"cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1\n#   (tier2_e2e includes a file opened from outside the window's folder,\n#    identified late through VS Code's window state)\"\"\"),\n])\nedit('PLAN.md',[\n(\"\"\"  the file is identified from the window title (an absolute path, or the\n  default title resolved through VS Code's recently opened folders) and\n  copied, unless it had unsaved changes or changed on disk after the session\n  started.\"\"\",\"\"\"  the file is identified from the window title: an absolute path if the\n  title has one, otherwise the title's file name looked up in VS Code's\n  per-workspace state for the window's folder (its open editors, which also\n  covers files opened from outside the folder), under that folder, then in\n  the window's editor history; one existing match is required. VS Code\n  writes that state with a delay, so an unidentified file is looked up\n  again on each ingest step while the session is open, for up to 2 minutes.\n  The file is copied, unless it is an unsaved new file (`Untitled-1`), had\n  unsaved changes when the session started, or changed on disk after the\n  session started (a late snapshot is therefore still the starting text).\"\"\"),\n(\"\"\"  of `brain.db` a rebuild from the log does not reproduce (its file snapshot\n  must be taken within 10 s of the session starting).\"\"\",\"\"\"  of `brain.db` a rebuild from the log does not reproduce (its file snapshot\n  must be taken within 2 minutes of the session starting, before the file\n  is saved).\"\"\"),\n])\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -cE '^warning'",
+  "description": "Update README and PLAN for the tier 2 lookup"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+[This command modified 2 files you've previously read: PLAN.md, README.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:34:15.321Z</sub>
+
+Clean. The VS Code test that resolves a default title against your real config also touches the changed code, so I'll run it:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --test vscode_replay vscode_resolves_default_title_from_history -- --ignored 2>&1 | grep -E '^test |test result|panicked'",
+  "description": "Run the real-config title resolution test",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test vscode_resolves_default_title_from_history ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+```
+
+</details>
+
