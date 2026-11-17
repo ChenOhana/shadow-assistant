@@ -17194,3 +17194,1014 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; fin
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src tests README.md PLAN.md && git commit -q -F - <<'EOF'\nFind VS Code files opened outside the folder\n\nTier 2 was skipped for a file opened from outside the window's folder\n(~/Desktop/test.txt in a window on the ai-logs folder): VS Code's\ndefault title only has the file and folder names, and the lookup only\nsearched inside the folder.\n\nThe lookup now also reads VS Code's per-workspace state for that\nfolder: the editors the window has open (which records the full path\nof every open file) and its editor history. The order is open editors,\nthen files under the folder, then the history; one existing match is\nrequired, two different files of the same name stay ambiguous.\n\nVS Code writes that state with a delay, so a file opened just before\ntyping may not be listed yet. Instead of giving up when the session\nopens, the session is marked `resolving` and the lookup is retried on\neach ingest step while it is open, for up to 2 minutes. A late\nsnapshot is still the starting text, since the file must not have\nchanged on disk since the session started; otherwise the session is\nskipped with that reason. Unsaved new files (Untitled-1) are now\nskipped as such instead of as \"could not identify the file\".\n\nTests: lookup unit tests against a fake VS Code config (outside the\nfolder, history only, not listed yet, ambiguous, untitled), session\ntests for late identification with a fake snapshotter, and an end to\nend test where the file is listed late and then replayed in VS Code.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2",
+  "description": "Commit the fix, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+eab169c Refresh AI logs
+337231c Find VS Code files opened outside the folder
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T13:34:53.998Z</sub>
+
+Fixed and pushed (`337231c`, plus an `ai-logs/` refresh `eab169c`). The design is unchanged: VS Code sessions are still snapshotted while open, marked pending when they close, and replayed by the worker. What's new is how the edited file is found, plus a retry when it can't be found yet. Checked against your real VS Code config, your exact title (`test.txt - ai-logs - Visual Studio Code`) now resolves to `/home/juan/Desktop/test.txt`.
+
+**What changed:**
+- **The file lookup now reads VS Code's own state for that window** (per-workspace `state.vscdb`). It searches, in order:
+  - The editors the window has open. This records the full path even for files outside the folder, which was your case.
+  - Files under the folder, as before.
+  - The window's editor history.
+  - It needs exactly one existing match. Two different files with the same name are still skipped rather than guessed.
+- **Retry while the session is open.** VS Code writes that state a little late, so if the file can't be found when the session opens, the session's `tier2_status` becomes `resolving`. `brain` tries again on each ingest pass, about once a second, for up to 2 minutes. A late snapshot is still correct, because it's only taken if the file hasn't changed on disk since the session started. If you saved before it was found, it's skipped and says so.
+- **Clearer skip reasons:**
+  - `Untitled-1` now gives `skipped: unsaved new file (nothing on disk to replay from)`.
+  - A file saved too early gives `… changed on disk after the session started (saved before it could be snapshotted)`.
+- **Testing support:** `VsCodeSnapshots::with_vscode_config(...)` lets a test supply a fake VS Code config.
+
+**Tests:**
+- **Lookup tests against a fake VS Code config:**
+  - a file outside the folder, found through the open editors;
+  - a file found only through the history;
+  - a file not listed yet;
+  - two open files with the same name, which stay ambiguous;
+  - an open editor winning over a same-named file in the folder;
+  - untitled titles.
+- **Session test** with a fake snapshotter: found on the third try (`resolving` → `snapshot` → `pending`, and the job is queued); never found (skipped with the reason); found but not replayable (skipped and not asked again).
+- **New end-to-end test with real VS Code:** a file in a separate "Desktop" folder that VS Code's state lists only after the session opened. `brain` finds it on a later pass, replays it, and marks it tier 2 `done`.
+- **Results:** 127 unit tests, crash safety, `query_cli`, `perf_budget`, both tier-2 end-to-end tests and the real-config lookup test all pass. Clippy and the generated docs are clean.
+
+**Docs:** the README and PLAN.md describe the lookup, the 2-minute retry and the skip reasons. The README also recommends one VS Code setting that makes it instant and exact, a full path in the title:
+`"window.title": "${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"`
+
+**To try it yourself:**
+```sh
+make                                   # install the new build
+./target/release/brain run --vscode-replay --data-dir /tmp/brain-manual
+# open ~/Desktop/test.txt (saved) in your ai-logs VS Code window, type, then stop typing for 30+ s
+sqlite3 /tmp/brain-manual/brain.db "SELECT id, tier_used, tier2_status, tier2_file FROM sessions WHERE app LIKE '%VSCode%'"
+```
+Expected: `tier2_status` goes `resolving` → `snapshot` → `pending` → `done`, with `tier_used = 2`. The first replay takes about 25 s while VS Code starts.
+
+## User  <sub>2026-11-17T14:01:04.750Z</sub>
+
+i tested it and the text file worked good. but i created a cpp file and also used the autocomplete. i wrote st then a few down arrows to reach to the std autocomplete but it couldn't reconstruct it good, it also doesn't take the current content of the file after closing and reopening vscode, also status is done although the file text and the session reconstructed text don't match. for some reason the last session also stuck on open status. 
+investigate all of these, explain and suggest a fix
+
+## Assistant  <sub>2026-11-17T14:01:41.683Z</sub>
+
+I'll start from the data of your test: the sessions, their tier-2 status, and the raw events.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for db in $(find /tmp ~/.local/state ~/brain-data -maxdepth 3 -name brain.db -newer /home/juan/Documents/shadow-assistant/Cargo.toml 2>/dev/null); do echo \"== $db\"; python3 -c \"\nimport sqlite3; c=sqlite3.connect('file:$db?mode=ro',uri=True)\nfor r in c.execute(\\\"select id,app,window,started_at,ended_at,status,end_reason,tier_used,tier2_status,tier2_file,start_offset,end_offset,reconstructed_text from sessions where lower(app) like '%code%' order by id\\\"): print(r)\nprint('ingest offset', c.execute('select log_offset from ingest_state').fetchone())\" 2>&1; done; pgrep -af 'brain run' | grep -v pgrep",
+  "description": "Inspect VS Code sessions in the user's test data"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== /home/juan/brain-data/brain.db
+(1, 'com.microsoft.VSCode', 'testing new • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T10:17:11.076Z', '2026-11-17T10:17:22.190Z', 'closed', 'idle', 1, None, None, 440, 8516, 'testing again\nnew\nline\n')
+(2, 'com.microsoft.VSCode', 'testing again • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T10:21:46.139Z', '2026-11-17T10:21:53.132Z', 'closed', 'idle', 1, None, None, 10731, 17078, 'testing again\nnew\nline\ntesting copy data')
+(3, 'com.microsoft.VSCode', 'Untitled-2 - ai-logs - Visual Studio Code', '2026-11-17T10:21:57.377Z', '2026-11-17T10:22:02.227Z', 'closed', 'idle', 1, None, None, 17733, 19292, 'testing copy data\npasted')
+(78, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T12:36:07.675Z', '2026-11-17T12:36:17.614Z', 'closed', 'idle', 1, None, None, 329908, 341769, 'testing normal file in vscode\nnew line\n')
+(79, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T12:37:06.647Z', '2026-11-17T12:37:28.727Z', 'closed', 'idle', 1, None, None, 342997, 347826, 'editing a saved file\n\n')
+(121, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T12:57:16.772Z', '2026-11-17T12:57:30.970Z', 'closed', 'idle', 1, None, None, 499169, 509474, 'checking writing with service in the background\n\nnice :)\nworks')
+(161, 'com.microsoft.VSCode', 'test.txt - ai-logs - Visual Studio Code', '2026-11-17T13:37:43.306Z', '2026-11-17T13:38:45.332Z', 'closed', 'idle', 1, None, None, 845617, 866705, 'checking saved file now\n\nnew lintested and ctrl+z\n\ncheck')
+(162, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T13:37:49.033Z', '2026-11-17T13:37:52.020Z', 'closed', 'idle', 1, None, None, 846376, 851640, 'testing normal file in vscode\nnew line\nchecking untitled')
+(164, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T13:41:49.611Z', '2026-11-17T13:42:01.482Z', 'closed', 'idle', 1, None, None, 878424, 889677, 'testing normal file in vscode\nnew line\nchecking untit// ledcreating cpp file\n\n')
+(166, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:42:22.681Z', '2026-11-17T13:44:22.511Z', 'closed', 'idle', 1, None, None, 891802, 917664, 'int fint numunc ( {\n\nretu\n\tint status = num * 2;\n\nstd::cout << "printing shit\n << st\n status;\n::endl;\n#include <stdio>\n\n')
+(169, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:50:10.395Z', '2026-11-17T13:50:34.728Z', 'closed', 'idle', 1, None, None, 943422, 949848, 'int fint numunc ( {\n\nretu\n\tint status = num * 2;\n\nstd::cout << "printing shit\n << st\n\n\tstd::cout << st\n status;\n::endl;\n\n\n::endl;\n#include <stdio>\n\n\n\n')
+(172, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:52:25.297Z', '2026-11-17T13:52:45.424Z', 'closed', 'idle', 1, None, None, 955337, 966167, 'int fint numunc ( {\n\nretu\n\tint
+… [2610 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Three `test.cpp` sessions in your test database are marked tier 2 `done` with poor text, and two `brain run` processes are still going, one a leftover synthetic test instance. I'm checking the open sessions, both processes, and the real file next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for db in ~/brain-data/brain.db /tmp/brain-manual/brain.db; do echo \"== $db open sessions:\"; python3 -c \"\nimport sqlite3; c=sqlite3.connect('file:$db?mode=ro',uri=True)\nfor r in c.execute(\\\"select id,app,window,started_at,status,start_offset,substr(reconstructed_text,1,50) from sessions where status='open'\\\"): print(r)\"; done; for p in 406506 591827; do echo \"== pid $p: $(ps -o etime=,args= -p $p) cwd=$(readlink /proc/$p/cwd) ppid=$(ps -o ppid= -p $p)\"; cat /proc/$p/cgroup 2>/dev/null | tail -1; done; echo \"== test.cpp:\"; cat -A ~/Desktop/test.cpp | head -40; ls -la --time-style=full-iso ~/Desktop/test.cpp",
+  "description": "Check open sessions, running brain processes and the real file"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== /home/juan/brain-data/brain.db open sessions:
+== /tmp/brain-manual/brain.db open sessions:
+== pid 406506:    15:58:25 /home/juan/Documents/shadow-assistant/target/release/brain run --synthetic 200 --data-dir /tmp/.tmpd1bh9m/data cwd=/home/juan/Documents/shadow-assistant ppid=   1501
+0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-ghostty-surface-transient-112405.scope
+== pid 591827:    01:00:08 brain run cwd=/home/juan ppid=   3263
+0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-ghostty-surface-transient-3261.scope
+== test.cpp:
+// creating cpp file$
+$
+#include <stdio>$
+$
+int func (int num) {$
+$
+    int status = num * 2;$
+$
+    std::cout << "printing shit" << std::endl;$
+$
+    std::cout << std::endl;$
+$
+    return status;$
+$
+}$
+$
+-rw-rw-r-- 1 juan juan 189 2026-11-17 15:52:46.261195328 +0200 /home/juan/Desktop/test.cpp
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+No sessions are open now, so I need more evidence on the "stuck on open" point. I'm also stopping pid 406506, a leftover `brain run --synthetic 200` from my test runs that has kept typing at 200 keys per second, and leaving your own process (pid 591827) alone. Next I'll check the end of your test log.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "kill -TERM 406506; sleep 2; ps -p 406506 >/dev/null && echo \"still running\" || echo \"leftover test process stopped\"; L=/tmp/brain-manual/events.jsonl; echo \"lines: $(wc -l < $L)\"; grep -n '\"system\"' $L | tail -6 | cut -c1-140; tail -3 $L | cut -c1-160; python3 -c \"\nimport os;print('log size', os.path.getsize('$L'))\"",
+  "description": "Stop leftover test process; inspect end of the user's test log"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Destructive or Unwanted Actions]. If you have other tasks that don't depend on this action, continue working on those. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat. But you *should not* attempt to work around this denial in malicious ways, e.g. do not use your ability to run tests to execute non-test actions. You should only try to work around this restriction in reasonable ways that do not attempt to bypass the intent behind this denial. If you believe this capability is essential to complete the user's request, first try a safer method. Get as much of the rest of the task done as you can, then STOP and explain to the user what you were trying to do and why you need this permission. Let the user decide how to proceed. To allow this type of action in the future, the user can add a permission rule for Bash to their settings.
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:02:29.086Z</sub>
+
+My permissions won't let me stop that process, so I'll leave it for you and continue reading:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "L=/tmp/brain-manual/events.jsonl; echo \"lines: $(wc -l < $L) size: $(stat -c %s $L)\"; grep -n '\"system\"' $L | tail -6 | cut -c1-140; echo ...; tail -3 $L | cut -c1-160",
+  "description": "Inspect the end of the user's test log"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+lines: 1912 size: 286996
+1223:{"ts":"2026-11-17T13:35:48.400Z","app":"unknown","type":"system","state":"start"}
+1725:{"ts":"2026-11-17T13:46:51.428Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+1726:{"ts":"2026-11-17T13:50:03.783Z","app":"unknown","type":"system","state":"start"}
+1800:{"ts":"2026-11-17T13:52:08.939Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+1801:{"ts":"2026-11-17T13:52:11.421Z","app":"unknown","type":"system","state":"start"}
+1912:{"ts":"2026-11-17T13:57:41.692Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+...
+{"ts":"2026-11-17T13:57:37.523Z","app":"com.mitchellh.ghostty","type":"focus","window":"brain run --vscode-replay --data-dir /tmp/brain-manual"}
+{"ts":"2026-11-17T13:57:41.682Z","app":"com.mitchellh.ghostty","type":"key","key":"c","mods":["ctrl"],"window":"brain run --vscode-replay --data-dir /tmp/brain-
+{"ts":"2026-11-17T13:57:41.692Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:03:18.607Z</sub>
+
+Both of your runs were stopped cleanly with Ctrl+C. Now the keys behind the autocomplete problem, from the last `test.cpp` session:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport json\nL='/tmp/brain-manual/events.jsonl'\ndata=open(L,'rb').read()\ndef seg(a,b):\n    out=[]\n    for line in data[a:b].split(b'\\n'):\n        if not line: continue\n        e=json.loads(line)\n        if 'VSCode' not in e['app']: continue\n        if e['type']=='key':\n            k=e['key']; m='+'.join(e.get('mods',[]))\n            out.append((m+'+' if m and m!='shift' else '')+('⏎' if k=='Enter' else '⇥' if k=='Tab' else '⌫' if k=='Backspace' else f'<{k}>' if len(k)>1 else k))\n        elif e['type']=='focus': out.append(f\"[focus{' renamed' if e.get('renamed') else ''}: {e['window'][:40]}]\")\n        elif e['type']=='paste': out.append(f\"[paste {e['text']!r}]\")\n    return ''.join(out)\nprint('session 49:', seg(271557,282387))\nprint()\nprint('session 47:', seg(260181,266607))\nEOF\nls ~/.vscode/extensions | grep -i -E 'cpp|clang' ; du -sh ~/.vscode/extensions 2>/dev/null",
+  "description": "Show the keys of the C++ sessions and installed C++ extensions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+session 49: ⌫[focus renamed: ● test.cpp - ai-logs - Visual Studio Cod]⌫⌫⏎}<Up><Up><Up><Up><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right><Right>⌫⌫⇥std::cout << st<Down><Down><Down><Down>⏎::endl;
+
+session 47: ⏎[focus renamed: ● test.cpp - ai-logs - Visual Studio Cod]⏎<Up><Up>⏎⏎<Up><Up><Up><Up>⏎⏎<Up>⇥std::cout << st<Down><Down><Down><Down>⏎::endl;
+ms-vscode.cpp-devtools-0.7.2
+ms-vscode.cpptools-1.35.6-linux-x64
+ms-vscode.cpptools-extension-pack-1.5.1
+ms-vscode.cpptools-themes-2.0.0
+798M	/home/juan/.vscode/extensions
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:04:03.503Z</sub>
+
+I've worked through everything in your data. Nothing is changed yet. Here's what happened, point by point.
+
+## 1. Autocomplete (`st` → ↓↓↓↓ → Enter)
+Your last C++ session logged: `⇥std::cout << st<Down><Down><Down><Down>⏎::endl;`
+- **In your VS Code:** typing `st` opened the C++ extension's suggestion list (IntelliSense from `ms-vscode.cpptools`). Four Downs moved to `std` and Enter accepted it.
+- **In the replay:** your extensions folder is **798 MB**, over the 300 MB copy limit, so the sandboxed VS Code ran **without the C++ extension**. There was no `std` suggestion to pick. The four Downs moved the cursor down four lines and Enter inserted a newline, which gave `std::cout << st\n\n\n\n ::endl;`.
+- Even with extensions, picking a suggestion with arrow keys depends on what the language server offers at that exact moment. The replay types much faster than you, so it can't be made reliable. Tier 0/1 can't model suggestions at all.
+
+## 2. "Doesn't take the current content after closing and reopening VS Code"
+The replay *did* start from the file as it was on disk. The problem is **where the cursor starts**.
+- Your session began with `⌫⌫ ⏎ } ↑↑↑↑ →×31 ⌫⌫`, edits relative to where VS Code put your cursor when it reopened.
+- The replay always starts at the end of the file (the documented assumption), so those moves and deletions landed in the wrong place.
+- VS Code does record each file's last cursor position in its window state (`textEditorViewState`; I saw your `test.txt` position there earlier), but only as fresh as VS Code's last save of that state.
+
+## 3. "Status is done although the text doesn't match"
+- **`done` only means "the replay ran"**, not "the result is right". Nothing checks it against reality.
+- **Reality was available.** Your VS Code **auto-saves**: `test.cpp` was written at 13:52:46, 0.8 s after your last keystroke in that session. Those sessions also contain no Ctrl+S.
+- **The session text isn't meant to be the whole file anyway.** It's the lines the session changed (the design, so a search finds what you wrote rather than the whole file). Even a perfect replay would store only the changed lines, not the full text you see in the editor.
+
+## 4. A session stuck on `open`
+I can't find it in the data. In both databases every session is closed with reason `idle`, and both runs ended with a clean Ctrl+C (a `stop` event).
+- **Most likely cause:** you were viewing the database in **DB Browser for SQLite**. It keeps showing the snapshot from when you opened or last refreshed it, so a session that closed later still shows as open until you refresh.
+- **Another possibility:** if DB Browser holds an unsaved edit or open transaction, `brain` can't write until it's released. `brain run` would then print `ingest failed (will retry)` warnings.
+- **Questions:** which database and tool were you looking at, and did `brain run` print any warnings?
+
+## 5. Something I found on the way: a process my tests left behind
+`pid 406506` is a `brain run --synthetic 200` from one of my test runs about 16 hours ago. Its temp folder is gone, but it has been typing synthetic keys ever since. My tests start `brain run` without a guard that stops it if the test fails partway. My permissions blocked stopping it myself, so please run:
+```
+! kill 406506
+```
+
+## Proposed fixes
+- **A. Use the saved file when it has the final text (the main fix).**
+  - When a VS Code session closes, if the file on disk was written **after the session's last keystroke** (autosave, or Ctrl+S at the end), its content *is* the session's final text, exactly as VS Code produced it.
+  - The session's text then comes from comparing the snapshot with the saved file: autocomplete, auto-indent and wherever the cursor really was are all correct, with no replay needed.
+  - The replay is used only when the final state wasn't saved.
+- **B. Honest status values:**
+  - `done: saved file`: exact.
+  - `done: replayed (unverified)`: the replay's best effort.
+  - A failure or skip keeps its reason, as today.
+- **C. Start the replay at VS Code's recorded cursor position** for that file, when available, instead of the end of the file. This helps only the unsaved case.
+- **D. Leave the extension limit as it is.** Copying 800 MB per sandbox is too much, and A makes autocomplete exact whenever the file is saved. I'd document that the replay runs without your extensions.
+- **E. Fix the tests** so every `brain run` they start is stopped even if the test fails partway (`crash_safety`, `query_cli`, `perf_budget`).
+
+**Two questions:**
+1. Should the session text for VS Code stay as **the changed lines** (current design), or become **the whole file** as it stood at the end of the session?
+2. Do you approve A–E? And please tell me how you saw the session stuck on `open`, so I can fix that too if it's real.
+
+## User  <sub>2026-11-17T14:13:23.762Z</sub>
+
+ok let's keep replay at its best effort. session text should be only the changed lines, you can save the inital content of the edited file and then diff after save, then no need replay.
+use more honest status values.
+fix the tests so no dangling runs or files are present.
+tell me what you are going to change and how before implementing and fixing
+
+## Assistant  <sub>2026-11-17T14:14:09.564Z</sub>
+
+Here's the plan. Nothing is changed yet.
+
+## 1. Session text from the saved file (no replay needed)
+The initial content is already saved when a VS Code session opens (the snapshot in `<data-dir>/vscode/snapshots/`). What changes is the step after the session closes, in the tier-2 worker (`src/reconstruct/tier2.rs`, `run_job`):
+1. **First, check the edited file on disk.** If it was written **after the session's last keystroke** (`ended_at`), whether by your autosave or Ctrl+S, it holds the session's final text exactly as VS Code produced it. Autocomplete, auto-indent and wherever the cursor really was are all included.
+   - The session text becomes `changed_lines(initial content, saved file)`, the same diff used today, so it's still only the changed lines.
+   - VS Code isn't started at all.
+2. **Only if the file wasn't saved after the last edit** does it fall back to the replay, kept exactly as it is now: best effort, with no cursor-position or extension changes.
+3. **Unchanged:** this all stays under `--vscode-replay` (tier 2 is opt-in), the initial content is taken only when the session opens, and a failure keeps the tier 0/1 text.
+
+## 2. Honest status values (`tier2_status`)
+
+| Value | Meaning |
+|---|---|
+| `resolving` | looking for the edited file (unchanged) |
+| `snapshot` | initial content saved, session still open (unchanged) |
+| `pending` | session closed, waiting for the worker (unchanged) |
+| **`done: saved file`** | text from the file you saved after your last edit: exact |
+| **`done: replayed (best effort, unverified)`** | the file wasn't saved after the last edit; text from replaying your keys in VS Code, not checked against anything |
+| `failed: <reason>` | replay failed; tier 0/1 text kept (unchanged) |
+| `skipped: <reason>` | tier 2 impossible (unchanged) |
+
+Both `done` values set `tier_used = 2`.
+
+## 3. Tests: no leftover processes or files
+- **One guard for every `brain run` a test starts**, in `tests/common/mod.rs`: when it goes out of scope, including when the test fails partway, it sends SIGTERM, waits up to 10 s, then SIGKILL, and reaps the process. Every test that starts `brain run` uses it: `crash_safety` (all 26 runs), `query_cli`, `perf_budget`, `repeat_e2e`, `real_keyboard_e2e`. The guard is declared *after* the test's temp folder, so the process is stopped before its folder is deleted. Your leftover process was writing into a deleted folder for 16 hours.
+- **A check at the end of each of those tests** that no `brain` process still uses its data folder.
+- **Files:** all test data already lives in temp folders that are deleted even when a test fails. Kate windows are closed by file name (fixed earlier), and the VS Code sandbox lives inside the test's temp folder.
+- I'll also check the machine now for anything my earlier runs left behind (`brain` processes, stray Kate or headless VS Code instances, leftover `/tmp/.tmp*` folders, loaded KWin test scripts) and report what I find rather than delete it.
+
+## 4. Tests for the new behavior
+- **New default test** (no VS Code needed, so it runs with `cargo test`): a session whose file is saved after its last keystroke gives `done: saved file`, with exactly the changed lines.
+- **Existing VS Code end-to-end tests** cover the replay path, with their expected status updated to `done: replayed (best effort, unverified)`.
+
+## 5. Docs
+- **README tier-2 section:** saved file first (exact), otherwise replay (best effort), the status table, and a note that the replay runs without your extensions, so their autocomplete isn't reproduced.
+- **PLAN.md** and **CLAUDE.md:** updated to match.
+
+Separately, `pid 406506` (my leftover test process) is still running. Please stop it with `! kill 406506`.
+
+Should I go ahead?
+
+## User  <sub>2026-11-17T14:18:09.486Z</sub>
+
+looks good, but before you start, look at the /tmp/brain-manual/brain.db file, its last session is open because it wouldn't stop even after i stopped its corresponding brain run
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -c \"\nimport sqlite3; c=sqlite3.connect('file:/tmp/brain-manual/brain.db?mode=ro',uri=True)\nfor r in c.execute(\\\"select id,app,window,started_at,ended_at,status,end_reason,tier2_status,start_offset,end_offset,substr(reconstructed_text,1,60) from sessions order by id desc limit 6\\\"): print(r)\nprint('offset',c.execute('select log_offset from ingest_state').fetchone())\"; ls -la --time-style=full-iso /tmp/brain-manual/; L=/tmp/brain-manual/events.jsonl; wc -c $L; tail -4 $L | cut -c1-170; pgrep -af 'brain-manual' | grep -v pgrep",
+  "description": "Inspect the last sessions and log of /tmp/brain-manual"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(49, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:52:25.297Z', '2026-11-17T13:52:45.424Z', 'closed', 'idle', 'done', 271557, 282387, '    std::cout << st\n    ::endl;')
+(48, 'krunner', '', '2026-11-17T13:52:14.012Z', '2026-11-17T13:52:15.269Z', 'closed', 'commit', None, 270776, 271160, 'vsc')
+(47, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:50:10.395Z', '2026-11-17T13:50:34.728Z', 'closed', 'idle', 'done', 260181, 266607, '    std::cout << st\n\n\n\n    ::endl;\n')
+(46, 'com.microsoft.VSCode', 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T13:42:22.681Z', '2026-11-17T13:44:22.511Z', 'closed', 'idle', 'done', 232448, 258310, 'int func (int num) {\n\n    retu\n    int status = num * 2;\n\n  ')
+(45, 'org.freedesktop.impl.portal.desktop.kde', 'Save As', '2026-11-17T13:42:05.641Z', '2026-11-17T13:42:07.551Z', 'closed', 'idle', None, 230623, 231833, 'test.cpp\n')
+(44, 'com.microsoft.VSCode', 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T13:41:49.611Z', '2026-11-17T13:42:01.482Z', 'closed', 'idle', 'skipped: unsaved new file (nothing on disk to replay from)', 219070, 230323, 'testing normal file in vscode\nnew line\nchecking untit// ledc')
+offset (286996,)
+total 4504
+drwx------  4 juan juan     180 2026-11-17 14:34:41.570519074 +0200 .
+drwxrwxrwt 30 root root     680 2026-11-17 16:16:53.559171557 +0200 ..
+-rw-------  1 juan juan  151552 2026-11-17 15:50:17.912145237 +0200 brain.db
+-rw-------  1 juan juan   32768 2026-11-17 14:33:02.190517677 +0200 brain.db-shm
+-rw-------  1 juan juan 4136512 2026-11-17 15:57:41.692312162 +0200 brain.db-wal
+-rw-------  1 juan juan  286996 2026-11-17 15:57:41.691312176 +0200 events.jsonl
+drwx------  2 juan juan      60 2026-11-17 15:57:41.691312176 +0200 kwin
+-rw-------  1 juan juan       0 2026-11-17 14:14:30.873810188 +0200 run.lock
+drwx------  7 juan juan     160 2026-11-17 15:57:41.716311847 +0200 vscode
+286996 /tmp/brain-manual/events.jsonl
+{"ts":"2026-11-17T13:57:32.142Z","app":"sqlitebrowser","type":"key","key":"F5","mods":[],"window":"DB Browser for SQLite - /tmp/brain-manual/brain.db"}
+{"ts":"2026-11-17T13:57:37.523Z","app":"com.mitchellh.ghostty","type":"focus","window":"brain run --vscode-replay --data-dir /tmp/brain-manual"}
+{"ts":"2026-11-17T13:57:41.682Z","app":"com.mitchellh.ghostty","type":"key","key":"c","mods":["ctrl"],"window":"brain run --vscode-replay --data-dir /tmp/brain-manual"}
+{"ts":"2026-11-17T13:57:41.692Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+578892 /usr/bin/kate -b /tmp/brain-manual/events.jsonl
+582603 /usr/bin/sqlitebrowser /tmp/brain-manual/brain.db
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The database file shows no open session, since session 49 is closed and nothing follows it. DB Browser (pid 582603) may be holding an old snapshot of brain.db, so I'm checking for a lock next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls -l /proc/582603/fd 2>/dev/null | grep brain-manual; for f in /tmp/brain-manual/brain.db /tmp/brain-manual/brain.db-shm /tmp/brain-manual/brain.db-wal; do echo \"$f inode $(stat -c %i $f)\"; done; grep -E \"$(stat -c %i /tmp/brain-manual/brain.db-shm)|$(stat -c %i /tmp/brain-manual/brain.db)\" /proc/locks",
+  "description": "Check DB Browser's open files and SQLite locks"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+lrwx------  1 juan juan 64 Nov 17 15:37 26 -> /tmp/brain-manual/brain.db
+lrwx------  1 juan juan 64 Nov 17 15:37 27 -> /tmp/brain-manual/brain.db-wal
+lrwx------  1 juan juan 64 Nov 17 15:37 28 -> /tmp/brain-manual/brain.db-shm
+/tmp/brain-manual/brain.db inode 51876
+/tmp/brain-manual/brain.db-shm inode 51879
+/tmp/brain-manual/brain.db-wal inode 51878
+22: POSIX  ADVISORY  READ 582603 00:2c:51879 124 124
+59: POSIX  ADVISORY  READ 582603 00:2c:51879 128 128
+60: POSIX  ADVISORY  READ 582603 00:2c:51876 1073741826 1073742335
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:19:00.075Z</sub>
+
+Found it. **It isn't stuck in the database. DB Browser is showing an old snapshot.**
+
+- **The data:** reading `/tmp/brain-manual/brain.db` now, the last session (49, `test.cpp`) is `closed`, ended by the idle timeout, with tier 2 `done`. The `brain run` you stopped also wrote its final `stop` event cleanly.
+- **The lock:** DB Browser (pid 582603) still has the database open and holds a **read lock** on it. `/proc/locks` shows SQLite's shared lock on `brain.db` and a WAL read mark on `brain.db-shm`. That means DB Browser is inside an open read transaction.
+- **Why that shows `open`:** SQLite gives a reader a frozen view of the database as of when its transaction began, and DB Browser keeps that transaction open, for example after an edit or a query in its Execute SQL tab. Its view is from a moment when session 49 was still open. F5 refreshes the table but stays in the same transaction, so you keep seeing `open`, even after `brain` closed it and stopped.
+- **Side effect:** while that old view is held, SQLite can't fold its log back into the main file. That's why `brain.db-wal` has grown to 4 MB and `brain.db` was last updated at 15:50. It's harmless, and it clears when DB Browser lets go.
+
+**To see the real state:** in DB Browser, use "Revert Changes" or close and reopen the database. Better, open it with **File → Open Database Read-Only**. Or use `brain query search …` or `sqlite3 /tmp/brain-manual/brain.db "SELECT id, status FROM sessions ORDER BY id DESC LIMIT 5"`, neither of which holds a transaction open.
+
+So nothing needs fixing in `brain` for this. I'll mention it in the README's "inspect the result" note: use a read-only connection, or the open session view will look stuck.
+
+Next I'll implement the plan you approved: the saved-file text, the honest statuses, the test guards and the checks for leftovers.
+
+## User  <sub>2026-11-17T14:20:01.829Z</sub>
+
+ok you can start
+
+## Assistant  <sub>2026-11-17T14:20:32.509Z</sub>
+
+Starting with the saved-file text and the new statuses. Here are `run_job` and how ingest applies results:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn run_job' -A48 src/reconstruct/tier2.rs; grep -n 'pub type Tier2Result' -A1 src/reconstruct/tier2.rs; grep -n 'tier2_results\\|fn add_tier2_result\\|fn apply_tier2_result' -A3 src/ingest.rs | head -50",
+  "description": "Read run_job and tier 2 result handling in ingest"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+241:fn run_job(
+242-    replayer: &mut VsCodeReplayer,
+243-    db_path: &Path,
+244-    log_path: &Path,
+245-    snapshots: &Path,
+246-    id: i64,
+247-) -> Result<String> {
+248-    let conn = store::open_reader(db_path)?;
+249-    let (app, window, start, end, file): (String, String, i64, Option<i64>, Option<String>) = conn
+250-        .query_row(
+251-            "SELECT app, window, start_offset, end_offset, tier2_file FROM sessions
+252-             WHERE id = ?1 AND tier2_status = 'pending'",
+253-            [id],
+254-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+255-        )
+256-        .context("session is no longer pending")?;
+257-    drop(conn);
+258-    let (Some(end), Some(file)) = (end, file) else {
+259-        bail!("session has no end offset or file");
+260-    };
+261-    let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
+262-    let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
+263-    let file_name = Path::new(&file)
+264-        .file_name()
+265-        .map(|n| n.to_string_lossy().into_owned())
+266-        .unwrap_or_else(|| "file.txt".into());
+267-    // Generous: VS Code may need to start (cold start is several seconds).
+268-    let timeout = Duration::from_secs(45) + Duration::from_millis(30 * events.len() as u64);
+269-    let saved = replayer.replay(
+270-        &ReplayInput {
+271-            file_name: &file_name,
+272-            initial: &initial,
+273-            events: &events,
+274-        },
+275-        timeout,
+276-    )?;
+277-    Ok(vscode::changed_lines(
+278-        &String::from_utf8_lossy(&initial),
+279-        &saved,
+280-    ))
+281-}
+282-
+283-/// The session's own input events: everything logged for its (app, window)
+284-/// between its first and last event.
+285-fn session_events(
+286-    log_path: &Path,
+287-    app: &str,
+288-    window: &str,
+289-    start: u64,
+140:pub type Tier2Result = (i64, std::result::Result<String, String>);
+141-
+37:    tier2_results: Vec<(i64, std::result::Result<String, String>)>,
+38-    /// Tier 2 jobs whose sessions are committed as pending, to hand to the worker.
+39-    tier2_jobs: Vec<i64>,
+40-}
+--
+85:            tier2_results: Vec::new(),
+86-            tier2_jobs: Vec::new(),
+87-        })
+88-    }
+--
+95:    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<String, String>) {
+96:        self.tier2_results.push((id, result));
+97-    }
+98-
+99-    /// Tier 2 jobs committed since the last call.
+--
+162:        let results = std::mem::take(&mut self.tier2_results);
+163-        for (id, result) in &results {
+164-            apply_tier2_result(&tx, *id, result)?;
+165-        }
+--
+175:            self.tier2_results = results; // retry them next time
+176-            return Err(e).context("committing ingest transaction");
+177-        }
+178-
+--
+216:fn apply_tier2_result(
+217-    tx: &Connection,
+218-    id: i64,
+219-    result: &std::result::Result<String, String>,
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 210,235p src/ingest.rs",
+  "description": "Read apply_tier2_result"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        Ok(total)
+    }
+}
+
+/// Writes a finished tier 2 replay over the session's tier 0/1 text. Only a
+/// session still waiting for it is updated.
+fn apply_tier2_result(
+    tx: &Connection,
+    id: i64,
+    result: &std::result::Result<String, String>,
+) -> Result<()> {
+    match result {
+        Ok(text) => tx.execute(
+            "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = 'done'
+             WHERE id = ?2 AND tier2_status = 'pending'",
+            rusqlite::params![text, id],
+        )?,
+        Err(why) => tx.execute(
+            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status = 'pending'",
+            rusqlite::params![format!("failed: {why}"), id],
+        )?,
+    };
+    Ok(())
+}
+
+/// A new checkpoint is due when none exists yet for this app, or the last one is
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nT='src/reconstruct/tier2.rs'\nedit(T,[\n(\"\"\"//! When a VS Code session opens, [`VsCodeSnapshots`] copies the edited file\n//! (identified from the window title) into the data directory. When the\n//! session closes as tier 0/1 text, it is marked `pending`; [`Tier2Worker`]\n//! then replays the session's own keystrokes from the log into a sandboxed\n//! VS Code ([`super::vscode`]), one job at a time, and hands the text back to\n//! the ingest thread, which writes it over the tier 0/1 text. A failure or\n//! timeout leaves the tier 0/1 text in place and records why. Pending jobs\n//! survive restarts (they are rows in the database) and are retried.\"\"\",\"\"\"//! When a VS Code session opens, [`VsCodeSnapshots`] copies the edited file\n//! (identified from the window title) into the data directory: its initial\n//! content. When the session closes as tier 0/1 text, it is marked\n//! `pending`, and [`Tier2Worker`] works out its real text, one job at a time:\n//!\n//! 1. If the file on disk was written after the session's last keystroke\n//!    (autosave, or Ctrl+S at the end), it holds exactly what VS Code made of\n//!    the session: the text is the lines it changed from the initial content\n//!    (status `done: saved file`). VS Code is not started.\n//! 2. Otherwise the session's own keystrokes are replayed from the log into a\n//!    sandboxed VS Code ([`super::vscode`]), as a best effort that nothing\n//!    verifies (status `done: replayed (best effort, unverified)`).\n//!\n//! The text goes back to the ingest thread, which writes it over the tier\n//! 0/1 text. A failure or timeout leaves the tier 0/1 text in place and\n//! records why. Pending jobs survive restarts (they are rows in the\n//! database) and are retried.\"\"\"),\n(\"\"\"/// A finished replay: the session id and its text, or why it failed.\npub type Tier2Result = (i64, std::result::Result<String, String>);\"\"\",\"\"\"/// `tier2_status` of a session whose text comes from the saved file.\npub const STATUS_SAVED_FILE: &str = \"done: saved file\";\n/// `tier2_status` of a session whose text comes from a replay in VS Code.\npub const STATUS_REPLAYED: &str = \"done: replayed (best effort, unverified)\";\n\n/// A finished tier 2 job's text, and the status saying where it came from.\n#[derive(Debug, Clone, PartialEq, Eq)]\npub struct Tier2Text {\n    pub text: String,\n    pub status: &'static str,\n}\n\n/// A finished job: the session id and its text, or why it failed.\npub type Tier2Result = (i64, std::result::Result<Tier2Text, String>);\"\"\"),\n(\"\"\"    id: i64,\n) -> Result<String> {\n    let conn = store::open_reader(db_path)?;\n    let (app, window, start, end, file): (String, String, i64, Option<i64>, Option<String>) = conn\n        .query_row(\n            \"SELECT app, window, start_offset, end_offset, tier2_file FROM sessions\n             WHERE id = ?1 AND tier2_status = 'pending'\",\n            [id],\n            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),\n        )\n        .context(\"session is no longer pending\")?;\n    drop(conn);\n    let (Some(end), Some(file)) = (end, file) else {\n        bail!(\"session has no end offset or file\");\n    };\n    let initial = std::fs::read(snapshot_path(snapshots, id)).context(\"reading the snapshot\")?;\n    let events\"\"\",\"\"\"    id: i64,\n) -> Result<Tier2Text> {\n    let conn = store::open_reader(db_path)?;\n    type Row = (String, String, i64, Option<i64>, Option<String>, Option<String>);\n    let (app, window, start, end, file, ended_at): Row = conn\n        .query_row(\n            \"SELECT app, window, start_offset, end_offset, tier2_file, ended_at FROM sessions\n             WHERE id = ?1 AND tier2_status = 'pending'\",\n            [id],\n            |r| Ok((r.
+… [4063 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+It builds. I'm adding a test guard in tests/common/mod.rs that sends SIGTERM, waits up to 10 s, then SIGKILL, plus a helper that checks no brain process still uses a data folder.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub struct Kill' -B2 -A12 tests/common/mod.rs; grep -n '^use' tests/common/mod.rs",
+  "description": "Read the current Kill guard in tests/common"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+138-
+139-/// Kills a child process on drop (also on panic).
+140:pub struct Kill(pub Child);
+141-impl Drop for Kill {
+142-    fn drop(&mut self) {
+143-        // SAFETY: SIGTERM to our own child.
+144-        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };
+145-        let _ = self.0.wait();
+146-    }
+147-}
+148-
+149-/// Closes every process whose command line contains `needle` (Kate
+150-/// detaches from the process we start, so it is found by its unique file).
+151:pub struct KillMatching(pub String);
+152-impl Drop for KillMatching {
+153-    fn drop(&mut self) {
+154-        let me = std::process::id();
+155-        let find = || -> Vec<i32> {
+156-            std::fs::read_dir("/proc")
+157-                .into_iter()
+158-                .flatten()
+159-                .flatten()
+160-                .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())
+161-                .filter(|&pid| pid as u32 != me)
+162-                .filter(|pid| {
+163-                    std::fs::read(format!("/proc/{pid}/cmdline"))
+6:use brain::capture::synthetic::us_keycode;
+7:use std::fs::OpenOptions;
+8:use std::io::Write;
+9:use std::os::fd::AsRawFd;
+10:use std::path::Path;
+11:use std::process::{Child, Command, Stdio};
+12:use std::time::{Duration, Instant};
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/common/mod.rs'; s=open(p).read()\nold=\"\"\"/// Kills a child process on drop (also on panic).\npub struct Kill(pub Child);\nimpl Drop for Kill {\n    fn drop(&mut self) {\n        // SAFETY: SIGTERM to our own child.\n        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };\n        let _ = self.0.wait();\n    }\n}\"\"\"\nnew=\"\"\"/// A child process that is stopped when this goes out of scope, also when\n/// the test fails partway: no test may leave a `brain run` behind. Declare it\n/// after the test's temp directory, so the process stops before its data is\n/// deleted.\npub struct Kill(pub Child);\n\nimpl Kill {\n    /// Stops the process: SIGTERM (a clean stop), then SIGKILL if it has not\n    /// exited after 10 s. Returns its exit status. Never signals a process\n    /// that has already been reaped (its pid may belong to another by then).\n    pub fn stop(&mut self) -> std::process::ExitStatus {\n        if let Ok(Some(status)) = self.0.try_wait() {\n            return status;\n        }\n        // SAFETY: SIGTERM to our own child, which try_wait says is not reaped.\n        unsafe { libc::kill(self.0.id() as i32, libc::SIGTERM) };\n        let deadline = Instant::now() + Duration::from_secs(10);\n        while Instant::now() < deadline {\n            if let Ok(Some(status)) = self.0.try_wait() {\n                return status;\n            }\n            std::thread::sleep(Duration::from_millis(20));\n        }\n        let _ = self.0.kill(); // SIGKILL\n        self.0.wait().expect(\"reaping the child\")\n    }\n}\n\nimpl Drop for Kill {\n    fn drop(&mut self) {\n        self.stop();\n    }\n}\n\n/// Starts `brain` with `args` (output discarded), guarded by [`Kill`].\npub fn spawn_brain(args: &[&str], data: &Path) -> Kill {\n    Kill(\n        Command::new(env!(\"CARGO_BIN_EXE_brain\"))\n            .args(args)\n            .arg(\"--data-dir\")\n            .arg(data)\n            .stdout(Stdio::null())\n            .stderr(Stdio::null())\n            .spawn()\n            .unwrap(),\n    )\n}\n\n/// Panics if any process still runs `brain` on the data directory `data`.\npub fn assert_no_brain_on(data: &Path) {\n    let needle = data.to_string_lossy().into_owned();\n    let left: Vec<String> = std::fs::read_dir(\"/proc\")\n        .into_iter()\n        .flatten()\n        .flatten()\n        .filter(|e| e.file_name().to_str().is_some_and(|n| n.parse::<u32>().is_ok()))\n        .filter_map(|e| std::fs::read(e.path().join(\"cmdline\")).ok())\n        .map(|c| String::from_utf8_lossy(&c).replace('\\\\0', \" \"))\n        .filter(|c| c.contains(\"brain\") && c.contains(&needle))\n        .collect();\n    assert!(left.is_empty(), \"brain still running on {needle}: {left:?}\");\n}\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nold2=\"\"\"/// Starts `brain run` on `data` (stopped with SIGTERM when dropped).\npub fn start_brain(data: &Path) -> Kill {\n    Kill(\n        Command::new(env!(\"CARGO_BIN_EXE_brain\"))\n            .args([\"run\", \"--data-dir\"])\n            .arg(data)\n            .stdout(Stdio::null())\n            .stderr(Stdio::null())\n            .spawn()\n            .unwrap(),\n    )\n}\"\"\"\nnew2=\"\"\"/// Starts `brain run` on `data`, guarded by [`Kill`].\npub fn start_brain(data: &Path) -> Kill {\n    spawn_brain(&[\"run\"], data)\n}\"\"\"\nassert s.count(old2)==1; s=s.replace(old2,new2)\nopen(p,'w').write(s)\nEOF\ngrep -n 'spawn_brain\\|Command::new(env!\\|child\\b\\|\\.kill()\\|wait_with_output\\|libc::kill\\|let mut run\\|run.wait\\|run.id' tests/crash_safety.rs tests/query_cli.rs tests/perf_budget.rs tests/repeat_e2e.rs tests/real_keyboard_e2e.rs | cut -c1-120",
+  "description": "Make the guard robust; find every brain spawn in tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+tests/query_cli.rs:15:    let out = Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/query_cli.rs:405:    let raw = Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/query_cli.rs:454:    let mut run = Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/query_cli.rs:487:    // SAFETY: SIGTERM to our own child.
+tests/query_cli.rs:488:    unsafe { libc::kill(run.id() as i32, libc::SIGTERM) };
+tests/query_cli.rs:489:    assert!(run.wait().unwrap().success());
+tests/perf_budget.rs:43:    let mut run = Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/perf_budget.rs:55:    let pid = run.id();
+tests/perf_budget.rs:65:        let out = Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/perf_budget.rs:76:    // SAFETY: SIGTERM to our own child.
+tests/perf_budget.rs:77:    unsafe { libc::kill(pid as i32, libc::SIGTERM) };
+tests/perf_budget.rs:78:    assert!(run.wait().unwrap().success());
+tests/crash_safety.rs:13:fn spawn_brain(dir: &Path, rate: u32) -> Child {
+tests/crash_safety.rs:14:    Command::new(env!("CARGO_BIN_EXE_brain"))
+tests/crash_safety.rs:60:        let mut child = spawn_brain(&dir, 3000);
+tests/crash_safety.rs:63:        child.kill().unwrap(); // SIGKILL
+tests/crash_safety.rs:64:        child.wait().unwrap();
+tests/crash_safety.rs:89:    let child = spawn_brain(&dir, 50);
+tests/crash_safety.rs:91:    // SAFETY: sending SIGTERM to our own child.
+tests/crash_safety.rs:92:    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+tests/crash_safety.rs:93:    let out = child.wait_with_output().unwrap();
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\n# crash_safety\np='tests/crash_safety.rs'; s=open(p).read()\ni=s.index(\"fn spawn_brain(dir: &Path, rate: u32) -> Child {\"); j=s.index(\"/// xorshift64*\")\ns=s[:i]+s[j:]\ns=s.replace(\"\"\"use std::process::{Child, Command, Stdio};\n\"\"\",\"\")\ns=s.replace(\"use brain::eventlog::LogReader;\",\"mod common;\\n\\nuse brain::eventlog::LogReader;\\nuse common::{assert_no_brain_on, spawn_brain};\")\ns=s.replace(\"\"\"        let mut child = spawn_brain(&dir, 3000);\"\"\",\"\"\"        let mut child = spawn_brain(&[\"run\", \"--synthetic\", \"3000\"], &dir);\"\"\")\ns=s.replace(\"\"\"        child.kill().unwrap(); // SIGKILL\n        child.wait().unwrap();\"\"\",\"\"\"        child.0.kill().unwrap(); // SIGKILL\n        child.0.wait().unwrap();\"\"\")\nold=s[s.index(\"    let child = spawn_brain(&dir, 50);\"):s.index(\"assert!(out.status.success(), \\\"clean stop must exit 0\\\");\")+len(\"assert!(out.status.success(), \\\"clean stop must exit 0\\\");\")]\ns=s.replace(old,\"\"\"    let mut child = spawn_brain(&[\"run\", \"--synthetic\", \"50\"], &dir);\n    std::thread::sleep(Duration::from_millis(1500));\n    assert!(child.stop().success(), \"clean stop must exit 0\");\n    assert_no_brain_on(&dir);\"\"\")\nopen(p,'w').write(s)\n# query_cli\np='tests/query_cli.rs'; s=open(p).read()\ns=s.replace(\"use brain::event::{Event, EventKind, Mod};\",\"mod common;\\n\\nuse brain::event::{Event, EventKind, Mod};\",1)\nold=s[s.index(\"    let mut run = Command::new(env!(\\\"CARGO_BIN_EXE_brain\\\"))\\n        .args([\\\"run\\\", \\\"--synthetic\\\", \\\"200\\\", \\\"--data-dir\\\"])\"):]\nold=old[:old.index(\".unwrap();\")+len(\".unwrap();\")]\ns=s.replace(old,\"\"\"    let mut run = common::spawn_brain(&[\"run\", \"--synthetic\", \"200\"], &dir);\"\"\")\ns=s.replace(\"\"\"    // SAFETY: SIGTERM to our own child.\n    unsafe { libc::kill(run.id() as i32, libc::SIGTERM) };\n    assert!(run.wait().unwrap().success());\"\"\",\"\"\"    assert!(run.stop().success());\n    common::assert_no_brain_on(&dir);\"\"\")\nopen(p,'w').write(s)\n# perf_budget\np='tests/perf_budget.rs'; s=open(p).read()\ns=s.replace(\"use std::process::{Command, Stdio};\",\"mod common;\\n\\nuse std::process::Command;\")\nold=s[s.index(\"    let mut run = Command::new(env!(\\\"CARGO_BIN_EXE_brain\\\"))\"):]\nold=old[:old.index(\".unwrap();\")+len(\".unwrap();\")]\ns=s.replace(old,\"\"\"    let mut run = common::spawn_brain(\n        &[\"run\", \"--synthetic\", &KEYS_PER_SECOND.to_string()],\n        &dir,\n    );\"\"\")\ns=s.replace(\"    let pid = run.id();\",\"    let pid = run.0.id();\")\ns=s.replace(\"\"\"    // SAFETY: SIGTERM to our own child.\n    unsafe { libc::kill(pid as i32, libc::SIGTERM) };\n    assert!(run.wait().unwrap().success());\"\"\",\"\"\"    assert!(run.stop().success());\n    common::assert_no_brain_on(&dir);\"\"\")\nopen(p,'w').write(s)\n# Kate tests\nfor p in ['tests/repeat_e2e.rs','tests/real_keyboard_e2e.rs']:\n    s=open(p).read()\n    s=s.replace(\"    drop(brain); // SIGTERM: final ingest, sessions closed\",\"    drop(brain); // SIGTERM: final ingest, sessions closed\\n    assert_no_brain_on(&data);\")\n    s=s.replace(\"    drop(brain);\\n    drop(restore);\",\"    drop(brain);\\n    assert_no_brain_on(&data);\\n    drop(restore);\")\n    open(p,'w').write(s)\nEOF\ngrep -n 'assert_no_brain_on' tests/*.rs | cut -c1-90; cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -30",
+  "description": "Use the guard for every brain run started by tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+tests/real_keyboard_e2e.rs:122:    assert_no_brain_on(&data);
+tests/repeat_e2e.rs:100:    assert_no_brain_on(&data);
+tests/crash_safety.rs:9:use common::{assert_no_brain_on, spawn_brain};
+tests/crash_safety.rs:84:    assert_no_brain_on(&dir);
+tests/perf_budget.rs:71:    common::assert_no_brain_on(&dir);
+tests/query_cli.rs:484:    common::assert_no_brain_on(&dir);
+warning: unused import: `Stdio`
+  --> tests/query_cli.rs:13:29
+   |
+13 | use std::process::{Command, Stdio};
+   |                             ^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `brain` (test "query_cli") generated 1 warning (run `cargo clippy --fix --test "query_cli" -p brain -- ` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.95s
+[This command modified 6 files you've previously read: src/reconstruct/tier2.rs, tests/repeat_e2e.rs, tests/perf_budget.rs, tests/real_keyboard_e2e.rs, tests/query_cli.rs and 1 more. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm removing an unused import, and I'll make Tier2Worker stop its VS Code instance on scope exit, not only when stop() is called, so a panicking test can't leave it running.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -i 's/^use std::process::{Command, Stdio};/use std::process::Command;/' tests/query_cli.rs && grep -n 'pub fn stop(mut self)' -B3 -A12 src/reconstruct/tier2.rs",
+  "description": "Remove unused import; read Tier2Worker::stop"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+199-
+200-    /// Stops the worker, killing an in-flight replay (it stays pending and
+201-    /// is retried on the next start).
+202:    pub fn stop(mut self) {
+203-        self.jobs = None; // closes the channel
+204-        self.kill.kill();
+205-        if let Some(t) = self.thread.take()
+206-            && t.join().is_err()
+207-        {
+208-            eprintln!("brain: warning: tier 2 worker panicked");
+209-        }
+210-    }
+211-}
+212-
+213-fn worker(
+214-    mut replayer: VsCodeReplayer,
+[This command modified 1 file you've previously read: tests/query_cli.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/tier2.rs'; s=open(p).read()\nold=\"\"\"    /// Stops the worker, killing an in-flight replay (it stays pending and\n    /// is retried on the next start).\n    pub fn stop(mut self) {\n        self.jobs = None; // closes the channel\n        self.kill.kill();\n        if let Some(t) = self.thread.take()\n            && t.join().is_err()\n        {\n            eprintln!(\"brain: warning: tier 2 worker panicked\");\n        }\n    }\n}\"\"\"\nnew=\"\"\"    /// Stops the worker, killing an in-flight replay (it stays pending and\n    /// is retried on the next start). Dropping the worker does the same.\n    pub fn stop(self) {\n        drop(self);\n    }\n}\n\nimpl Drop for Tier2Worker {\n    fn drop(&mut self) {\n        self.jobs = None; // closes the channel\n        self.kill.kill();\n        if let Some(t) = self.thread.take()\n            && t.join().is_err()\n        {\n            eprintln!(\"brain: warning: tier 2 worker panicked\");\n        }\n    }\n}\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20",
+  "description": "Stop the tier 2 worker on drop"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+[This command modified 1 file you've previously read: src/reconstruct/tier2.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:23:07.505Z</sub>
+
+Clean. Now the new default test for the saved-file path. It needs no VS Code, so it runs with `cargo test`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat >> tests/tier2_e2e.rs <<'EOF'\n\n/// When VS Code saved the file after the session's last keystroke (autosave,\n/// or Ctrl+S at the end), the session's text comes from that saved file:\n/// exactly what VS Code made of the keys (here an autocompletion the keys\n/// alone do not show), as the lines changed from the initial content.\n/// VS Code is not started, so this runs without it.\n#[test]\nfn saved_file_gives_the_session_text_without_replay() {\n    let tmp = tempfile::tempdir().unwrap();\n    let project = tmp.path().join(\"project\");\n    std::fs::create_dir_all(&project).unwrap();\n    let file = project.join(\"main.cpp\");\n    std::fs::write(&file, \"int main() {\\n}\\n\").unwrap();\n    std::thread::sleep(Duration::from_millis(20)); // file mtime < session start\n\n    let data = tmp.path().join(\"data\");\n    std::fs::create_dir_all(&data).unwrap();\n    let log_path = data.join(\"events.jsonl\");\n    let db_path = data.join(\"brain.db\");\n    let mut log = LogWriter::open(&log_path).unwrap();\n    let title = format!(\"{} - project - Visual Studio Code\", file.display());\n    let mut ts = now_ms();\n    // \"st\" + Down×4 + Enter: an autocompletion picked from VS Code's list.\n    let keys = [\"Up\", \"End\", \"Enter\", \"s\", \"t\", \"Down\", \"Down\", \"Down\", \"Down\", \"Enter\"];\n    for k in keys {\n        log.append(&Event {\n            ts,\n            app: \"com.microsoft.VSCode\".into(),\n            kind: EventKind::Key {\n                key: k.into(),\n                mods: vec![],\n                repeat: false,\n                window: title.clone(),\n            },\n        })\n        .unwrap();\n        ts += 30;\n    }\n    log.append(&Event {\n        ts,\n        app: \"unknown\".into(),\n        kind: EventKind::System {\n            state: SystemState::Stop,\n        },\n    })\n    .unwrap();\n    let vscode_dir = data.join(\"vscode\");\n    let snaps = VsCodeSnapshots::new(vscode_dir.join(\"snapshots\")).unwrap();\n    let mut ing =\n        Ingester::with_tier2(store::open_writer(&db_path).unwrap(), &log_path, Some(Box::new(snaps)))\n            .unwrap();\n    ing.catch_up(10).unwrap();\n    let jobs = ing.take_tier2_jobs();\n    assert_eq!(jobs.len(), 1);\n\n    // VS Code autosaves after the last keystroke.\n    while now_ms() <= ts {\n        std::thread::sleep(Duration::from_millis(10));\n    }\n    std::fs::write(&file, \"int main() {\\n    std\\n}\\n\").unwrap();\n\n    let (tx, rx) = std::sync::mpsc::channel();\n    let worker = Tier2Worker::spawn(db_path.clone(), log_path.clone(), vscode_dir, tx).unwrap();\n    let (id, result) = rx.recv_timeout(Duration::from_secs(10)).expect(\"tier 2 result\");\n    worker.stop();\n    assert_eq!(id, jobs[0]);\n    ing.add_tier2_result(id, result);\n    ing.catch_up(10).unwrap();\n    let c = Connection::open(&db_path).unwrap();\n    let (text, tier, status): (String, i64, String) = c\n        .query_row(\n            \"SELECT reconstructed_text, tier_used, tier2_status FROM sessions\",\n            [],\n            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),\n        )\n        .unwrap();\n    assert_eq!(status, \"done: saved file\");\n    assert_eq!(tier, 2);\n    assert_eq!(text, \"    std\", \"only the changed line\");\n}\nEOF\npython3 - <<'EOF'\np='tests/tier2_e2e.rs'; s=open(p).read()\nimport re\nn=s.count('assert_eq!(status, \"done\");')+s.count('Some(\"done\")')\ns=s.replace('assert_eq!(status, \"done\");','assert_eq!(status, \"done: replayed (best effort, unverified)\");')\ns=s.replace('assert_eq!(status().as_deref(), Some(\"done\"));','assert_eq!(status().as_deref(), Some(\"done: replayed (best effort, unverified)\"));')\ns=s.replace(\"\"\"//! Needs /usr/bin/code, so it is ignored by default:\n//! `cargo test --release --test tier2_e2e -- --ignored`\"\"\",\"\"\"//! The replay tests need /usr/bin/code, so they are ignored by default:\n//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.\
+… [410 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+replaced 2
+test file_outside_the_folder_is_identified_late_and_replayed ... ignored
+test vscode_session_is_upgraded_to_tier_2 ... ignored
+test saved_file_gives_the_session_text_without_replay ... ok
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.33s
+[This command modified 1 file you've previously read: tests/tier2_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:23:47.003Z</sub>
+
+The saved-file test passes in 0.3 s without VS Code. Now the two replay tests (real VS Code) with their new status, then the full default suite:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E '^test |test result|panicked|left|right'; cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Run replay e2e tests and the full default suite",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test file_outside_the_folder_is_identified_late_and_replayed ... ok
+test vscode_session_is_upgraded_to_tier_2 ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 47.91s
+     Running unittests src/lib.rs 
+test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.32s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T14:26:13.052Z</sub>
+
+Everything passes. Now the check for anything left on the machine. It only reports, nothing gets deleted.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "echo \"== brain processes:\"; ps -eo pid,etime,args | grep -E '[b]rain run|[b]rain query' | cut -c1-140; echo \"== headless VS Code (sandbox) processes: $(pgrep -fc 'ozone-platform=headless')\"; echo \"== kate test windows: $(pgrep -fc 'kate -n /tmp')\"; echo \"== brain-vscode scopes:\"; systemctl --user list-units --type=scope --no-pager 2>/dev/null | grep -c brain-vscode; echo \"== KWin scripts loaded by brain/tests:\"; for n in $(qdbus6 org.kde.KWin /Scripting 2>/dev/null | head -0); do :; done; qdbus6 org.kde.KWin 2>/dev/null | grep -i 'Script' | head; echo \"== /tmp temp dirs:\"; ls -ld --time-style=+%m-%d_%H:%M /tmp/.tmp* 2>/dev/null | awk '{print $6, $7}' | head -20; echo \"count: $(ls -d /tmp/.tmp* 2>/dev/null | wc -l)\"; ls -d /tmp/brain-* /tmp/tmp.* 2>/dev/null; ls -d ~/.local/state/brain* 2>/dev/null; ls ~/.config/systemd/user/ | grep brain",
+  "description": "Scan for leftover processes, scopes, scripts and temp dirs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== brain processes:
+ 591827    01:24:29 brain run
+== headless VS Code (sandbox) processes: 1
+== kate test windows: 1
+== brain-vscode scopes:
+0
+== KWin scripts loaded by brain/tests:
+/Scripting
+/Scripting/Script0
+== /tmp temp dirs:
+(eval):1: no matches found: /tmp/.tmp*
+(eval):1: no matches found: /tmp/.tmp*
+count: 0
+(eval):1: no matches found: /tmp/tmp.*
+(eval):1: no matches found: /home/juan/.local/state/brain*
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The leftover test process (406506) is already gone, so it was stopped by you. Next I'll confirm that the count of 1 for headless VS Code and Kate is just the search matching its own command line.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ps -eo pid,args | grep -E 'ozone-platform=headles[s]|kate -n /tm[p]' | cut -c1-120; echo \"(end)\"; ls -d /tmp/brain-manual 2>/dev/null; qdbus6 org.kde.KWin /Scripting/Script0 2>/dev/null | head -3",
+  "description": "Recheck headless VS Code and Kate without self-matching"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(end)
+/tmp/brain-manual
+method void org.kde.kwin.Script.run()
+method void org.kde.kwin.Script.stop()
+signal void org.freedesktop.DBus.Properties.PropertiesChanged(QString interface_name, QVariantMap changed_properties, QStringList invalidated_properties)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+No test leftovers remain: the stray processes, sandboxes, windows, temp folders and scopes are cleaned up. I left the running `brain run` KWin script and your `/tmp/brain-manual` folder untouched, and I'm moving on to the docs next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'Tier 2\\*\\* (`--vscode-replay`)' -A20 README.md | head -24; grep -n 'Inspect the result' -A6 README.md; grep -n 'VS Code tier 2 is opt-in' -A9 README.md; grep -n '^- \\*\\*Tier 2, VS Code' -A24 PLAN.md | head -28",
+  "description": "Read tier 2 doc passages to update"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+249:* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its
+250-  keystrokes are replayed into a headless VS Code with your settings, in a
+251-  network-less sandbox with capped CPU and memory. The session text then
+252-  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
+253-  The session stores the changed lines. If replay is impossible or fails,
+254-  the tier 0/1 text stays, and the `tier2_status` column says why.
+255-  The edited file is found from the window title: VS Code's default title
+256-  only has the file and folder names, so `brain` looks the name up in VS
+257-  Code's own state for that window (the editors it has open, also for files
+258-  opened from outside the folder), under the folder, and in the window's
+259-  editor history. VS Code records a newly opened file there a little late,
+260-  so the lookup is retried while the session is open (up to 2 minutes).
+261-  For an instant, exact match, put the full path in the title (VS Code
+262-  setting `"window.title": "${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"`).
+263-
+264-Inspect the result:
+265-
+266-```sh
+267-sqlite3 ~/brain-data/brain.db \
+268-  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
+269-```
+264:Inspect the result:
+265-
+266-```sh
+267-sqlite3 ~/brain-data/brain.db \
+268-  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
+269-```
+270-
+347:* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
+348-  content at session start, so it is skipped for unsaved new files
+349-  (`Untitled-1`), files with unsaved changes when the session started, and
+350-  files saved before they could be identified (within 2 minutes of the
+351-  session start);
+352-  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
+353-  outside brain's budget), and runs with extensions disabled when your
+354-  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+355-
+356-**Queries**
+330:- **Tier 2, VS Code replayed in VS Code** (`reconstruct/vscode/`,
+331-  `tier2.rs`, opt-in with `--vscode-replay`): when a VS Code session opens,
+332-  the file is identified from the window title: an absolute path if the
+333-  title has one, otherwise the title's file name looked up in VS Code's
+334-  per-workspace state for the window's folder (its open editors, which also
+335-  covers files opened from outside the folder), under that folder, then in
+336-  the window's editor history; one existing match is required. VS Code
+337-  writes that state with a delay, so an unidentified file is looked up
+338-  again on each ingest step while the session is open, for up to 2 minutes.
+339-  The file is copied, unless it is an unsaved new file (`Untitled-1`), had
+340-  unsaved changes when the session started, or changed on disk after the
+341-  session started (a late snapshot is therefore still the starting 
+… [744 more characters in the raw transcript]
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its\n  keystrokes are replayed into a headless VS Code with your settings, in a\n  network-less sandbox with capped CPU and memory. The session text then\n  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).\n  The session stores the changed lines. If replay is impossible or fails,\n  the tier 0/1 text stays, and the `tier2_status` column says why.\"\"\",\"\"\"* **Tier 2** (`--vscode-replay`): when a VS Code session opens, the\n  edited file's initial content is saved. When the session closes:\n  1. if the file was saved after your last keystroke (autosave, or Ctrl+S\n     at the end), the session text is the lines it changed from the\n     initial content: exactly what VS Code made of your keys, autocomplete\n     and auto-indent included; VS Code is not started;\n  2. otherwise the keystrokes are replayed into a headless VS Code with\n     your settings, in a network-less sandbox with capped CPU and memory, as\n     a best effort: the cursor is assumed at the end of the file, your\n     extensions are not loaded (so their autocomplete is not reproduced),\n     and nothing checks the result.\n\n  Either way the session stores only the changed lines, and tier 0/1 text\n  stays if neither works. The `tier2_status` column says what happened:\n\n  | `tier2_status` | Meaning |\n  |---|---|\n  | `resolving` | looking for the edited file |\n  | `snapshot` | initial content saved, session open |\n  | `pending` | session closed, waiting for the worker |\n  | `done: saved file` | text from the file saved after the last edit (exact) |\n  | `done: replayed (best effort, unverified)` | text from a replay in VS Code |\n  | `failed: …` | the replay failed; tier 0/1 text kept |\n  | `skipped: …` | tier 2 impossible (unsaved new file, unsaved changes at the start, file not found, …) |\n\"\"\"),\n(\"\"\"Inspect the result:\n\n```sh\nsqlite3 ~/brain-data/brain.db \\\\\n  \"SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions\"\n```\"\"\",\"\"\"Inspect the result:\n\n```sh\nsqlite3 -readonly ~/brain-data/brain.db \\\\\n  \"SELECT id, app, started_at, ended_at, status, end_reason, tier_used, tier2_status, reconstructed_text FROM sessions\"\n```\n\nA GUI such as DB Browser for SQLite keeps a read transaction open and shows\nthe database as of when it started: sessions that have closed since still\nlook `open`, and SQLite cannot shrink its WAL file meanwhile. Open the\ndatabase read-only and reopen it to see the current state.\"\"\"),\n(\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's\n  content at session start, so it is skipped for unsaved new files\n  (`Untitled-1`), files with unsaved changes when the session started, and\n  files saved before they could be identified (within 2 minutes of the\n  session start);\n  costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,\n  outside brain's budget), and runs with extensions disabled when your\n  extensions exceed 300 MB. Suggestion acceptance may not replay the same.\"\"\",\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's\n  content at session start, so it is skipped for unsaved new files\n  (`Untitled-1`), files with unsaved changes when the session started, and\n  files saved before they could be identified (within 2 minutes of the\n  session start). When the file is saved after the last edit, the session\n  text comes from it (exact). Otherwise a replay in VS Code is a best\n  effort: ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,\n  outside brain's budget), the cursor assumed at the end of the file, and no\n  extensions when yours ex
+… [2684 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+[This command modified 3 files you've previously read: CLAUDE.md, README.md, PLAN.md. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Clippy and the docs are clean, and I'm running the two Kate tests on the new guard next. Please keep hands off the keyboard and mouse for about 40 seconds while I check the screen.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "L=$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive); echo \"locked: $L\"; if [ \"$L\" = \"false\" ]; then cargo test --release --test real_keyboard_e2e --test repeat_e2e -- --ignored --nocapture --test-threads=1 2>&1 | grep -E 'kate [AB]|test result|panicked'; fi; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"",
+  "description": "Run the Kate tests with the new guard if unlocked",
+  "timeout": 240000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+locked: false
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.17s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.46s
+leftover: brain=0 kate=0 layout=0
+```
+
+</details>
+
