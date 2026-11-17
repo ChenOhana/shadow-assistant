@@ -16,10 +16,9 @@ build deliberately differs from it are called out ("Differs from the design").
                  ▼                │                       ingest thread ──► brain.db (SQLite WAL)
  KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
  Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
-                                                              checkpoints     log_checkpoints
                                     tier 2 worker (opt-in): VS Code replay ──┘
  brain query search ──► brain.db (read-only snapshot)
- brain query text   ──► log_checkpoints → events.jsonl
+ brain query text   ──► brain.db + replay of running sessions from events.jsonl
 ```
 
 * **Capture** reads keyboards directly from the kernel (evdev), passively, and
@@ -28,12 +27,13 @@ build deliberately differs from it are called out ("Differs from the design").
   script calling back over D-Bus. Every event is one JSON line appended to
   `events.jsonl`.
 * **Ingest** (a thread in the same process) tails the log about once a
-  second. In one SQLite transaction per batch it writes log checkpoints,
-  opens, updates and closes writing sessions, reconstructs their text, and
-  advances the log offset. The log is the ground truth; the database is
-  derived from it and can be rebuilt from it.
-* **Query** reads the database (`search`) or the log (`text`) while `run`
-  keeps writing, and prints JSON.
+  second. In one SQLite transaction per batch it opens, updates and closes
+  writing sessions, reconstructs their text, and advances the log offset.
+  The log is the ground truth; the database is derived from it and can be
+  rebuilt from it.
+* **Query** reads the database while `run` keeps writing, and prints JSON:
+  `search` matches session text; `text` gives an app's text at a point in
+  time, replaying sessions still running then from the log.
 * **Threads in `brain run`**: main (signals, orderly shutdown), input (the
   hot path), ingest, one small thread per watched D-Bus signal plus zbus's
   own connection threads, and with `--vscode-replay` a tier 2 worker. A real
@@ -219,11 +219,10 @@ lines until it has caught up. **Each step is one SQLite transaction** that
 holds everything derived from those lines and the new log offset:
 
 1. read complete lines from `ingest_state.log_offset`;
-2. write a log checkpoint at most every 5 s of log time;
-3. feed each event to the session engine (section 4);
-4. once caught up, close sessions idle on the wall clock, write finished tier
+2. feed each event to the session engine (section 4);
+3. once caught up, close sessions idle on the wall clock, write finished tier
    2 results, refresh the live text of open sessions;
-5. store the new offset and commit.
+4. store the new offset and commit.
 
 If the commit fails nothing is visible and the same lines are read again; the
 in-memory session state is rebuilt from the database first, so it cannot run
@@ -250,8 +249,8 @@ logic, is fixed by deleting `brain.db`, which is rebuilt from the log.
 | with sessions open | open sessions are rebuilt from the database and their events replayed from the log (section 4.5); the restart's `start` event then closes them |
 
 `tests/crash_safety.rs` kills brain 25 times under load and checks database
-integrity, offsets on line boundaries, a complete log, and that every session,
-document and checkpoint equals a clean rebuild from the log.
+integrity, offsets on line boundaries, a complete log, and that every session
+and document equals a clean rebuild from the log.
 
 ## 4. Sessions and reconstruction
 
@@ -344,12 +343,15 @@ session.
 the CDP connection is a pipe, because the network namespace makes a TCP port
 unreachable.
 
-### 4.5 Restart with open sessions
+### 4.5 Replaying a session: restart, and text at a point in time
 
-On start, ingest loads the sessions still open in the database, restores
-their starting documents from `context_state`, and replays their events from
-each session's `start_offset` up to the ingested offset, through the same
-key-to-action rules. The `start` event that follows closes them (input while
+Each session row stores the document it started from (`start_text`, cursor
+and selection), so any session can be replayed from the log to any moment.
+On start, ingest loads the sessions still open in the database and replays
+their events from each session's `start_offset` up to the ingested offset,
+through the same key-to-action rules. `query text` uses the same replay,
+bounded by a time instead, to know a session's text at the end of its
+window. The `start` event that follows closes them (input while
 brain was not running is unknown). Everything the engine decides is a
 function of the log, so a database rebuilt from the log alone is identical;
 `sessions::tests::crash_recovery_reproduces_an_uninterrupted_run` restarts
@@ -369,11 +371,13 @@ ingest after every line to prove it.
 
 The directory is created 0700 and brain runs with umask 077.
 
-### 5.2 Schema (version 4)
+### 5.2 Schema (version 5)
 
 - **`sessions`**: `id`, `app`, `window` (normalized), `started_at`,
   `ended_at` (NULL while open), `status`, `tier_used`, `reconstructed_text`,
   `start_offset` / `end_offset` (the session's events in the log),
+  `start_text` / `start_cursor` / `start_anchor` (the document it started
+  from, for replays),
   `end_reason` (`idle`, `commit`, `cancel`, `field`, `stop`, `restart`),
   `tier2_status`, `tier2_file`. Indexes on `(app, started_at)`, `status`, and
   `(app, end_reason, end_offset)` for shell history.
@@ -382,7 +386,6 @@ The directory is created 0700 and brain runs with umask 077.
   triggers in the same transaction.
 - **`context_state`**: each multi-line window's document between sessions.
 - **`ingest_state`**: the single log offset.
-- **`log_checkpoints`**: `(ts, byte_offset)`, at most one per 5 s of log time.
 
 There are no migrations (first version): a database from another schema
 version is refused with a message to delete it.
@@ -408,17 +411,6 @@ trigram finds Hebrew words with attached prefixes (`בית` in "בבית"). Word
 shorter than 3 characters cannot use the trigram index and are matched with
 `LIKE`.
 
-### 5.5 Log checkpoints
-
-`query text` must read raw keys from the log for a time window without
-scanning it from the start. Each checkpoint says "the event at this byte has
-this timestamp". Because the log is written in time order, starting at the
-latest checkpoint at or before the window misses nothing, and reads at most
-5 s of log before the window; reading stops 60 s of log after it. Per-app
-checkpoints would not save work, since the log interleaves apps and the
-window has to be read anyway. Clock steps backwards are discussed in section
-10.
-
 ## 6. Query semantics
 
 (`src/query.rs`)
@@ -428,11 +420,19 @@ window has to be read anyway. Clock steps backwards are discussed in section
   case), newest first, default limit 20, with a snippet around the first
   match. Open sessions are included with their live text and
   `ended_at: null`. A session is in a time window if it overlaps it.
-- **`brain query text --app A [--from T] [--to T] [--at T]`**: the raw stream
-  typed into the app over the window: characters as typed, Enter as a
-  newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
-  `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
-  decision: an audit-style trail, distinct from the edited session text).
+- **`brain query text --app A [--from T] [--to T] [--at T]`**: the app's
+  **reconstructed** text as it stood at the end of the window: each of its
+  sessions active in the window, as it was at that moment (a session still
+  running then is replayed from the log up to it).
+  In editors a later session continues the previous one's document, so
+  only the latest state of each document is shown; single-line fields
+  (commands, searches, messages) are each listed. `text` joins them one per
+  line; `sessions` gives each part with its window and times.
+  A session that ended by the end of the window contributes its stored
+  text; one still running is replayed with `sessions::text_at` from its
+  stored starting document up to that moment, which is the same replay
+  crash recovery uses (section 4.5). *Differs from the design*, where `text`
+  was the raw keystroke stream; the owner changed it.
 - **`--app A`** can be part of an app id, ignoring case. `search` keeps
   every matching app; `text` resolves it to one full id (exact match first,
   else the single id containing it; ambiguous or unknown is an error) and
@@ -526,11 +526,6 @@ window has to be read anyway. Clock steps backwards are discussed in section
   can produce one character more or less in the app than in brain.
 - **Compose, dead keys, IME** are not interpreted; dead keys are logged by
   name.
-- **Clock steps backwards** (NTP corrections, manual changes) break the
-  "log in time order" assumption `query text` relies on: events in its window
-  written after such a step can be missed. Both bounds can be made exact using
-  the checkpoints' 5 s spacing (start at the earliest checkpoint within 5 s
-  before the window, stop after the last one within 5 s after it); not done.
 - **Other password prompts** are captured. AT-SPI's `password text` role
   would allow skipping them in apps that expose it.
 - **VS Code tier 2** assumes the cursor starts at the end of the file,

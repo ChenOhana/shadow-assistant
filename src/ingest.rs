@@ -7,8 +7,8 @@
 //! dies after the commit, the offset already covers the batch. Either way there
 //! are no gaps and no duplicates.
 //!
-//! A step derives log checkpoints (seek points for `query text`) and feeds
-//! every event to the [`Sessions`] engine, which opens, updates and closes
+//! A step feeds every event to the [`Sessions`] engine, which opens, updates
+//! and closes
 //! writing sessions and their reconstructed text in the same transaction.
 //! If a step fails, the engine's in-memory state may be ahead of the
 //! database, so it is rebuilt from the database and the log
@@ -22,8 +22,6 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
-/// Minimum spacing between two checkpoints for the same app, in log time.
-pub const CHECKPOINT_INTERVAL_MS: Millis = 5_000;
 /// Upper bound on lines per transaction, which bounds memory use and commit latency.
 pub const MAX_LINES_PER_STEP: usize = 5_000;
 
@@ -31,7 +29,6 @@ pub struct Ingester {
     conn: Connection,
     log_path: PathBuf,
     offset: u64,
-    last_checkpoint: Option<Millis>,
     sessions: Option<Sessions>,
     /// Tier 2 results waiting to be written: (session id, text or error).
     tier2_results: Vec<(i64, std::result::Result<String, String>)>,
@@ -43,7 +40,6 @@ pub struct Ingester {
 pub struct StepStats {
     pub lines: usize,
     pub invalid_lines: usize,
-    pub checkpoints: usize,
 }
 
 /// Where the ingest clock comes from: the wall clock in production, fixed in tests.
@@ -72,15 +68,12 @@ impl Ingester {
             offset = log_len;
             store::set_ingest_offset(&conn, offset)?;
         }
-        let last_checkpoint =
-            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok());
         let sessions = Sessions::recover(&conn, log_path, offset, tier2)
             .context("recovering open sessions")?;
         Ok(Self {
             conn,
             log_path: log_path.to_owned(),
             offset,
-            last_checkpoint,
             sessions: Some(sessions),
             tier2_results: Vec::new(),
             tier2_jobs: Vec::new(),
@@ -126,9 +119,6 @@ impl Ingester {
             anyhow::bail!("session state unavailable");
         };
         let mut stats = StepStats::default();
-        // Checkpoint decisions are staged and only become the in-memory state
-        // once the transaction commits, so a failed commit cannot desync them.
-        let mut staged: Option<Millis> = None;
         let tx = self
             .conn
             .transaction()
@@ -145,11 +135,6 @@ impl Ingester {
                     stats.invalid_lines += 1;
                     continue;
                 };
-                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
-                    store::insert_checkpoint(&tx, &timefmt::format_ms(event.ts), line.offset)?;
-                    staged = Some(event.ts);
-                    stats.checkpoints += 1;
-                }
                 sessions.on_event(&tx, line.offset, reader.offset(), &event)?;
             }
             new_offset = reader.offset();
@@ -176,9 +161,6 @@ impl Ingester {
         }
 
         self.offset = new_offset;
-        if staged.is_some() {
-            self.last_checkpoint = staged;
-        }
         let (jobs, discards) = sessions.take_committed_effects();
         self.tier2_jobs.extend(jobs);
         for id in discards {
@@ -201,7 +183,6 @@ impl Ingester {
             let s = self.step()?;
             total.lines += s.lines;
             total.invalid_lines += s.invalid_lines;
-            total.checkpoints += s.checkpoints;
             if s.lines < MAX_LINES_PER_STEP {
                 break;
             }
@@ -231,17 +212,6 @@ fn apply_tier2_result(
     Ok(())
 }
 
-/// A new checkpoint is due when none exists yet for this app, or the last one is
-/// at least [`CHECKPOINT_INTERVAL_MS`] away in log time. The distance is absolute
-/// so that a backwards clock jump (NTP, manual change) cannot suppress
-/// checkpoints until the clock catches up again.
-fn checkpoint_due(last: Option<Millis>, ts: Millis) -> bool {
-    match last {
-        None => true,
-        Some(prev) => (ts - prev).abs() >= CHECKPOINT_INTERVAL_MS,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn ingests_and_checkpoints_every_five_seconds() {
+    fn ingests_the_whole_log_and_records_the_offset() {
         let tmp = tempfile::tempdir().unwrap();
         let log = tmp.path().join("events.jsonl");
         let mut w = LogWriter::open(&log).unwrap();
@@ -289,8 +259,6 @@ mod tests {
             count(c, "SELECT log_offset FROM ingest_state"),
             w.len() as i64
         );
-        // One checkpoint per 5 s of log time: t = 0, 5, 10, 15 s.
-        assert_eq!(count(c, "SELECT count(*) FROM log_checkpoints"), 4);
         // Nothing new: a no-op step.
         assert_eq!(ing.step().unwrap(), StepStats::default());
     }
@@ -314,10 +282,7 @@ mod tests {
         let mut ing = Ingester::new(store::open_writer(&db).unwrap(), &log).unwrap();
         let s = ing.catch_up(10).unwrap();
         assert_eq!(s.lines, 5, "only the new lines are read");
-        assert_eq!(
-            count(ing.connection(), "SELECT count(*) FROM log_checkpoints"),
-            15
-        );
+        assert_eq!(ing.offset(), w.len());
     }
 
     #[test]
@@ -333,13 +298,5 @@ mod tests {
             Ingester::new(store::open_writer(&tmp.path().join("b.db")).unwrap(), &log).unwrap();
         assert_eq!(ing.step().unwrap().lines, 1);
         assert_eq!(ing.offset(), committed);
-    }
-
-    #[test]
-    fn checkpoint_spacing_rule() {
-        assert!(checkpoint_due(None, 0));
-        assert!(!checkpoint_due(Some(0), 4_999));
-        assert!(checkpoint_due(Some(0), 5_000));
-        assert!(checkpoint_due(Some(100_000), 0), "backwards clock jump");
     }
 }

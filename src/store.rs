@@ -12,12 +12,12 @@
 //! independently, so ingest simply re-derives them on the next start.
 
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use std::time::Duration;
 
 /// Bumped whenever the schema changes; see [`init_schema`].
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = r#"
 -- One row per writing session. While a session is open its text is the live
@@ -32,6 +32,9 @@ CREATE TABLE sessions (
   tier_used          INTEGER,
   reconstructed_text TEXT,
   start_offset       INTEGER NOT NULL,           -- log offset of the session's first event
+  start_text         TEXT NOT NULL DEFAULT '',   -- the document the session started from,
+  start_cursor       INTEGER NOT NULL DEFAULT 0, --   so it can be replayed to any point in time
+  start_anchor       INTEGER,
   end_offset         INTEGER,                    -- log offset just past its last event
   end_reason         TEXT,                       -- idle | commit | cancel | field | stop | restart
   tier2_status       TEXT,                       -- VS Code replay: snapshot | pending | done | failed: .. | skipped: ..
@@ -81,14 +84,6 @@ CREATE TABLE ingest_state (
   log_offset INTEGER NOT NULL DEFAULT 0          -- bytes of the capture log already ingested
 );
 INSERT INTO ingest_state (id, log_offset) VALUES (1, 0);
-
--- Seek points into the capture log, at most one per 5 s of log time: the
--- first event at or after `ts` starts at `byte_offset`. `query text` starts
--- reading the log there instead of at the beginning.
-CREATE TABLE log_checkpoints (
-  ts          TEXT PRIMARY KEY,
-  byte_offset INTEGER NOT NULL
-);
 "#;
 
 /// Opens the database for the writer (`brain run`), creating it if new.
@@ -170,29 +165,6 @@ pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
         [offset as i64],
     )?;
     Ok(())
-}
-
-pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
-    conn.prepare_cached("INSERT OR IGNORE INTO log_checkpoints (ts, byte_offset) VALUES (?1, ?2)")?
-        .execute(rusqlite::params![ts, offset as i64])?;
-    Ok(())
-}
-
-/// Timestamp of the latest checkpoint, to resume checkpoint spacing after a restart.
-pub fn latest_checkpoint(conn: &Connection) -> Result<Option<String>> {
-    Ok(conn.query_row("SELECT MAX(ts) FROM log_checkpoints", [], |r| r.get(0))?)
-}
-
-/// Byte offset of the latest checkpoint at or before `ts`, or 0.
-pub fn seek_offset_before(conn: &Connection, ts: &str) -> Result<u64> {
-    let off: Option<i64> = conn
-        .query_row(
-            "SELECT byte_offset FROM log_checkpoints WHERE ts <= ?1 ORDER BY ts DESC LIMIT 1",
-            [ts],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(off.unwrap_or(0) as u64)
 }
 
 #[cfg(test)]
@@ -296,32 +268,5 @@ mod tests {
         assert_eq!(hits("\"cafe\""), vec![5], "accents ignored");
         assert_eq!(hits("\"run\" AND \"late\""), vec![1]);
         assert!(hits("\"walk\"").is_empty());
-    }
-
-    #[test]
-    fn checkpoint_seek() {
-        let tmp = tempfile::tempdir().unwrap();
-        let c = open_writer(&tmp.path().join("b.db")).unwrap();
-        assert_eq!(latest_checkpoint(&c).unwrap(), None);
-        insert_checkpoint(&c, "2026-01-01T00:00:00.000Z", 0).unwrap();
-        insert_checkpoint(&c, "2026-01-01T00:00:05.000Z", 500).unwrap();
-        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 900).unwrap();
-        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 999).unwrap(); // ignored duplicate
-        assert_eq!(
-            seek_offset_before(&c, "2026-01-01T00:00:07.000Z").unwrap(),
-            500
-        );
-        assert_eq!(
-            seek_offset_before(&c, "2026-01-01T00:00:10.000Z").unwrap(),
-            900
-        );
-        assert_eq!(
-            seek_offset_before(&c, "2025-01-01T00:00:00.000Z").unwrap(),
-            0
-        );
-        assert_eq!(
-            latest_checkpoint(&c).unwrap().as_deref(),
-            Some("2026-01-01T00:00:10.000Z")
-        );
     }
 }

@@ -6,7 +6,7 @@ lets you search it later.
 ```
 brain run                      # capture keystrokes + focus changes, store them
 brain query search "<words>"   # full-text search over writing sessions
-brain query text --app A       # the raw typed stream of an app
+brain query text --app A       # what an app's text was at a point in time
 ```
 
 > **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
@@ -119,10 +119,13 @@ brain query text --app A [--from T] [--to T] [--at T]
   a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
   first (default limit 20). Open sessions are included with what has been
   typed so far (`ended_at: null`).
-* **`text`**: the raw stream typed into the app, as captured, with no
-  editing applied: characters as typed, Enter as a newline, Tab as a tab,
-  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
-  pasted text inline.
+* **`text`**: the app's **reconstructed** text as it stood at the end of
+  the window: each of its sessions active in the window, as it was at that
+  moment (a session still running then is replayed from the log up to it).
+  In editors a later session continues the previous one's document, so
+  only the latest state of each document is shown; single-line fields
+  (commands, searches, messages) are each listed. `text` joins them one per
+  line; `sessions` gives each part with its window and times.
 * **`--app A`** can be part of the app id, ignoring case (`--app chrome`
   finds `google-chrome`). `search` keeps every app that matches. `text`
   resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
@@ -169,11 +172,20 @@ database store UTC.
 
 ```json
 {
-  "app": "org.kde.konsole",
-  "at": "2026-11-16T16:51:22.680+02:00",
-  "from": "2026-11-16T16:41:22.680+02:00",
-  "to": "2026-11-16T16:51:22.680+02:00",
-  "text": "git status\ncargo test\nls -la\n"
+  "app": "org.kde.kate",
+  "at": "2026-11-17T10:05:00.000+02:00",
+  "from": "2026-11-17T09:55:00.000+02:00",
+  "to": "2026-11-17T10:05:00.000+02:00",
+  "text": "Goals\n- ship search\n- fix the rename rule",
+  "sessions": [
+    {
+      "session_id": "42",
+      "window": "goals.md — Kate",
+      "started_at": "2026-11-17T09:58:12.040+02:00",
+      "ended_at": null,
+      "text": "Goals\n- ship search\n- fix the rename rule"
+    }
+  ]
 }
 ```
 
@@ -305,10 +317,11 @@ sqlite3 ~/brain-data/brain.db \
   extensions exceed 300 MB. Suggestion acceptance may not replay the same.
 
 **Queries**
-* **`query text` is the raw stream, `search` the edited text.** As the
-  owner decided, `text` returns exactly what was typed (with `<Backspace>`
-  and other keys visible) rather than reconstructed text; reconstructed,
-  edit-aware text is what `search` matches and returns.
+* **`query text` returns reconstructed text at a point in time.** It
+  reuses the session engine: each session row keeps the document it started
+  from, so a session can be replayed from the log to any moment, the same
+  way crash recovery rebuilds open sessions. (An earlier version returned
+  the raw keystroke stream; the owner changed it.)
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
@@ -322,11 +335,6 @@ sqlite3 ~/brain-data/brain.db \
 * **`--app` takes part of the id.** `search` keeps every matching app;
   `text` must resolve to exactly one app and reports its full id, so two
   apps' keystrokes are never mixed into one stream.
-* **`query text` assumes the log is in time order.** It starts reading at
-  the last checkpoint before its window and stops 60 s of log after it. If
-  the system clock is stepped backwards while capturing (an NTP correction,
-  a manual change), keys typed after the step whose times fall in a queried
-  window can be missed. PLAN.md (section 10) describes an exact bound.
 
 **Running**
 * **Service as you, not root**: a systemd user service, because desktop
@@ -337,9 +345,9 @@ sqlite3 ~/brain-data/brain.db \
 
 ```sh
 cargo test --release      # unit tests (~120) and the default integration tests:
-                          #   crash_safety  25 random kill -9s under load; sessions,
-                          #                 documents and checkpoints must equal a
-                          #                 clean rebuild from the log
+                          #   crash_safety  25 random kill -9s under load; sessions
+                          #                 and documents must equal a clean
+                          #                 rebuild from the log
                           #   query_cli     the query commands through the binary,
                           #                 incl. thousands of queries while run writes
                           #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
