@@ -43,7 +43,10 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 - Sessions: keyed by (app, normalized window title); close after 30 s idle
   in that context or on Enter in single-line contexts; focus loss alone
   never closes a session; a title change of the typed window (a `renamed`
-  focus event) shortly after a keystroke keeps the session.
+  focus event) shortly after a keystroke keeps the session. With
+  `--vscode-replay`, every VS Code key (not only text edits) opens or
+  extends a session, and a session of shortcuts only (Ctrl+D, Ctrl+S) is
+  kept for the saved file's diff, or removed when there is none.
 - The mouse is not captured (owner's call): cursor moves made with the mouse
   are a documented limitation, not something to work around.
 - Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,

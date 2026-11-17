@@ -49,10 +49,17 @@ struct Inner {
     paused: bool,
 }
 
+/// A thread to wake, and which apps' focus changes wake it.
+type FocusWake = (std::thread::Thread, fn(&str) -> bool);
+
 pub struct Recorder {
     inner: Mutex<Inner>,
     clipboard: Box<dyn ClipboardSource>,
     write_errors: AtomicU64,
+    /// With `--vscode-replay`: the ingest thread, woken right away when a
+    /// window of an app matching the predicate (VS Code) takes focus, so its
+    /// file is copied before the user can edit and save it.
+    wake_on_focus: std::sync::OnceLock<FocusWake>,
 }
 
 impl Recorder {
@@ -65,7 +72,14 @@ impl Recorder {
             }),
             clipboard,
             write_errors: AtomicU64::new(0),
+            wake_on_focus: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Wakes `thread` after recording a focus change to an app for which
+    /// `app_matches` is true.
+    pub fn wake_on_focus(&self, thread: std::thread::Thread, app_matches: fn(&str) -> bool) {
+        let _ = self.wake_on_focus.set((thread, app_matches));
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
@@ -116,6 +130,12 @@ impl Recorder {
             },
         };
         self.append(&mut g, ev);
+        drop(g);
+        if let Some((thread, app_matches)) = self.wake_on_focus.get()
+            && app_matches(app)
+        {
+            thread.unpark();
+        }
     }
 
     /// Pauses or resumes recording of input (screen lock). Lifecycle markers
@@ -256,6 +276,32 @@ mod tests {
             v.push(l.event.unwrap());
         }
         v
+    }
+
+    #[test]
+    fn focus_on_a_matching_app_wakes_the_ingest_thread() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("events.jsonl");
+        let rec = std::sync::Arc::new(Recorder::new(
+            LogWriter::open(&p).unwrap(),
+            Box::new(FixedClipboard("")),
+        ));
+        let (ready_tx, ready) = std::sync::mpsc::channel();
+        let sleeper = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            let t = std::time::Instant::now();
+            std::thread::park_timeout(std::time::Duration::from_secs(5));
+            t.elapsed()
+        });
+        rec.wake_on_focus(sleeper.thread().clone(), |app| app == "code");
+        ready.recv().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        rec.set_focus("kate", "a.txt", false); // not a match: no wake
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert!(!sleeper.is_finished());
+        rec.set_focus("code", "a.txt - Visual Studio Code", false);
+        let slept = sleeper.join().unwrap();
+        assert!(slept < std::time::Duration::from_secs(2), "{slept:?}");
     }
 
     #[test]

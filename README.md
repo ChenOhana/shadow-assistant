@@ -261,13 +261,27 @@ Ingest (inside `brain run`, about once a second) turns the log into
      and nothing checks the result.
 
   The replay stores the lines it changed; tier 0/1 text stays if neither
-  works. The `tier2_status` column says what happened:
+  works.
+
+  Every key in a VS Code window counts toward its session, including
+  shortcuts the tier 0/1 adapters don't understand (Ctrl+D to duplicate a
+  line, Alt+Up to move one, Ctrl+/ to comment, Ctrl+S): they can change the
+  file. A session made only of such shortcuts gets the saved file's diff
+  and is never replayed; when the file was not saved after it, or the diff
+  is empty, the session changed nothing and is removed (as is any session
+  whose saved file shows no change). The file is also copied when a VS Code
+  window is focused, so Ctrl+D then Ctrl+S right after focusing still has
+  the content to diff against. Without `--vscode-replay`, VS Code behaves
+  like any other app.
+
+  The `tier2_status` column says what happened:
 
   | `tier2_status` | Meaning |
   |---|---|
   | `resolving` | looking for the edited file |
   | `snapshot` | initial content saved, session open |
   | `pending` | session closed, waiting for the worker |
+  | `pending: saved file only` | a session of shortcuts only, waiting for the saved file's diff (removed if there is none) |
   | `done: saved file` | a diff of the file saved after the last edit (exact) |
   | `done: replayed (best effort, unverified)` | text from a replay in VS Code |
   | `failed: …` | the replay failed; tier 0/1 text kept |

@@ -355,6 +355,18 @@ session.
   extension autocomplete is not reproduced). Failures and timeouts keep the
   tier 0/1 text; pending jobs survive restarts.
 
+  With tier 2 on, every VS Code key except desktop (Super) shortcuts opens
+  or extends the session, even ones tier 0/1 ignores (Ctrl+D, Alt+Up,
+  Ctrl+S), and a session with a snapshot is kept at close even if its tier
+  0/1 text is unchanged (`pending: saved file only`): it gets the saved
+  file's diff, or is removed when the file was not saved after it; any
+  session whose saved diff is empty is removed too. Because the snapshot is
+  taken when ingest opens the session (up to 1 s after the first key), a
+  focus change to VS Code wakes the ingest thread at once and the file is
+  copied on focus; a session that starts within 10 s and finds its file
+  saved before its own snapshot uses that copy, if the file was not
+  modified after the session started.
+
 *Differs from the design*: no Xvfb (headless Electron needs no display), and
 the CDP connection is a pipe, because the network namespace makes a TCP port
 unreachable.

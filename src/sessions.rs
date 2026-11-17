@@ -75,9 +75,23 @@ pub enum Tier2Start {
     Skipped(String),
 }
 
+/// `tier2_status` of a closed VS Code session that only shortcuts touched
+/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the
+/// saved file's diff, or is removed; it is never replayed.
+pub const TIER2_PENDING_SAVED_ONLY: &str = "pending: saved file only";
+
 /// Takes the file snapshot a tier 2 replay starts from, when a session opens
 /// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
 pub trait Tier2Snapshotter: Send {
+    /// Whether keys in this app that tier 0/1 ignores (Ctrl+D, Ctrl+S, ...)
+    /// still open or extend a session: they may change the file.
+    fn counts_every_key(&self, _app: &str) -> bool {
+        false
+    }
+    /// A window of `app` was focused or retitled at `ts`: a chance to copy
+    /// its file before any key, in case it is saved before the session's
+    /// own snapshot is taken.
+    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}
     fn snapshot(
         &self,
         app: &str,
@@ -226,6 +240,12 @@ impl Sessions {
                 let act = self.note_key(class, &k, key, mods, ev.ts);
                 if act == Action::Ignore {
                     self.last_key = None;
+                    if self.tier2_counts(&ev.app, mods)
+                        && in_session(&k)
+                        && let Some(s) = self.open.get_mut(&k)
+                    {
+                        s.extend(ev.ts, next);
+                    }
                     return Ok(());
                 }
                 if !in_session(&k) {
@@ -315,6 +335,13 @@ impl Sessions {
         action(class, key, mods)
     }
 
+    /// Whether a key that tier 0/1 ignores still belongs to a session: in
+    /// VS Code with tier 2 on, except desktop (Super) shortcuts.
+    fn tier2_counts(&self, app: &str, mods: &[crate::event::Mod]) -> bool {
+        !mods.contains(&crate::event::Mod::Super)
+            && self.tier2.as_ref().is_some_and(|t| t.counts_every_key(app))
+    }
+
     fn paste_suppressed(&mut self, k: &Key, ts: Millis) -> bool {
         let hit = self
             .suppress_paste
@@ -338,6 +365,15 @@ impl Sessions {
                 let act = self.note_key(class, &k, key, mods, ev.ts);
                 if act == Action::Ignore {
                     self.last_key = None;
+                    // Tier 2 only: a shortcut such as Ctrl+D may still change
+                    // the file, so it belongs to the session (the text stays).
+                    if self.tier2_counts(&ev.app, mods) {
+                        self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
+                        self.open
+                            .get_mut(&k)
+                            .expect("just opened")
+                            .extend(ev.ts, next);
+                    }
                     return Ok(());
                 }
                 self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
@@ -368,6 +404,9 @@ impl Sessions {
                 self.last_key = Some((k, ev.ts));
             }
             EventKind::Focus { window, renamed } => {
+                if let Some(t2) = &self.tier2 {
+                    t2.on_focus(&ev.app, window, ev.ts);
+                }
                 let open: Vec<Key> = self.open.keys().cloned().collect();
                 self.note_focus(&ev.app, window, *renamed, ev.ts, &|k| open.contains(k));
             }
@@ -508,7 +547,10 @@ impl Sessions {
     /// Closes a session. A session that left the document as it found it
     /// (cursor movement, a typo typed and deleted) or holds only whitespace
     /// leaves no row behind, except a commit of a non-empty line, which is a
-    /// real submission (a shell command run again from history).
+    /// real submission (a shell command run again from history), and a
+    /// session with a tier 2 snapshot, which stays until the saved file's
+    /// diff shows whether the file changed (shortcuts like Ctrl+D change it
+    /// without changing the tier 0/1 text).
     fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
         let Some(mut s) = self.open.remove(k) else {
             return Ok(());
@@ -527,13 +569,18 @@ impl Sessions {
         }
         let text = s.editor.buf.text();
         let changed = text_hash(&text) != s.start_hash;
-        let keep = (changed || reason == "commit") && !text.trim().is_empty();
-        if keep {
+        let typed = (changed || reason == "commit") && !text.trim().is_empty();
+        if typed || s.tier2_snapshot {
+            let pending = if typed {
+                "pending"
+            } else {
+                TIER2_PENDING_SAVED_ONLY
+            };
             tx.prepare_cached(
                 "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
                     end_offset = ?3, end_reason = ?4,
                     tier2_status = CASE tier2_status
-                        WHEN 'snapshot' THEN 'pending'
+                        WHEN 'snapshot' THEN ?6
                         -- still identifying when brain stopped or crashed
                         WHEN 'resolving' THEN 'skipped: could not identify the file from the window title'
                         ELSE tier2_status END
@@ -544,7 +591,8 @@ impl Sessions {
                 text,
                 s.end_offset as i64,
                 reason,
-                s.id
+                s.id,
+                pending
             ])?;
             if s.tier2_snapshot {
                 self.staged_jobs.push(s.id);
@@ -638,10 +686,15 @@ fn record_tier2(tx: &Connection, id: i64, outcome: Tier2Start) -> Result<bool> {
 
 impl OpenSession {
     fn touch(&mut self, ts: Millis, next: u64) {
+        self.extend(ts, next);
+        self.dirty = true;
+    }
+
+    /// Activity that leaves the text as it is (a shortcut in VS Code).
+    fn extend(&mut self, ts: Millis, next: u64) {
         // max(): a backwards clock jump must not make the session look older.
         self.last_activity = self.last_activity.max(ts);
         self.end_offset = next;
-        self.dirty = true;
     }
 }
 

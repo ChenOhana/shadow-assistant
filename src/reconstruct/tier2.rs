@@ -14,6 +14,11 @@
 //!    sandboxed VS Code ([`super::vscode`]), as a best effort that nothing
 //!    verifies (status `done: replayed (best effort, unverified)`).
 //!
+//! A session that only shortcuts touched (Ctrl+D, Alt+Up, ... leave the tier
+//! 0/1 text as it was; status `pending: saved file only`) gets step 1 only.
+//! When the saved file shows no change, or a shortcut-only session was not
+//! saved, the session changed nothing and is removed.
+//!
 //! The text goes back to the ingest thread, which writes it over the tier
 //! 0/1 text. A failure or timeout leaves the tier 0/1 text in place and
 //! records why. Pending jobs survive restarts (they are rows in the
@@ -23,7 +28,7 @@ use super::apps::normalize_window;
 use super::vscode::{self, ReplayEvent, ReplayInput, VsCodeReplayer};
 use crate::event::EventKind;
 use crate::eventlog::LogReader;
-use crate::sessions::{Tier2Snapshotter, Tier2Start};
+use crate::sessions::{TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter, Tier2Start};
 use crate::store;
 use crate::timefmt::{Millis, now_ms};
 use anyhow::{Context, Result, bail};
@@ -43,9 +48,32 @@ const MAX_SNAPSHOT_DELAY_MS: Millis = 120_000;
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// Shut the warm instance down after this long without jobs.
 const IDLE_SHUTDOWN: Duration = Duration::from_secs(600);
+/// A focus event is copied from only while it is this fresh (not while
+/// ingest catches up on an old log, when the file has changed since).
+const LIVE_FOCUS_MS: Millis = 2_000;
+/// A copy taken on focus can stand in for a session's snapshot only if the
+/// session starts within this long after the focus.
+const FOCUS_COPY_MS: Millis = 10_000;
 
 fn snapshot_path(dir: &Path, id: i64) -> PathBuf {
     dir.join(format!("snapshot-{id}"))
+}
+
+/// A file copied when its VS Code window was focused, before any key.
+struct FocusCopy {
+    /// Where the copy is (`focus-<n>` in the snapshot directory).
+    path: PathBuf,
+    /// The file's modification time when it was copied.
+    modified: Millis,
+    /// When the window was focused.
+    focused_at: Millis,
+}
+
+fn modified_ms(meta: &std::fs::Metadata) -> Option<Millis> {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as Millis)
 }
 
 /// Takes VS Code file snapshots into `dir` (`<data-dir>/vscode/snapshots`).
@@ -54,6 +82,10 @@ pub struct VsCodeSnapshots {
     /// VS Code's config directory to read window state from; `None` means
     /// the user's (`~/.config/Code`). Tests give a fake one.
     vscode_config: Option<PathBuf>,
+    /// Files copied on focus, by file, for sessions whose file is saved
+    /// before their own snapshot is taken (Ctrl+D then Ctrl+S right away).
+    focus_copies: std::sync::Mutex<std::collections::HashMap<PathBuf, FocusCopy>>,
+    next_copy: std::sync::atomic::AtomicU64,
 }
 
 impl VsCodeSnapshots {
@@ -62,7 +94,38 @@ impl VsCodeSnapshots {
         Ok(Self {
             dir,
             vscode_config: None,
+            focus_copies: Default::default(),
+            next_copy: Default::default(),
         })
+    }
+
+    fn resolve(&self, raw_title: &str) -> Option<PathBuf> {
+        match &self.vscode_config {
+            Some(config) => vscode::resolve_file_in(raw_title, Some(config)),
+            None => vscode::resolve_file(raw_title),
+        }
+    }
+
+    fn focus_copies(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<PathBuf, FocusCopy>> {
+        self.focus_copies.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Takes the focus copy of `file`, if it still shows the file as it was
+    /// when a session starting at `started_at` began: not modified after
+    /// that, and the focus recent enough that nothing else saved it between.
+    fn take_focus_copy(&self, file: &Path, started_at: Millis) -> Option<PathBuf> {
+        let copy = self.focus_copies().remove(file)?;
+        let usable = copy.modified <= started_at
+            && copy.focused_at <= started_at
+            && started_at - copy.focused_at <= FOCUS_COPY_MS;
+        if usable {
+            Some(copy.path)
+        } else {
+            let _ = std::fs::remove_file(&copy.path);
+            None
+        }
     }
 
     /// Reads VS Code's window state from `config` instead of the user's.
@@ -74,13 +137,17 @@ impl VsCodeSnapshots {
     /// Removes snapshots no session needs any more (left behind when `brain
     /// run` died between taking a snapshot and committing its session).
     pub fn prune(&self, conn: &rusqlite::Connection) -> Result<()> {
-        let mut st =
-            conn.prepare("SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending')")?;
+        let mut st = conn
+            .prepare("SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending', ?1)")?;
         let keep = st
-            .query_map([], |r| r.get::<_, i64>(0))?
+            .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get::<_, i64>(0))?
             .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
         for entry in std::fs::read_dir(&self.dir)?.flatten() {
             let name = entry.file_name();
+            if name.to_str().is_some_and(|n| n.starts_with("focus-")) {
+                let _ = std::fs::remove_file(entry.path());
+                continue;
+            }
             let id = name
                 .to_str()
                 .and_then(|n| n.strip_prefix("snapshot-"))
@@ -94,6 +161,56 @@ impl VsCodeSnapshots {
 }
 
 impl Tier2Snapshotter for VsCodeSnapshots {
+    fn counts_every_key(&self, app: &str) -> bool {
+        vscode::is_vscode(app)
+    }
+
+    fn on_focus(&self, app: &str, raw_title: &str, ts: Millis) {
+        if !vscode::is_vscode(app)
+            || now_ms() - ts > LIVE_FOCUS_MS
+            || vscode::title_is_untitled(raw_title)
+            // Unsaved changes: the file on disk is not what the editor shows.
+            || vscode::title_is_dirty(raw_title)
+        {
+            return;
+        }
+        let Some(file) = self.resolve(raw_title) else {
+            return;
+        };
+        let Ok(meta) = std::fs::metadata(&file) else {
+            return;
+        };
+        let Some(modified) = modified_ms(&meta) else {
+            return;
+        };
+        if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
+            return;
+        }
+        let mut copies = self.focus_copies();
+        // Drop copies too old to be used, and the previous copy of this file.
+        copies.retain(|f, c| {
+            let keep = f != &file && ts - c.focused_at <= FOCUS_COPY_MS;
+            if !keep {
+                let _ = std::fs::remove_file(&c.path);
+            }
+            keep
+        });
+        let n = self
+            .next_copy
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = self.dir.join(format!("focus-{n}"));
+        if std::fs::copy(&file, &path).is_ok() {
+            copies.insert(
+                file,
+                FocusCopy {
+                    path,
+                    modified,
+                    focused_at: ts,
+                },
+            );
+        }
+    }
+
     fn snapshot(&self, app: &str, raw_title: &str, started_at: Millis, id: i64) -> Tier2Start {
         if !vscode::is_vscode(app) {
             return Tier2Start::NotApplicable;
@@ -106,11 +223,7 @@ impl Tier2Snapshotter for VsCodeSnapshots {
             return skip("the file had unsaved changes when the session started");
         }
         let unidentified = "could not identify the file from the window title";
-        let resolved = match &self.vscode_config {
-            Some(config) => vscode::resolve_file_in(raw_title, Some(config)),
-            None => vscode::resolve_file(raw_title),
-        };
-        let Some(file) = resolved else {
+        let Some(file) = self.resolve(raw_title) else {
             return if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
                 skip(unidentified)
             } else {
@@ -124,18 +237,23 @@ impl Tier2Snapshotter for VsCodeSnapshots {
         if meta.len() > MAX_FILE_BYTES {
             return skip("the file is too large to replay");
         }
-        let modified_ms = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as Millis);
-        if modified_ms.is_some_and(|m| m > started_at) {
-            return skip(
-                "the file changed on disk after the session started \
-                 (saved before it could be snapshotted)",
-            );
+        // A copy taken when the window was focused is used only when the
+        // file was saved before this snapshot (it is consumed either way).
+        let focus_copy = self.take_focus_copy(&file, started_at);
+        let target = snapshot_path(&self.dir, id);
+        if modified_ms(&meta).is_some_and(|m| m > started_at) {
+            return match focus_copy.map(|c| std::fs::rename(c, &target)) {
+                Some(Ok(())) => Tier2Start::Snapshot { file },
+                _ => skip(
+                    "the file changed on disk after the session started \
+                     (saved before it could be snapshotted)",
+                ),
+            };
         }
-        match std::fs::copy(&file, snapshot_path(&self.dir, id)) {
+        if let Some(c) = focus_copy {
+            let _ = std::fs::remove_file(c);
+        }
+        match std::fs::copy(&file, target) {
             Ok(_) => Tier2Start::Snapshot { file },
             Err(_) => skip("could not copy the file"),
         }
@@ -158,8 +276,17 @@ pub struct Tier2Text {
     pub status: &'static str,
 }
 
-/// A finished job: the session id and its text, or why it failed.
-pub type Tier2Result = (i64, std::result::Result<Tier2Text, String>);
+/// What a finished tier 2 job found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tier2Outcome {
+    /// The session's text, to replace the tier 0/1 text.
+    Text(Tier2Text),
+    /// The session did not change the file: remove it.
+    Unchanged,
+}
+
+/// A finished job: the session id and its outcome, or why it failed.
+pub type Tier2Result = (i64, std::result::Result<Tier2Outcome, String>);
 
 /// The background worker running tier 2 replays.
 pub struct Tier2Worker {
@@ -259,9 +386,9 @@ fn worker(
 fn pending_jobs(db_path: &Path) -> Result<Vec<i64>> {
     let conn = store::open_reader(db_path)?;
     let mut st =
-        conn.prepare("SELECT id FROM sessions WHERE tier2_status = 'pending' ORDER BY id")?;
+        conn.prepare("SELECT id FROM sessions WHERE tier2_status IN ('pending', ?1) ORDER BY id")?;
     let ids = st
-        .query_map([], |r| r.get(0))?
+        .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(ids)
 }
@@ -272,7 +399,7 @@ fn run_job(
     log_path: &Path,
     snapshots: &Path,
     id: i64,
-) -> Result<Tier2Text> {
+) -> Result<Tier2Outcome> {
     let conn = store::open_reader(db_path)?;
     type Row = (
         String,
@@ -281,12 +408,13 @@ fn run_job(
         Option<i64>,
         Option<String>,
         Option<String>,
+        String,
     );
-    let (app, window, start, end, file, ended_at): Row = conn
+    let (app, window, start, end, file, ended_at, status): Row = conn
         .query_row(
-            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at FROM sessions
-             WHERE id = ?1 AND tier2_status = 'pending'",
-            [id],
+            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at, tier2_status
+             FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+            rusqlite::params![id, TIER2_PENDING_SAVED_ONLY],
             |r| {
                 Ok((
                     r.get(0)?,
@@ -295,6 +423,7 @@ fn run_job(
                     r.get(3)?,
                     r.get(4)?,
                     r.get(5)?,
+                    r.get(6)?,
                 ))
             },
         )
@@ -312,10 +441,18 @@ fn run_job(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        return Ok(Tier2Text {
-            text: vscode::unified_diff(&initial_text, &saved, &name, 3),
+        let diff = vscode::unified_diff(&initial_text, &saved, &name, 3);
+        if diff.is_empty() {
+            return Ok(Tier2Outcome::Unchanged);
+        }
+        return Ok(Tier2Outcome::Text(Tier2Text {
+            text: diff,
             status: STATUS_SAVED_FILE,
-        });
+        }));
+    }
+    // Only shortcuts and no save: nothing shows that the file changed.
+    if status == TIER2_PENDING_SAVED_ONLY {
+        return Ok(Tier2Outcome::Unchanged);
     }
     // 2. Otherwise, a best-effort replay.
     let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
@@ -333,10 +470,10 @@ fn run_job(
         },
         timeout,
     )?;
-    Ok(Tier2Text {
+    Ok(Tier2Outcome::Text(Tier2Text {
         text: vscode::changed_lines(&initial_text, &saved),
         status: STATUS_REPLAYED,
-    })
+    }))
 }
 
 /// The content of `file` if it was written after `last_key` (so it includes

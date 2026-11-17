@@ -85,6 +85,12 @@ pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
     };
     let recorder = source.recorder().clone();
     let ingest = IngestThread::spawn(ingester, recorder.clone(), tier2_worker)?;
+    if opts.vscode_replay {
+        recorder.wake_on_focus(
+            ingest.thread.thread().clone(),
+            crate::reconstruct::vscode::is_vscode,
+        );
+    }
 
     let sig = wait_for_signal(&signals)?;
     eprintln!("brain: received signal {sig}, stopping");

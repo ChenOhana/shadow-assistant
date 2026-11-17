@@ -15,8 +15,8 @@
 //! ([`Sessions::recover`]) before the next attempt.
 
 use crate::eventlog::LogReader;
-use crate::reconstruct::tier2::{Tier2Result, Tier2Text};
-use crate::sessions::{Sessions, Tier2Snapshotter};
+use crate::reconstruct::tier2::{Tier2Outcome, Tier2Result};
+use crate::sessions::{Sessions, TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter};
 use crate::store;
 use crate::timefmt::{self, Millis};
 use anyhow::{Context, Result};
@@ -93,7 +93,7 @@ impl Ingester {
     }
 
     /// Queues a finished tier 2 replay to be written by the next step.
-    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<Tier2Text, String>) {
+    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<Tier2Outcome, String>) {
         self.tier2_results.push((id, result));
     }
 
@@ -218,17 +218,23 @@ impl Ingester {
 fn apply_tier2_result(
     tx: &Connection,
     id: i64,
-    result: &std::result::Result<Tier2Text, String>,
+    result: &std::result::Result<Tier2Outcome, String>,
 ) -> Result<()> {
+    let pending = TIER2_PENDING_SAVED_ONLY;
     match result {
-        Ok(done) => tx.execute(
+        Ok(Tier2Outcome::Text(done)) => tx.execute(
             "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2
-             WHERE id = ?3 AND tier2_status = 'pending'",
-            rusqlite::params![done.text, done.status, id],
+             WHERE id = ?3 AND tier2_status IN ('pending', ?4)",
+            rusqlite::params![done.text, done.status, id, pending],
+        )?,
+        // The session changed nothing in the file.
+        Ok(Tier2Outcome::Unchanged) => tx.execute(
+            "DELETE FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+            rusqlite::params![id, pending],
         )?,
         Err(why) => tx.execute(
-            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status = 'pending'",
-            rusqlite::params![format!("failed: {why}"), id],
+            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status IN ('pending', ?3)",
+            rusqlite::params![format!("failed: {why}"), id, pending],
         )?,
     };
     Ok(())
