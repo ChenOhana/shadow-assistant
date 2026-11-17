@@ -21052,3 +21052,2013 @@ leftover brain: 0
 
 </details>
 
+## Assistant  <sub>2026-11-17T15:32:25.112Z</sub>
+
+All green, nothing left behind. Committing and pushing:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src tests README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nGive VS Code shortcut-only edits a session\n\nThe owner pressed Ctrl+D then Ctrl+S in VS Code and got no session.\nKeys the tier 0/1 adapters don't understand never opened one, and a\nsession whose tier 0/1 text did not change was deleted at close, so\nthe saved file's diff never ran. With `--vscode-replay` only:\n\n- Every VS Code key except Super shortcuts opens or extends the\n  session (and is replayed the same way after a crash), without\n  changing its text.\n- A session with a file snapshot is kept at close even when its text\n  is unchanged, as `pending: saved file only`. The worker gives it the\n  saved file's diff, never a replay; with no save after its last key,\n  or an empty diff, the session changed nothing and is removed. Any\n  session whose saved file shows no change is removed the same way.\n- The snapshot is taken when ingest opens the session, up to 1 s\n  after the first key, so Ctrl+D then Ctrl+S right after focusing\n  found the file already saved. A VS Code focus change now wakes the\n  ingest thread, which copies the file then; a session starting within\n  10 s whose file was saved before its own snapshot uses that copy if\n  the file was not modified after the session started.\n\nWithout the flag nothing changes. New tests cover a shortcut-only\ndiff, shortcut sessions that change nothing, the flag off, the copy\ntaken on focus, and the wake-up; the saved-file tests share a harness.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2; git status --short | head",
+  "description": "Commit, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+e3c8256 Refresh AI logs
+9bb8bb7 Give VS Code shortcut-only edits a session
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:32:47.414Z</sub>
+
+I made all four changes, and they only apply with `--vscode-replay`. Your Ctrl+D then Ctrl+S case now gets a session holding the saved file's diff, at least in the tests. I haven't tried it in a real VS Code window; that needs your check below. Everything is committed and pushed (`9bb8bb7`), and `ai-logs/` is refreshed.
+
+**What changed (all only with `--vscode-replay`):**
+1. **Every key in VS Code counts toward the session.** That includes Ctrl+D, Alt+Up, Ctrl+/ and Ctrl+S, but not Super shortcuts. The reconstructed text isn't touched. Crash recovery treats these keys the same way.
+2. **Shortcut-only sessions are kept until the diff decides.** If the reconstructed text didn't change, the session now closes as a new status, `pending: saved file only`, instead of being deleted.
+3. **Only the diff decides for those sessions.** If the file was saved after the last key and the diff isn't empty, the session gets the diff as `done: saved file`. Otherwise it's removed, and it's never replayed. A typed session whose saved file turns out unchanged is also removed now, which matches the existing "no change, no session" rule.
+4. **Focusing a VS Code window copies its file at once.** The recorder wakes the ingest thread on the focus change, and ingest copies the file. A session that starts within 10 s and finds its file already saved uses that copy, if the file wasn't modified after the session started.
+
+**Without the flag, nothing changes.** A new test checks that Ctrl+D + Ctrl+S makes no session in that case.
+
+**Tests:**
+
+| Test | Checks |
+|---|---|
+| Ctrl+D, then Ctrl+S | gives the diff `a` → `a`,`a`,`b` |
+| Ctrl+P + Escape (no save), and Ctrl+S (no change) | leave no session |
+| Flag off | no session |
+| Ctrl+D + Ctrl+S saved before the session's own copy | uses the focus copy; without it, no session |
+| VS Code focus | wakes the ingest thread; a Kate focus doesn't |
+
+- The five saved-file tests share one setup now.
+- All 130 unit tests and the default integration suites pass, including crash safety, the CPU/memory budget test and the query tests.
+- The two replay tests pass with real VS Code.
+- Clippy and the generated docs are clean, and no test left a process or temp folder behind.
+
+**Docs:** the README tier-2 section explains the shortcut behaviour and has the new status in its table. PLAN.md, CLAUDE.md and the schema comment are updated.
+
+To check it in your real VS Code window:
+```sh
+make install
+brain run --vscode-replay --data-dir /tmp/brain-manual4
+# focus test.cpp in VS Code, press Ctrl+D then Ctrl+S, wait 30+ s
+sqlite3 -readonly /tmp/brain-manual4/brain.db "SELECT id, tier2_status, reconstructed_text FROM sessions WHERE app LIKE '%VSCode%'"
+```
+Expected: one session, `done: saved file`, whose diff shows the duplicated line as a `+` line. I'll wait for your results before starting anything else.
+
+## User  <sub>2026-11-17T15:38:28.450Z</sub>
+
+awesome, it works. how can i trigger replay now then to test it?
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n -i 'autosave\\|autoSaveDelay' ~/.config/Code/User/settings.json 2>/dev/null || echo \"no autoSave setting (default: off)\"",
+  "description": "Check the VS Code auto save setting"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+no autoSave setting (default: off)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:38:48.337Z</sub>
+
+The replay runs when a session with typed text closes and the file **wasn't saved after your last keystroke**. Your VS Code settings have no `files.autoSave` entry, so auto save is off (the default) and a saved file only comes from Ctrl+S.
+
+To trigger it:
+1. Start brain with the flag:
+   ```sh
+   brain run --vscode-replay --data-dir /tmp/brain-manual5
+   ```
+2. Open a file whose tab shows no unsaved dot. A session that starts on unsaved changes is skipped.
+3. Type a few lines, for example a small function with Enter, auto-indent and a `{` that VS Code closes for you.
+4. **Don't press Ctrl+S.** Stop typing and wait 30+ s so the session closes on idle.
+5. Check the result:
+   ```sh
+   sqlite3 -readonly /tmp/brain-manual5/brain.db \
+     "SELECT id, tier_used, tier2_status, reconstructed_text FROM sessions WHERE app LIKE '%VSCode%'"
+   ```
+
+**What to expect:**
+- Right after the session closes, it shows `pending` for about 25 s while the hidden VS Code starts. Later replays are faster because that VS Code stays running for 10 minutes.
+- Then the status becomes `done: replayed (best effort, unverified)` with `tier_used = 2`. The text is the lines that changed, not a diff; the diff only comes from a saved file.
+
+**Things that switch it to the diff path or skip it:**
+- If you save before the session has closed and its status has left `pending`, the worker sees a save after your last key and uses the diff instead. Wait for `done`, then save or revert the file.
+- Once you're done, the file is left with unsaved changes. A new session on it before you save or revert is skipped with `the file had unsaved changes when the session started`.
+- Autocomplete from extensions (the C++ suggestions) isn't replayed, because the hidden VS Code runs without your 800 MB of extensions. A plain `.txt` or `.js` file shows what replay can do; a C++ autocomplete will come out wrong, as before.
+
+## User  <sub>2026-11-17T15:45:22.772Z</sub>
+
+i opened a new untitled file in vscode, then typed a line, then ctrl+d to duplicate it, and watch the correct reconstructed text after the replay. it creates a snapshot but then finishes on idle with the reason skipped. explain why it won't replay it
+
+## Assistant  <sub>2026-11-17T15:45:25.868Z</sub>
+
+I'll look at what the session recorded.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for db in $(ls -t /tmp/brain-manual*/brain.db ~/brain-data/brain.db ~/.local/state/brain/brain.db 2>/dev/null | head -3); do echo \"== $db\"; python3 -c \"\nimport sqlite3; c=sqlite3.connect('file:$db?mode=ro',uri=True)\nfor r in c.execute(\\\"select id,window,started_at,ended_at,status,end_reason,tier_used,tier2_status,tier2_file,reconstructed_text from sessions where lower(app) like '%code%' order by id desc limit 4\\\"): print(r)\"; done",
+  "description": "Inspect the latest VS Code sessions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== /home/juan/brain-data/brain.db
+(235, 'testing replaying unsaved file • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T15:41:47.594Z', '2026-11-17T15:41:56.030Z', 'closed', 'idle', 1, None, None, 'testing unsaved file')
+(231, 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T15:39:28.158Z', '2026-11-17T15:39:40.475Z', 'closed', 'idle', 1, None, None, 'testing normal file in vscode\nnew line\nchecking untit// ledcreating cpp file\n\ntesting filetesting replaying unsaved file\nduplicated line')
+(220, 'test-dup-line.txt - ai-logs - Visual Studio Code', '2026-11-17T15:12:53.857Z', '2026-11-17T15:13:01.502Z', 'closed', 'idle', 1, None, None, 'testing duplicated line')
+(219, 'test-dup-line.txt - ai-logs - Visual Studio Code', '2026-11-17T15:10:32.026Z', '2026-11-17T15:10:49.748Z', 'closed', 'idle', 1, None, None, 'e')
+== /tmp/brain-manual4/brain.db
+(9, 'testing replaying unsaved file • Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T15:41:47.594Z', '2026-11-17T15:41:56.760Z', 'closed', 'idle', 1, 'skipped: unsaved new file (nothing on disk to replay from)', None, 'testing unsaved file')
+(6, 'Untitled-1 - ai-logs - Visual Studio Code', '2026-11-17T15:39:28.158Z', '2026-11-17T15:39:40.475Z', 'closed', 'idle', 1, 'skipped: unsaved new file (nothing on disk to replay from)', None, 'testing replaying unsaved file\nduplicated line')
+(3, 'test.cpp - ai-logs - Visual Studio Code', '2026-11-17T15:36:33.831Z', '2026-11-17T15:36:59.425Z', 'closed', 'idle', 2, 'done: saved file', '/home/juan/Desktop/test.cpp', '--- a/test.cpp\n+++ b/test.cpp\n@@ -6,7 +6,6 @@\n     int status = num * 2;\n \n     std::cout << "printing shit" << std::endl;\n-    std::cout << std::endl;\n \n     return status;\n }\n@@ -15,7 +14,6 @@\n     int result = func(5);\n     \n     std::cout << "Result: " << result << std::endl;\n-    std::cout << std::endl;\n     \n     return 0;\n }')
+(1, 'test-dup-line.txt - ai-logs - Visual Studio Code', '2026-11-17T15:35:17.683Z', '2026-11-17T15:35:18.731Z', 'closed', 'idle', 2, 'done: saved file', '/home/juan/Desktop/test-dup-line.txt', '--- a/test-dup-line.txt\n+++ b/test-dup-line.txt\n@@ -2,3 +2,4 @@\n testing duplicated line\n testing duplicated line\n testing duplicated line\n+testing duplicated line')
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cd ~/.config/Code/Backups 2>/dev/null && ls; cat workspaces.json 2>/dev/null | head -c 600; echo; for f in $(find . -path '*untitled*' -type f 2>/dev/null | head -5); do echo \"== $f $(stat -c %y \"$f\")\"; head -c 300 \"$f\" | cat -v; echo; done",
+  "description": "Look at VS Code's hot-exit backups for untitled files"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+adc19ec722c526f79ec3be2666deff19
+
+== ./adc19ec722c526f79ec3be2666deff19/untitled/-7f9c1a2e 2026-11-17 17:41:57.772758038 +0200
+untitled:Untitled-1 {"typeId":""}
+testing unsaved file
+testing unsaved file
+Shell cwd was reset to /home/juan/Documents/shadow-assistant
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:46:23.408Z</sub>
+
+It wasn't replayed because tier 2 skips untitled files by design, and the session was marked skipped as soon as it opened, not at the idle close. In `/tmp/brain-manual4` both untitled sessions (6 and 9) say `skipped: unsaved new file (nothing on disk to replay from)`. If you saw `snapshot` earlier, it was for one of the saved files (test.cpp or test-dup-line.txt); an `Untitled-1` window never gets one.
+
+## Why untitled files are skipped
+Both tier-2 paths need the file's content from **before** the session:
+- **Replay** opens a copy of that starting content in the hidden VS Code and types your keys into it. Without the true starting text, the replayed result is wrong.
+- **The diff** compares that starting copy with the saved file, and an untitled file is never saved.
+
+For an untitled tab, brain can't read that starting content. Assuming it's empty isn't safe: VS Code keeps untitled tabs across restarts with their text. Your `Untitled-1` in `~/brain-data` has held text since this morning (`testing normal file in vscode…`). Replaying into an empty file would silently give wrong text, so it's skipped. Tier 0/1 kept `testing unsaved file`, without the duplicate, because tier 0/1 doesn't know Ctrl+D.
+
+## Untitled tabs do have a copy on disk
+VS Code backs up every tab with unsaved changes (untitled or not) about a second after each change. That's how it restores them after a restart. Your tab's backup is `~/.config/Code/Backups/adc19ec7…/untitled/-7f9c1a2e`, written 1.7 s after your last key:
+```
+untitled:Untitled-1 {"typeId":""}
+testing unsaved file
+testing unsaved file
+```
+It already contains the correct text, duplicate included.
+
+## Two ways I could support untitled tabs
+**A. Replay, as you specified (diff only for saved files).** Take the starting content from VS Code's backup instead of the file:
+- If a backup older than the session's start exists, it's the starting content.
+- If none exists, the tab was empty: an untitled tab with text always has a backup.
+- On window focus, copy the backup as well, the same way step 4 copies files. That covers a backup written before brain could take its own copy.
+
+The replay then runs as for saved files, as a best effort, and stores the changed lines.
+
+**B. Diff the backup, with no replay.** Use the same starting content as in A, and compare it with the backup VS Code writes after your last key, exactly like a saved file. That's exact, with no replay and no 25 s VS Code start. But it extends the diff beyond saved files, which you ruled out earlier.
+
+**Either option also has these effects and limits:**
+- **Ambiguous tabs:** if several VS Code windows each have an `Untitled-1`, brain can't tell which backup belongs to the session. That case stays skipped, with a clear reason.
+- **Saved files with unsaved changes:** these get backups too, so the same mechanism would remove the `the file had unsaved changes when the session started` skip.
+- **Hot exit off:** if hot exit is turned off in VS Code, backups may not exist, and sessions are skipped as now.
+
+Which do you want, A or B? Should it also cover saved files that have unsaved changes? I'll explain the exact changes before implementing.
+
+## User  <sub>2026-11-17T15:49:26.074Z</sub>
+
+it is ok not to support unsaved files, but i am asking, in this current design, when will the replay trigger? your previous answer was incorrect
+
+## Assistant  <sub>2026-11-17T15:50:01.171Z</sub>
+
+You're right: my earlier instructions were wrong. They said to open a file whose tab shows no unsaved dot, but a new `Untitled` tab has no dot either, and untitled files are always skipped. I should have said a file that exists on disk, and I left out other conditions too.
+
+## When replay runs in the current design
+All of these must hold, in order.
+
+**When the session opens** (at the first key in that window):
+1. `brain run` was started with `--vscode-replay`.
+2. The tab is a **file saved on disk**, not `Untitled-N`.
+3. The tab has **no unsaved changes** when the first key arrives (no `●` in the title).
+4. brain can **identify the file** from the window title. The lookup is retried for up to 2 minutes while the session is open.
+5. The file is **at most 2 MB**.
+6. The file wasn't modified on disk between the first key and brain copying it. If it was, brain uses the copy it took when the window was focused, when that copy qualifies.
+
+If any of these fails, the status is `skipped: …` from the start and stays that way.
+
+**When the session closes** (30 s idle, or brain stops):
+
+7. The session **changed the text as tier 0/1 sees it**, meaning you typed something. A session of only shortcuts (Ctrl+D, Alt+Up) is never replayed: it gets the diff or is removed.
+
+**When the worker picks up the job:**
+
+8. The file was **not saved after your last key**. If it was, you get the diff (`done: saved file`) instead.
+
+Only then does it replay, giving `done: replayed (best effort, unverified)`.
+
+## In practice
+Replay covers one situation: **you edited a saved file and closed the session without saving.** Every other case is either a diff or skipped.
+
+## Steps that trigger it
+1. Open a real file, such as `~/Desktop/test.txt`, with no `●` on its tab.
+2. Type some text, not just shortcuts.
+3. Don't save. Wait 30 s.
+4. The status goes `snapshot` → `pending` → after about 25 s `done: replayed (best effort, unverified)`.
+
+After that the file has unsaved changes. Save it only after the status is `done`, or the worker would see a save after your last key and use the diff instead. Until you save or revert, new sessions on it are skipped by condition 3.
+
+## User  <sub>2026-11-17T15:57:56.839Z</sub>
+
+cool I tested it thanks. what happens when brain stops while a session is still open?
+
+## Assistant  <sub>2026-11-17T15:58:11.810Z</sub>
+
+I'll check two details in the code before answering: where the start marker is written, and what happens to queued tier-2 jobs on shutdown.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'SystemState::Start\\|SystemState::Stop' src/capture/*.rs src/sessions.rs | head; grep -n 'Stop =>\\|\"stop\"\\|\"restart\"' src/sessions.rs | head",
+  "description": "Check start/stop markers and how sessions close on them"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/mod.rs:99:    recorder.system(SystemState::Stop);
+src/capture/mod.rs:162:    recorder.system(SystemState::Start);
+src/capture/mod.rs:236:    recorder.system(SystemState::Start);
+src/sessions.rs:414:                SystemState::Start => {
+src/sessions.rs:425:                SystemState::Stop => self.close_where(tx, "stop", |_| true)?,
+src/sessions.rs:1281:        l.sys(t, SystemState::Stop);
+src/sessions.rs:1282:        l.sys(t + 100, SystemState::Start);
+src/sessions.rs:1284:        l.sys(t, SystemState::Start); // crash: start without stop
+417:                    self.close_where(tx, "restart", |_| true)?;
+425:                SystemState::Stop => self.close_where(tx, "stop", |_| true)?,
+1304:        assert_eq!(s[0].3.as_deref(), Some("stop"));
+1305:        assert_eq!(s[1].3.as_deref(), Some("restart"));
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:58:24.990Z</sub>
+
+It depends on how `brain run` stops. Either way the session is closed, never resumed: a new session starts after the restart, even in the same window.
+
+## Clean stop (Ctrl+C, `kill`, `systemctl --user stop`)
+1. Capture stops, and a `stop` marker is written to the log (`src/capture/mod.rs:99`).
+2. The ingest thread does one last pass. When it reaches the marker, it closes **every open session** with `end_reason = 'stop'` (`src/sessions.rs:425`). Each session keeps its text up to the last key, and the usual rule applies: a session that changed nothing leaves no row.
+3. **VS Code sessions** (with `--vscode-replay`):
+   - A session that has its starting copy becomes `pending` (or `pending: saved file only`), as on an idle close.
+   - The tier-2 worker is stopped right away, killing a replay in progress. Unfinished jobs simply stay `pending` in the database. The next `brain run --vscode-replay` picks them up first, and the starting copies stay on disk until then.
+   - A session whose file was still being looked for gets one last lookup. If that fails, it's `skipped: could not identify the file from the window title`.
+
+## Crash (`kill -9`, power loss)
+1. No `stop` marker is written, so the open sessions stay `open` in the database.
+2. On the next start, brain rebuilds those sessions from the log, from where each started. Their text is exactly what the keys up to the crash produce.
+3. The new run writes a `start` marker. Since no `stop` came before it, brain closes them with `end_reason = 'restart'` (`src/sessions.rs:417`).
+4. Brain also marks every remembered document's cursor as unknown, because you may have typed while it wasn't running. The next session in such a window assumes the cursor is at the end.
+5. VS Code sessions with a starting copy then go `pending` as above. Copies made for sessions that were never written to the database are deleted.
+
+`tests/crash_safety.rs` covers this path: 25 random `kill -9`s, and the database afterwards must match a fresh rebuild from the log.
+
+## One catch for VS Code sessions
+A `pending` job runs at the next start, and the saved-file check looks at the file **as it is then**. Suppose you keep editing and save while brain is stopped. The file was then saved after the session's last key, so the session gets a diff that also includes edits brain never saw. In the opposite case, an unsaved file is replayed with only the logged keys. That replay is correct for the session, but it says nothing about what you did while brain was down.
+
+If you want, I can tighten the first case: accept the saved file only if it was saved before brain stopped, and fall back to the replay otherwise. Tell me if you want that.
+
+## User  <sub>2026-11-17T16:01:55.788Z</sub>
+
+do we have a test that check restart status?
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1268,1310p src/sessions.rs; grep -n 'restart\\|end_reason' tests/crash_safety.rs tests/*.rs | head",
+  "description": "Find tests that check stop/restart end reasons"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        let s = sessions(ing.connection());
+        assert_eq!(s[0].2, "open");
+        assert_eq!(s[0].4, "draft in progress");
+        assert_eq!(search(ing.connection(), "progress"), vec![1]);
+        // Once the wall clock passes the timeout (plus grace), it closes.
+        run(&mut ing, clock_late);
+        assert_eq!(sessions(ing.connection())[0].2, "closed");
+    }
+
+    #[test]
+    fn stop_and_restart_close_sessions() {
+        let mut l = Log::new();
+        let t = l.typ(T0, "notes", "n", "one");
+        l.sys(t, SystemState::Stop);
+        l.sys(t + 100, SystemState::Start);
+        let t = l.typ(t + 200, "notes", "n", " two");
+        l.sys(t, SystemState::Start); // crash: start without stop
+        // A single-line field does not carry text across sessions.
+        let t = l.typ(
+            t + 100,
+            "google-chrome",
+            "New tab - Google Chrome",
+            "abandoned",
+        );
+        l.typ(
+            t + 31_000,
+            "google-chrome",
+            "New tab - Google Chrome",
+            "fresh",
+        );
+        let mut ing = l.ingester("b.db");
+        run(&mut ing, clock_t0);
+        let s = sessions(ing.connection());
+        assert_eq!(s.len(), 4);
+        assert_eq!(s[2].4, "abandoned");
+        assert_eq!(s[3].4, "fresh");
+        assert_eq!(s[0].3.as_deref(), Some("stop"));
+        assert_eq!(s[1].3.as_deref(), Some("restart"));
+        // After a restart the cursor is unknown, so it is at the end anyway.
+        assert_eq!(s[1].4, "one two");
+    }
+
+    /// Ingests the log in many small pieces, recreating the ingester (a crash
+tests/crash_safety.rs:1://! `kill -9` at random moments, then restart: no corruption, no gaps, no duplicates.
+tests/crash_safety.rs:179:            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
+tests/crash_safety.rs:1://! `kill -9` at random moments, then restart: no corruption, no gaps, no duplicates.
+tests/crash_safety.rs:179:            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 160,215p tests/crash_safety.rs; grep -n 'Recovery\\|recover\\|fn .*crash\\|recreating the ingester' src/sessions.rs | sed -n 1,20p",
+  "description": "See what crash_safety compares and other recovery tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        torn_tails
+    );
+}
+
+type SessionRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    i64,
+    Option<i64>,
+);
+
+fn session_rows(c: &Connection) -> Vec<SessionRow> {
+    let mut st = c
+        .prepare(
+            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
+                    start_offset, end_offset FROM sessions ORDER BY id",
+        )
+        .unwrap();
+    st.query_map([], |r| {
+        Ok((
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+            r.get(6)?,
+            r.get(7)?,
+            r.get(8)?,
+        ))
+    })
+    .unwrap()
+    .collect::<Result<_, _>>()
+    .unwrap()
+}
+
+fn context_rows(c: &Connection) -> Vec<(String, String, String, i64)> {
+    let mut st = c
+        .prepare("SELECT app, window, text, cursor FROM context_state ORDER BY app, window")
+        .unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+36://! the log ([`Sessions::recover`]), so a rebuild from the log produces the
+152:    pub fn recover(
+225:    /// or closing sessions (used for recovery).
+704:/// end; with `write_back` that resolution is saved, so recovery later loads
+1310:    /// Ingests the log in many small pieces, recreating the ingester (a crash
+1313:    fn crash_recovery_reproduces_an_uninterrupted_run() {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1310,1345p src/sessions.rs; sed -n 60,160p tests/crash_safety.rs | grep -n 'assert' ",
+  "description": "Read recovery test and crash_safety assertions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    /// Ingests the log in many small pieces, recreating the ingester (a crash
+    /// and restart) after every piece, and compares with one uninterrupted pass.
+    #[test]
+    fn crash_recovery_reproduces_an_uninterrupted_run() {
+        let mut l = Log::new();
+        let k = "org.kde.konsole";
+        let mut t = l.typ(T0, "notes", "n", "hello wrold");
+        l.key(t, "notes", "n", "Left", &[Mod::Ctrl]);
+        t = l.typ(t + 100, "notes", "n", "\u{8}");
+        l.key(t, "notes", "n", "End", &[]);
+        t = l.typ(t + 100, k, "~", "git status\n");
+        l.key(t, k, "~", "Up", &[]);
+        t = l.typ(t + 100, k, "~", " -s");
+        t = l.typ(t + 5_000, "notes", "n", " again");
+        l.key(t, "notes", "n", "a", &[Mod::Ctrl]);
+        t = l.typ(t + 100, "notes", "n", "replaced");
+        l.key(t, "notes", "n", "z", &[Mod::Ctrl]);
+        t = l.typ(t + 40_000, k, "~", "\n");
+        t = l.typ(t + 100, "notes", "n", "!");
+        let t = type_renaming(
+            &mut l,
+            t + 100,
+            "code",
+            "renamed doc",
+            "Untitled-1 - Visual Studio Code",
+        );
+        l.typ(
+            t + 31_000,
+            "code",
+            "● renamed doc • Untitled-1 - Visual Studio Code",
+            "?",
+        );
+        let total = l.w.len();
+
+        let mut full = l.ingester("full.db");
+        run(&mut full, clock_late);
+9:        assert_eq!(ok, "ok");
+14:        assert!(off <= bytes.len());
+15:        assert!(
+24:    assert!(child.stop().success(), "clean stop must exit 0");
+25:    assert_no_brain_on(&dir);
+37:    assert_eq!(reader.offset(), log_len, "no torn tail after a clean stop");
+38:    assert!(
+49:    assert_eq!(off as u64, log_len);
+73:    assert_eq!(actual, expected);
+83:    assert_eq!(live_sessions, session_rows(&rebuilt));
+84:    assert_eq!(context_rows(&c), context_rows(&rebuilt));
+87:    assert!(
+92:    assert!(live_sessions.iter().all(|r| r.4 == "closed"));
+93:    assert!(live_sessions.iter().any(|r| {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 140,160p tests/crash_safety.rs",
+  "description": "Read the end of crash_safety assertions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    let rebuilt = Connection::open(&fresh).unwrap();
+    let live_sessions = session_rows(&c);
+    assert_eq!(live_sessions, session_rows(&rebuilt));
+    assert_eq!(context_rows(&c), context_rows(&rebuilt));
+    // The synthetic source types continuously, so each run is one session,
+    // closed by the next run's start (after a kill) or by the final stop.
+    assert!(
+        live_sessions.len() >= 20,
+        "got {} sessions",
+        live_sessions.len()
+    );
+    assert!(live_sessions.iter().all(|r| r.4 == "closed"));
+    assert!(live_sessions.iter().any(|r| {
+        r.6.contains("the migration is blocked on the schema change.")
+    }));
+
+    eprintln!(
+        "{} events, {} sessions, {} torn tails repaired across 25 kills",
+        events.len(),
+        live_sessions.len(),
+        torn_tails
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:02:24.740Z</sub>
+
+Partly. The rule is covered by a unit test, and the real binary is killed and restarted in another test, but no test checks the status a real killed run leaves.
+
+## What's covered
+- **`stop_and_restart_close_sessions`** (`src/sessions.rs:1277`) builds a log with a clean stop, a restart, and a crash (a `start` with no `stop` before it). It checks:
+  - the first session ends with `end_reason = 'stop'`;
+  - the second ends with `'restart'`;
+  - after the crash the cursor counts as unknown, so the text continues at the end (`one two`);
+  - a single-line field (a browser's new tab) doesn't carry text into the next session.
+- **`crash_recovery_reproduces_an_uninterrupted_run`** (`src/sessions.rs:1313`) feeds the log in small pieces and recreates the ingester after each one, as a crash and restart would. Sessions open at each "crash" must come out exactly as in one uninterrupted pass.
+- **`tests/crash_safety.rs`** runs the real binary, kills it with `kill -9` 25 times and restarts it each time. It checks:
+  - every session ends `closed`;
+  - the database matches a fresh rebuild from the log, `end_reason` included;
+  - there are at least 20 sessions.
+- **The saved-file tests in `tests/tier2_e2e.rs`** close their VS Code session through a `stop` marker. The worker then finds the `pending` job in the database on start, which is the same path that picks up jobs left from the previous run.
+
+## Gaps
+1. **The real killed run's `end_reason` is never checked.** `crash_safety` only checks that the live database and the rebuild agree. If both wrongly said `stop` after a `kill -9`, it would still pass. Two lines would close this: every session but the last ends `restart`, and the last ends `stop`.
+2. **No test crashes during a VS Code session.** Nothing checks that a session with a starting copy goes `pending` after a `kill -9` and restart, or that its copy survives until the job runs.
+3. **No test stops brain mid-replay.** Nothing checks that a replay in progress at shutdown stays `pending` and runs on the next start.
+
+Gaps 1 and 2 are quick, and 2 needs no VS Code. Gap 3 needs real VS Code, so it would be an `#[ignore]` test. Do you want me to add all three, or some of them?
+
+## User  <sub>2026-11-17T16:04:12.834Z</sub>
+
+no need to do anything it is ok.
+
+## Assistant  <sub>2026-11-17T16:04:16.261Z</sub>
+
+OK, I'll leave the restart tests as they are.
+
+The latest work is all pushed to `main`:
+- `aad7495`: saved VS Code files store a git-style diff with 3 lines of context.
+- `9bb8bb7`: shortcut-only VS Code edits like Ctrl+D then Ctrl+S get a session.
+- `e3c8256`: `ai-logs/` refreshed.
+
+Nothing is uncommitted, and no test process or temp folder was left behind.
+
+## User  <sub>2026-11-17T16:05:55.577Z</sub>
+
+i want to run all of the tests myself, give me commands for each test suite
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls tests/; grep -ln 'rtcwake\\|#\\[ignore\\]' tests/*.rs src -r | sort -u; grep -rn 'rtcwake' tests src scripts README.md | head -5; grep -n 'cargo test' README.md | head -20",
+  "description": "List test suites and ignored tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+common
+crash_safety.rs
+perf_budget.rs
+query_cli.rs
+real_keyboard_e2e.rs
+repeat_e2e.rs
+tier2_e2e.rs
+vscode_replay.rs
+tests/real_keyboard_e2e.rs
+tests/repeat_e2e.rs
+tests/tier2_e2e.rs
+tests/vscode_replay.rs
+scripts/setup-test-permissions.sh:7:#    `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only sets
+scripts/setup-test-permissions.sh:11:#    (`rtcwake -m mem` would suspend behind logind's back.) No other
+scripts/setup-test-permissions.sh:36:printf '%s ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m no -s 30\n' "$user" > "$tmp"
+README.md:458:passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm
+README.md:484:5. **A sleep/wake test that could not work.** `rtcwake -m mem` suspends
+434:cargo test --release      # unit tests (~120) and the default integration tests:
+448:cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+450:cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+453:#    needs no VS Code and also runs with plain `cargo test`)
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 425,475p README.md; grep -rn 'sleep\\|suspend' scripts/*.sh | grep -v setup-test | head; ls scripts",
+  "description": "Read the README testing section and scripts"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+**Running**
+* **Service as you, not root**: a systemd user service, because desktop
+  integration needs your session's D-Bus, and a root keylogger is the
+  worst case if it is ever compromised.
+
+## Tests
+
+```sh
+cargo test --release      # unit tests (~120) and the default integration tests:
+                          #   crash_safety  25 random kill -9s under load; sessions,
+                          #                 documents and checkpoints must equal a
+                          #                 clean rebuild from the log
+                          #   query_cli     the query commands through the binary,
+                          #                 incl. thousands of queries while run writes
+                          #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
+```
+
+Tests against real software are opt-in (`-- --ignored`):
+
+```sh
+# Type through a virtual keyboard into real Kate windows; hands off the
+# keyboard and mouse while they run, and the screen must be unlocked:
+cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+# Drive a real (headless) VS Code:
+cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+#   (tier2_e2e includes a file opened from outside the window's folder,
+#    identified late through VS Code's window state; its saved-file test
+#    needs no VS Code and also runs with plain `cargo test`)
+```
+
+The Kate tests need two narrow permissions, granted once by
+`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
+passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm
+for a sleep/wake check that suspends with `systemctl suspend`), and access to
+`/dev/uinput` for the user at the local seat.
+
+## Where the agent failed
+
+This project was built by Claude Code (Opus 5.5) with the owner reviewing
+every stage. These are the mistakes it made, in order, and how they were
+caught. Transcripts are in `ai-logs/`.
+
+1. **Wrong library assumption.** It wrote D-Bus code for zbus 6 with a
+   feature that does not exist there; the build failed and it moved to
+   zbus 5.
+2. **A commit that did not build.** The first commit declared a module
+   that was only added in the next one. Caught by building each commit
+   in a clean worktree; the history was rewritten before anything was
+   pushed.
+3. **A background agent's PLAN.md described things that were never
+export-ai-logs.py
+setup-test-permissions.sh
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rln 'suspend\\|rtcwake\\|PrepareForSleep' tests/ ; grep -rn 'fn .*sleep\\|fn .*wake\\|fn .*lock' tests/*.rs | head",
+  "description": "Find the sleep/wake and lock tests"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:06:12.470Z</sub>
+
+The README says the Kate tests need `rtcwake` for a sleep/wake check, but no test in `tests/` uses it. I'll check where that test went:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git log --oneline -S'rtcwake' -- tests src | head; git log --all --oneline --diff-filter=D --name-only -- 'tests/*' | head -20",
+  "description": "Search history for the removed sleep/wake test"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git log --oneline -S'rtcwake' | head; git log --oneline -S'sleep_wake' | head; grep -rn 'rtcwake\\|sleep/wake\\|sleep and wake' ai-logs/*.md 2>/dev/null | grep -i 'test' | tail -5 | cut -c1-250",
+  "description": "Trace the sleep/wake test in history and logs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+2963383 Refresh AI logs
+eab169c Refresh AI logs
+d6c481b Refresh AI logs
+b4a8fde Refresh AI logs
+d83b4a8 Add PLAN.md and finish the README
+be3c7e8 Add AI logs, decisions and agent failures
+74fc363 Suspend through logind in the sleep/wake test
+b00dbbc Run brain as a systemd user service
+ai-logs/session-2.md:9747:- **Already covered:** `kill -9` crash safety, queries during writing (`query_cli`), search behavior through the CLI, `text --at`, held keys against Kate, and sleep/wake (tested by hand).
+ai-logs/session-2.md:10544:the sleep/wake test then suspends with `systemctl suspend`), and access to `/dev/uinput` for
+ai-logs/session-2.md:10559:  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"> **Status: capture, sessions, reconstruction, indexing
+ai-logs/session-2.md:18965:   - Narrow test permissions script: passwordless `rtcwake -m no -s 30`, uinput `uaccess`.
+ai-logs/session-2.md:19115:   - "ok I understand now thanks. lets continue comlpeting these before query: [sleep/wake test, stemming answer, PLAN.md, README decisions, ai-logs and where agent failed] ask me for anything needed"
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git show --stat 74fc363 | head -20; git log --oneline -3 -- scripts/sleep-wake-test.sh scripts/ 2>/dev/null; git show 74fc363 --name-only --format= ",
+  "description": "See what the sleep/wake commit touched"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+commit 74fc363181a08c25a0e07bcbc61865ac040abbe7
+Author: Chen Ohana <23476402+ChenOhana@users.noreply.github.com>
+Date:   Mon Nov 16 13:34:18 2026 +0200
+
+    Suspend through logind in the sleep/wake test
+    
+    `rtcwake -m mem` suspends the kernel directly, so logind never emits
+    PrepareForSleep and brain cannot see the suspend: the first test run
+    proved nothing. The permission script now allows only
+    `rtcwake -m no -s 30`, which just sets the wake alarm; the test then
+    suspends with `systemctl suspend` (no root needed for the desktop
+    user), the same path as the KDE menu or closing the lid.
+    
+    brain also logs how many keyboards it reopened after a resume, so the
+    reopen is visible in the journal.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83
+
+ README.md                         |  4 ++--
+485f490 Fix mismatches found in the final review
+be3c7e8 Add AI logs, decisions and agent failures
+74fc363 Suspend through logind in the sleep/wake test
+README.md
+scripts/setup-test-permissions.sh
+src/capture/input.rs
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git show 74fc363 -- README.md | head -30; git show 485f490 --stat --format=%B | head -40",
+  "description": "See how the sleep/wake test was documented and removed"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+commit 74fc363181a08c25a0e07bcbc61865ac040abbe7
+Author: Chen Ohana <23476402+ChenOhana@users.noreply.github.com>
+Date:   Mon Nov 16 13:34:18 2026 +0200
+
+    Suspend through logind in the sleep/wake test
+    
+    `rtcwake -m mem` suspends the kernel directly, so logind never emits
+    PrepareForSleep and brain cannot see the suspend: the first test run
+    proved nothing. The permission script now allows only
+    `rtcwake -m no -s 30`, which just sets the wake alarm; the test then
+    suspends with `systemctl suspend` (no root needed for the desktop
+    user), the same path as the KDE menu or closing the lid.
+    
+    brain also logs how many keyboards it reopened after a resume, so the
+    reopen is visible in the journal.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83
+
+diff --git a/README.md b/README.md
+index c3f0694..3ec5d2a 100644
+--- a/README.md
++++ b/README.md
+@@ -162,6 +162,6 @@ cargo test --release --test crash_safety     # 25 random kill -9s under load;
+ 
+ Tests that use real hardware need two narrow permissions, granted once by
+ `sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
+-passwordless `sudo /usr/sbin/rtcwake -m mem -s 20` only (suspend with
+-automatic wake, for the sleep/wake test), and access to `/dev/uinput` for
++passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm;
+Fix mismatches found in the final review
+
+CLI: `query text --app` help now says it resolves to exactly one app
+and reports the full id; the query help says output is JSON in local
+time; `run` help says it also builds sessions with searchable text.
+`text` with nothing captured yet says so instead of listing no apps.
+
+Code: remove two unused functions (Recorder::is_paused,
+Sessions::open_count); module docs no longer say the input loop reads
+all devices, list the tier 2 thread and the vscode/ directory, and
+stop claiming query output is UTC. The ai-logs exporter finds the
+transcripts from the current directory instead of a hardcoded path.
+
+Docs: PLAN.md had the draft's notes on capture approaches twice and
+lacked the `renamed` focus flag; the README moved --vscode-replay out
+of the service section (and says how to enable it there), no longer
+claims X11 support, shows real log lines for every event type, groups
+the query decisions, and records that PLAN.md was rewritten. CLAUDE.md
+reflects the finished stages, the opt-in hardware tests, local query
+times, full app ids and the rename rule.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83
+
+
+ CLAUDE.md                 | 44 ++++++++++++++++----------
+ PLAN.md                   | 37 ++++------------------
+ README.md                 | 79 ++++++++++++++++++++++++++++++-----------------
+ scripts/export-ai-logs.py |  7 +++--
+ src/capture/mod.rs        |  3 +-
+ src/capture/recorder.rs   |  4 ---
+ src/datadir.rs            
+… [242 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n -i 'suspend\\|sleep' README.md | head -20",
+  "description": "Find sleep/wake mentions in the README"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+111:shortcut) and `system` (`start`, `stop`, `sleep`, `wake`, `lock`,
+337:* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
+338:  keyboards are reopened. Tested with a real suspend.
+459:for a sleep/wake check that suspends with `systemctl suspend`), and access to
+484:5. **A sleep/wake test that could not work.** `rtcwake -m mem` suspends
+486:   redone through `systemctl suspend`.
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:06:50.082Z</sub>
+
+Here's each suite on its own. Run them from the repo folder; the times are from my last runs.
+
+**Default tests** (no hardware, no desktop, run with plain `cargo test`):
+```sh
+cargo test --release --lib                     # 130 unit tests: keys, sessions, reconstruction, diff, query, time parsing (<1 s)
+cargo test --release --test crash_safety       # 25 random kill -9s under load; database must equal a clean rebuild (~19 s)
+cargo test --release --test query_cli          # query commands through the binary, queries while run writes (~8 s)
+cargo test --release --test perf_budget -- --nocapture   # ≤ 1 % CPU, ≤ 32 MB while typing; prints the numbers (~32 s)
+cargo test --release --test tier2_e2e          # the 5 saved-file / shortcut tests, no VS Code needed (<1 s)
+```
+Or all of them at once: `cargo test --release`
+
+**Real VS Code** (headless, nothing appears on screen; needs `/usr/bin/code`):
+```sh
+cargo test --release --test tier2_e2e -- --ignored --test-threads=1      # replay through ingest, incl. a file outside the folder (~50 s)
+cargo test --release --test vscode_replay -- --ignored --test-threads=1  # 12 replay tests: indent, Hebrew, undo, paste, no network, cleanup (~4 min)
+```
+
+**Real Kate windows** typed into through a virtual keyboard:
+- Once: `sudo sh scripts/setup-test-permissions.sh`.
+- The screen must be unlocked, and don't touch the keyboard or mouse while they run.
+```sh
+cargo test --release --test repeat_e2e -- --ignored --nocapture --test-threads=1          # held keys and key repeat (~22 s)
+cargo test --release --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1   # Hebrew layout switch, focus between windows, keyboard unplug/replug (~13 s)
+```
+
+**Lint** (must be clean before a commit):
+```sh
+cargo fmt --check && cargo clippy --all-targets
+```
+
+**Sleep/wake is checked by hand; no cargo test does it:**
+```sh
+brain run --data-dir /tmp/brain-sleep          # in one terminal
+sudo /usr/sbin/rtcwake -m no -s 30 && systemctl suspend   # in another: the machine wakes itself after 30 s
+# after it wakes: type something in Kate, wait 30+ s, then
+grep -E '"state":"(sleep|wake)"' /tmp/brain-sleep/events.jsonl
+brain query text --data-dir /tmp/brain-sleep
+```
+After waking, brain prints how many keyboards it reopened. The log should show `sleep` then `wake`, and `query text` should show what you typed after the resume.
+
+While collecting these I found a README error. The "Tests" section says the Kate tests need the passwordless `rtcwake` permission "for a sleep/wake check", but no automated test uses it. The Kate tests only need the `/dev/uinput` access; `rtcwake` is for the manual check above. Want me to fix that paragraph and add the manual sleep/wake steps to the README?
+
+## User  <sub>2026-11-17T16:15:56.057Z</sub>
+
+yes fix the readme
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,40p scripts/setup-test-permissions.sh; sed -n 335,339p README.md",
+  "description": "Read the permission script header and sleep/wake README line"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+#!/bin/sh
+# Grants the two narrow permissions brain's hardware tests need. Run once:
+#   sudo sh scripts/setup-test-permissions.sh          # install
+#   sudo sh scripts/setup-test-permissions.sh --undo   # remove
+#
+# 1. Sleep/wake test: lets the invoking user run exactly
+#    `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only sets
+#    the RTC wake alarm 30 s ahead. The test then suspends through logind
+#    (`systemctl suspend`, allowed for the desktop user without root), so
+#    brain sees the same PrepareForSleep signals as a real suspend.
+#    (`rtcwake -m mem` would suspend behind logind's back.) No other
+#    command or argument is allowed.
+# 2. Virtual keyboard tests: gives the user logged in at the local seat
+#    (systemd "uaccess") read/write access to /dev/uinput, so tests can type
+#    through a real kernel input device. Any program running as that user
+#    can then inject keystrokes, which is the trade-off.
+set -eu
+
+user="${SUDO_USER:-}"
+if [ "$(id -u)" -ne 0 ] || [ -z "$user" ]; then
+    echo "run with sudo from your own account: sudo sh $0 [--undo]" >&2
+    exit 1
+fi
+sudoers=/etc/sudoers.d/brain-tests
+rule=/etc/udev/rules.d/70-brain-uinput.rules
+
+if [ "${1:-}" = "--undo" ]; then
+    rm -f "$sudoers" "$rule"
+    udevadm control --reload
+    udevadm trigger --name-match=uinput
+    echo "removed $sudoers and $rule"
+    exit 0
+fi
+
+tmp=$(mktemp)
+printf '%s ALL=(root) NOPASSWD: /usr/sbin/rtcwake -m no -s 30\n' "$user" > "$tmp"
+visudo -cf "$tmp" >/dev/null
+install -m 0440 -o root -g root "$tmp" "$sudoers"
+rm -f "$tmp"
+
+  read from Klipper at that moment and logged, up to 64 KiB.
+* **Screen lock pauses capture**, so the unlock password is never logged.
+* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
+  keyboards are reopened. Tested with a real suspend.
+* **The mouse is not captured.** `brain` reads keyboards only. A mouse
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"The Kate tests need two narrow permissions, granted once by\n`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):\npasswordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm\nfor a sleep/wake check that suspends with `systemctl suspend`), and access to\n`/dev/uinput` for the user at the local seat.\"\"\",\"\"\"`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`) grants two\nnarrow permissions once: access to `/dev/uinput` for the user at the local\nseat, which the Kate tests need, and passwordless\n`sudo /usr/sbin/rtcwake -m no -s 30` only, which the manual sleep/wake check\nbelow uses (it sets a wake alarm; nothing else is allowed).\n\nSleep/wake is checked by hand, with a real suspend through logind (the same\npath as the KDE menu or closing the lid); no automated test does it:\n\n```sh\nbrain run --data-dir /tmp/brain-sleep                     # terminal 1\nsudo /usr/sbin/rtcwake -m no -s 30 && systemctl suspend   # terminal 2: wakes after 30 s\n# after the resume, brain prints how many keyboards it reopened;\n# type something in Kate, wait 30+ s, then:\ngrep -E '\"state\":\"(sleep|wake)\"' /tmp/brain-sleep/events.jsonl\nbrain query text --data-dir /tmp/brain-sleep              # shows the text typed after the resume\n```\"\"\"),\n])\nedit('scripts/setup-test-permissions.sh',[\n(\"\"\"# Grants the two narrow permissions brain's hardware tests need. Run once:\"\"\",\"\"\"# Grants the two narrow permissions brain's hardware checks need. Run once:\"\"\"),\n(\"\"\"# 1. Sleep/wake test: lets the invoking user run exactly\n#    `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only sets\n#    the RTC wake alarm 30 s ahead. The test then suspends through logind\"\"\",\"\"\"# 1. Manual sleep/wake check (see the README): lets the invoking user run\n#    exactly `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only\n#    sets the RTC wake alarm 30 s ahead. The check then suspends through logind\"\"\"),\n])\nEOF\ngrep -rn 'sleep/wake test\\|sleep/wake check' README.md CLAUDE.md PLAN.md scripts | cut -c1-120",
+  "description": "Fix the README test permissions paragraph and add the manual check"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+scripts/setup-test-permissions.sh:6:# 1. Manual sleep/wake check (see the README): lets the invoking user run
+README.md:459:`sudo /usr/sbin/rtcwake -m no -s 30` only, which the manual sleep/wake check
+README.md:496:5. **A sleep/wake test that could not work.** `rtcwake -m mem` suspends
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:16:15.486Z</sub>
+
+The remaining "sleep/wake test" (README line 496) is in "Where the agent failed", describing the old attempt, so it stays. Committing:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add README.md scripts/setup-test-permissions.sh && git commit -q -F - <<'EOF'\nDocument the sleep/wake check as manual\n\nThe README said the Kate tests need the passwordless rtcwake rule for\na sleep/wake check, but no automated test suspends the machine: the\nKate tests only need /dev/uinput, and sleep/wake was always checked by\nhand. The README now says which permission is for what and gives the\nmanual steps; the permission script's comment says the same.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1",
+  "description": "Commit and push the README fix"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+d727e26 Document the sleep/wake check as manual
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:16:25.975Z</sub>
+
+The README is fixed and pushed (`d727e26`).
+
+- **Permissions paragraph:** it now says what each permission is for. The Kate tests only need access to `/dev/uinput`. The passwordless `rtcwake -m no -s 30` rule is only for the manual sleep/wake check.
+- **New manual sleep/wake steps:** start brain, set the wake alarm and suspend with `systemctl suspend`, then check the `sleep` and `wake` events in the log and run `query text` after the resume. It also says plainly that no automated test does this.
+- **`scripts/setup-test-permissions.sh`:** its header comment had the same mistake (it called this a "sleep/wake test"), so I fixed that too.
+
+I didn't refresh `ai-logs/` for this small commit. It'll be picked up with the next one.
+
+## User  <sub>2026-11-17T16:19:37.372Z</sub>
+
+let's run now our final review and checklist, make this project ready for the interviewer, it should be clean, not messy, professional and without contradictions.
+
+## Assistant  <sub>2026-11-17T16:19:44.343Z</sub>
+
+I'll start with the mechanical checks, then read every doc against the code.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git status --short; cargo fmt --check && echo fmt-ok; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -cE '^warning'; grep -rn 'TODO\\|FIXME\\|XXX\\|HACK\\|dbg!\\|println!(\"DEBUG' src tests | head; cat .gitignore; ls -la; wc -l README.md PLAN.md CLAUDE.md; ls ai-logs | head",
+  "description": "Repo hygiene, lint, docs and leftover markers"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fmt-ok
+0
+0
+src/query.rs:637:            "TODO: call Dana⏎⇥send the \"Q3\" report⏎path: C:\\temp",
+src/query.rs:668:                    text: "TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp".into(),
+tests/query_cli.rs:308:        "TODO: call Dana⏎⇥send the \"Q3\" report⏎path: C:\\temp",
+tests/query_cli.rs:370:    let todo_text = "TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp";
+tests/query_cli.rs:424:        stdout.contains(r#""TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp""#),
+/target
+/brain-data
+*.pdf
+/.claude
+total 400
+drwxrwxr-x 10 juan juan   4096 Nov 17 12:10 .
+drwxr-xr-x  5 juan juan   4096 Nov 15 18:39 ..
+drwxrwxr-x  3 juan juan   4096 Nov 15 23:07 .claude
+drwxrwxr-x  9 juan juan   4096 Nov 17 18:19 .git
+-rw-rw-r--  1 juan juan     35 Nov 15 23:21 .gitignore
+-rw-rw-r--  1 juan juan   7094 Nov 17 17:29 CLAUDE.md
+-rw-rw-r--  1 juan juan  33867 Nov 15 19:05 Cargo.lock
+-rw-rw-r--  1 juan juan    612 Nov 15 19:05 Cargo.toml
+-rw-rw-r--  1 juan juan 238554 Nov 14 11:53 Endpoint Home Assignment.pdf
+-rw-rw-r--  1 juan juan   1575 Nov 17 15:06 Makefile
+-rw-rw-r--  1 juan juan  38725 Nov 17 17:29 PLAN.md
+-rw-rw-r--  1 juan juan  28271 Nov 17 18:16 README.md
+drwxrwxr-x  3 juan juan   4096 Nov 17 12:10 ai-logs
+drwxrwxr-x  2 juan juan   4096 Nov 17 14:55 packaging
+drwxrwxr-x  2 juan juan   4096 Nov 16 13:45 scripts
+drwxrwxr-x  4 juan juan   4096 Nov 17 13:01 src
+drwxrwxr-x  6 juan juan   4096 Nov 17 13:00 target
+drwxrwxr-x  3 juan juan   4096 Nov 17 17:02 tests
+  543 README.md
+  585 PLAN.md
+  120 CLAUDE.md
+ 1248 total
+README.md
+design-doc.md
+raw
+session-1.md
+session-2.md
+subagent-a8e3c9e477e3774ff.md
+subagent-aa6364f0e0124dab2.md
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:19:50.121Z</sub>
+
+Clean on the mechanical side (the `TODO`s are test data). Now the assignment itself, to rebuild the checklist from the source:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "pdftotext -layout \"Endpoint Home Assignment.pdf\" - | sed 's/[ \\t]*$//' | cat -s",
+  "description": "Read the assignment text"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+           Endpoint Home Exercise
+           Home Assignment: Shadow Assistant
+           Objective
+           The goal of this exercise is to build an efficient, low-level system. We want to see
+           how you approach a new problem, make decisions where the spec is open, verify
+           your own work, and use AI agents to move faster without losing correctness.
+
+           Task
+           We’re building a second brain: a shadow assistant that runs on the user’s
+           computer and follows what they write in each application. Later it helps them find
+           things (“what did I tell Dana about the migration?”), see what they did (“which
+           command did I run on prod yesterday?”), and get back to where they were.
+           You’ll build one binary, brain , with two commands:
+                          captures what the user types, works out what they actually wrote,
+                  brain run
+
+                 and stores it.
+                  brain query   answers questions about it, while run keeps going.
+
+                                                           brain run                        brain query
+                                       User typing in
+                                                          capture →        Your storage    search / text /   Future assistant
+                                           apps
+                                                        analyze → store   + search index      timeline
+
+           What to Capture
+           The event format and the storage are yours to design. You’ll need at least:
+                 For each keystroke: the time, the app, the key and the modifiers held
+                 Focus changes between apps and contexts
+           For example, one keystroke might look like this:
+
+Endpoint Home Exercise                                                                                                          1
+               { "ts": "2026-11-08T14:03:22.118Z", "app": "com.tinyspeck.sla
+               ckmacgap", "type": "key", "key": "H", "mods": ["shift"] }
+
+           1. The Brain
+            Which app
+                 Capture: keystrokes and the active app
+                 Analysis: rebuild what the user wrote in each app
+                 Query: search and text
+
+           Requirements
+                 Capture runs without the user noticing: no input lag, ≤ 1% average CPU while
+                 typing, ≤ 32 MB memory, and it keeps working after sleep/wake.
+                 Crash safety: kill -9 on run at any moment, followed by a restart, causes no
+                 corruption
+                 Live queries: query works while run is writing, and always sees a consistent
+                 state.
+                 History: query text --at <time>
+
+           2. CLI
+           Both commands take --data-dir <dir> (default ./brain-data ), and exit non-zero with
+           a message on stderr on error.
+           1. Run
+
+              brain run
+
+           2. Query
+
+End
+… [2989 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:19:54.229Z</sub>
+
+Now reading the README end to end against this:
+
+**Tool call: `Read`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/README.md"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+1	# brain — a shadow assistant for Linux
+2	
+3	`brain` runs on your computer, follows what you type in each application and
+4	lets you search it later.
+5	
+6	```
+7	brain run                      # capture keystrokes + focus changes, store them
+8	brain query search "<words>"   # full-text search over writing sessions
+9	brain query text --app A       # what was typed into an app, reconstructed
+10	```
+11	
+12	> **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
+13	> the AI transcripts are in [ai-logs/](ai-logs/).
+14	
+15	## Supported OS
+16	
+17	Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
+18	works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
+19	desktops, keys are recorded under the app `unknown`. The optional VS Code
+20	replay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).
+21	
+22	## Build
+23	
+24	```sh
+25	# Rust toolchain (https://rustup.rs), then:
+26	cargo build --release
+27	# binary: target/release/brain
+28	
+29	# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+30	make
+31	```
+32	
+33	SQLite is bundled. libxkbcommon is loaded from the runtime library
+34	`libxkbcommon.so.0` that every Wayland desktop ships, so no `-dev`
+35	packages are needed.
+36	
+37	## Permissions
+38	
+39	`brain` reads keyboards directly from `/dev/input/event*` (read-only,
+40	never grabbed, so it cannot add input lag). Your user must be in the `input`
+41	group:
+42	
+43	```sh
+44	sudo usermod -aG input "$USER"   # then log out and back in
+45	```
+46	
+47	Note that the `input` group can read every input device. That is the price of
+48	display-server-independent capture (see PLAN.md for the alternatives).
+49	
+50	## Run
+51	
+52	```sh
+53	target/release/brain run --data-dir ~/brain-data
+54	```
+55	
+56	`run` stops cleanly on Ctrl+C or SIGTERM. A `kill -9` is also safe. The next
+57	start repairs a torn last line, if there is one, and resumes ingest exactly
+58	where it stopped.
+59	
+60	Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
+61	invisible copy of VS Code (tier 2, below). It is off by default.
+62	
+63	### As a service
+64	
+65	`brain` can run as a **systemd user service**: it starts with your Plasma
+66	session, restarts if it crashes, stops at logout, and runs as you (no
+67	root; it needs your desktop session for focus tracking):
+68	
+69	```sh
+70	make install-service                 # installs /usr/bin/brain + the unit, enables it
+71	journalctl --user -u brain -f        # its messages
+72	systemctl --user stop brain          # pause capture
+73	brain query search "words" --data-dir ~/.local/state/brain
+74	make uninstall-service               # remove the service AND its captured data
+75	make uninstall-service KEEP_DATA=1   # remove the service, keep the data
+76	```
+77	
+78	The service keeps its data in its systemd **state directory**,
+79	`~/.local/state/brain` (`$XDG_STATE_HOME/brain`), which systemd creates
+80	private to you (mode 0700) before starting it. Pass 
+… [27222 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The README is mostly consistent, with a few stale spots noted (test counts, a tier-2 test note, some wording errors). I'm checking its claims against the code and CLI next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat Makefile; grep -n 'enum SystemState' -A12 src/event.rs; B=target/release/brain; cargo build --release -q; $B --help; $B run --help; $B query --help; $B query search --help; $B query text --help",
+  "description": "Check Makefile, system states and CLI help",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+# Build `brain` and install it system-wide.
+#
+#   make                    build (release) and install to $(BINDIR)
+#   make build              build only
+#   make install-service    install + enable the systemd user service
+#   make uninstall-service  stop and remove the service and its data
+#                           (KEEP_DATA=1: keep the data)
+#   make uninstall          remove the installed binary
+#
+# cargo runs as you; only the copy uses sudo, so target/ never becomes
+# root-owned and root needs no Rust toolchain.
+
+PREFIX ?= /usr
+BINDIR ?= $(PREFIX)/bin
+BIN    := target/release/brain
+
+.PHONY: all build install uninstall install-service uninstall-service
+
+all: install
+
+build:
+	cargo build --release
+
+install: build
+	sudo install -m 0755 $(BIN) $(BINDIR)/brain
+
+uninstall:
+	sudo rm -f $(BINDIR)/brain
+
+# The service runs as you (no root); see packaging/brain.service. Its data
+# lives in its systemd state directory.
+UNITDIR  ?= $(HOME)/.config/systemd/user
+STATEDIR := $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/brain
+
+install-service: install
+	install -Dm 0644 packaging/brain.service $(UNITDIR)/brain.service
+	systemctl --user daemon-reload
+	systemctl --user enable --now brain.service
+	@echo "brain service running; data in $(STATEDIR)"
+
+uninstall-service:
+	-systemctl --user disable --now brain.service
+ifeq ($(KEEP_DATA),1)
+	@echo "keeping the service's data in $(STATEDIR)"
+else
+	@echo "deleting the service's data in $(STATEDIR)"
+	-systemctl --user clean --what=state brain.service
+endif
+	rm -f $(UNITDIR)/brain.service
+	systemctl --user daemon-reload
+72:pub enum SystemState {
+73-    Start,
+74-    Stop,
+75-    Sleep,
+76-    Wake,
+77-    Lock,
+78-    Unlock,
+79-}
+80-
+81-impl Event {
+82-    /// The window title this event belongs to, if it relates to a text context.
+83-    pub fn window(&self) -> Option<&str> {
+84-        match &self.kind {
+Shadow assistant: captures what you type and makes it searchable
+
+Usage: brain [OPTIONS] <COMMAND>
+
+Commands:
+  run    Capture keystrokes and focus changes, group them into writing sessions with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM)
+  query  Query what has been captured; prints JSON, with times in local time. Safe to run while `brain run` is running
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+  -h, --help            Print help
+  -V, --version         Print version
+Capture keystrokes and focus changes, group them into writing sessions with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM)
+
+Usage: brain run [OPTIONS]
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --vscode-replay   Reconstruct VS Code sessions by replaying their keystrokes into a sandboxed, invisible VS Code (no network, capped CPU/memory). Falls back to generic reconstruction when it cannot
+  -h, --help            Prin
+… [2771 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The CLI matches its behavior apart from two help texts: `--vscode-replay` omits the saved-file diff, and `text`'s help confuses time window with app window. I'm moving on to the module docs next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for f in src/lib.rs src/main.rs src/capture/mod.rs src/sessions.rs src/ingest.rs src/store.rs src/query.rs src/reconstruct/mod.rs src/reconstruct/vscode/mod.rs src/reconstruct/vscode/title.rs src/eventlog.rs; do echo \"=== $f\"; awk '/^\\/\\/!/{print; next} NR>1 && !/^\\/\\/!/{exit}' $f; done 2>/dev/null | head -230",
+  "description": "Print every module's top doc comment"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+=== src/lib.rs
+//! `brain`: a shadow assistant that captures what you type and makes it searchable.
+//!
+//! Pipeline: [`capture`] (keystrokes + focus → append-only [`eventlog`]) →
+//! [`ingest`] (log → [`sessions`] with [`reconstruct`]ed text → SQLite
+//! [`store`] with full-text index) → [`query`] (`search` over sessions, `text`
+//! over the log).
+=== src/main.rs
+=== src/capture/mod.rs
+//! `brain run`: capture → log → ingest, until SIGINT/SIGTERM.
+//!
+//! Threads:
+//! * **input**: one `poll` loop over all keyboards (the hot path, see [`input`]).
+//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.
+//! * **D-Bus**: zbus's connection executors plus one small thread per watched
+//!   signal (focus calls from KWin, lock, sleep, layout).
+//! * **tier2** (only with `--vscode-replay`): VS Code replays, one at a time.
+//! * **main**: waits for a termination signal, then shuts down in order.
+=== src/sessions.rs
+//! Writing sessions: groups logged events into sessions and keeps each
+//! session's reconstructed text, inside the ingest transaction.
+//!
+//! **Session rules** (from the design):
+//! * A session is keyed by `(app, window)`; the window title is normalized
+//!   ([`normalize_window`]) so an editor's unsaved-marker does not split it.
+//! * It closes after [`IDLE_TIMEOUT_MS`] without activity *in that context*,
+//!   or at once when a single-line field commits (Enter at a shell prompt, in
+//!   a chat box or an address bar), is cancelled (Ctrl+C at a prompt), or
+//!   focus moves to another field of the same window (Tab in a web form).
+//! * Focus loss alone never closes it: switching away and back within the
+//!   idle timeout resumes the same session.
+//! * A window whose title changes *because of the typing* (VS Code names an
+//!   unsaved file after its first line, a mail window after its subject)
+//!   keeps its session: a title change within [`RENAME_WINDOW_MS`] of a
+//!   keystroke in that window, with no shortcut in between, makes the new
+//!   title an alias of the open session.
+//! * `brain run` stopping or restarting closes all sessions: what was typed
+//!   while it was not running is unknown.
+//!
+//! **Text.** In multi-line apps (editors and anything unknown) each
+//! `(app, window)` has a modelled document ([`TextBuffer`]) that outlives its
+//! sessions (persisted in `context_state`), so the next session continues
+//! where the previous one left it. A session's text is that document when the
+//! session closes. Single-line fields (shell prompts, address bars, chat
+//! boxes) start every session empty: they are short-lived, and their window
+//! titles are reused by unrelated fields (every new Chrome tab is "New tab",
+//! every shell at home is "~"), so carrying text over would mix them.
+//!
+//! **Determinism.** Everything here is a function of the log, except two
+//! wall-clock decisions that cannot change the result: closing an idle
+//! session before the next event arrives ([`Sessions::close_idle`] wai
+… [8236 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:20:31.008Z</sub>
+
+Module docs: three are stale (`capture/mod.rs`, `reconstruct/mod.rs`, the determinism note in `sessions.rs`). They still describe tier 2 as replay only. Now PLAN.md:
+
+**Tool call: `Read`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/PLAN.md"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+1	# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 / Wayland)
+2	
+3	This is the research and architecture write-up for `brain`: how keystrokes
+4	and application context are collected, how they are ingested, how writing
+5	sessions are defined and their text reconstructed, how everything is stored
+6	and indexed, and how queries read it. It describes the code as built; the
+7	original design doc is in `ai-logs/design-doc.md`, and the places where the
+8	build deliberately differs from it are called out ("Differs from the design").
+9	
+10	## 1. Summary
+11	
+12	```
+13	 keyboards ──► input thread ──► Recorder ──► events.jsonl  (append-only, ground truth)
+14	 (evdev,         │ xkbcommon      ▲ app + window                │ ~1 s
+15	  passive)       │ key repeat     │ from KWin                   ▼
+16	                 ▼                │                       ingest thread ──► brain.db (SQLite WAL)
+17	 KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
+18	 Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+19	                                                              checkpoints     log_checkpoints
+20	                                    tier 2 worker (opt-in): VS Code replay ──┘
+21	 brain query search ──► brain.db (read-only snapshot)
+22	 brain query text   ──► log_checkpoints → events.jsonl
+23	```
+24	
+25	* **Capture** reads keyboards directly from the kernel (evdev), passively, and
+26	  resolves each key to the character the app receives with libxkbcommon and
+27	  the user's real layouts. Focus (app id and window title) comes from a KWin
+28	  script calling back over D-Bus. Every event is one JSON line appended to
+29	  `events.jsonl`.
+30	* **Ingest** (a thread in the same process) tails the log about once a
+31	  second. In one SQLite transaction per batch it writes log checkpoints,
+32	  opens, updates and closes writing sessions, reconstructs their text, and
+33	  advances the log offset. The log is the ground truth; the database is
+34	  derived from it and can be rebuilt from it.
+35	* **Query** reads the database (`search`) or the log (`text`) while `run`
+36	  keeps writing, and prints JSON.
+37	* **Threads in `brain run`**: main (signals, orderly shutdown), input (the
+38	  hot path), ingest, one small thread per watched D-Bus signal plus zbus's
+39	  own connection threads, and with `--vscode-replay` a tier 2 worker. A real
+40	  run has 13 threads.
+41	* **Measured cost**: 0.1 % CPU and 8 MB peak RSS while typing at human speed
+42	  with queries running (`tests/perf_budget.rs`); the budget is 1 % and 32 MB.
+43	
+44	## 2. Research: collecting keystrokes and application data
+45	
+46	### 2.1 The constraint that shapes everything: Wayland
+47	
+48	On X11, any client can read global input (XRecord, XInput2 raw events) and the
+49	active window (`_NET_ACTIVE_WINDOW`). Wayland removed both on purpose. Clients
+50	only receive input while they have focus, and there is no 
+… [37811 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+PLAN.md has drifted from the code in several places, including tier 2 being described as replay-only and the test count. I'm checking CLAUDE.md and the thread-count and CPU/RSS figures next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat CLAUDE.md; echo ====; for p in $(pgrep -f 'brain run'); do echo \"$p $(tr '\\0' ' ' </proc/$p/cmdline) threads=$(grep Threads /proc/$p/status | awk '{print $2}') rss=$(grep VmRSS /proc/$p/status | awk '{print $2}')kB\"; done",
+  "description": "Read CLAUDE.md; check live brain thread count and RSS"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Exit code 1
+# CLAUDE.md — instructions for coding agents working on `brain`
+
+`brain` is a Rust CLI for the Endpoint "Shadow Assistant" home assignment
+(`Endpoint Home Assignment.pdf`, not committed). One binary, two commands:
+`brain run` captures keystrokes + focus and stores them; `brain query`
+(`search`, `text`) answers questions while `run` keeps going.
+
+Design doc (source of truth for architecture):
+https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9 — `PLAN.md` is the in-repo
+research/architecture write-up and must stay consistent with the code.
+
+## Target platform
+
+Ubuntu, **KDE Plasma 6 on Wayland** (KWin). Not GNOME. Keys come from evdev
+(`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon
+(`libxkbcommon.so.0`, linked by file name, so no `-dev` package is needed).
+Focus comes from a KWin script calling back over D-Bus. Tests that run by
+default must not need hardware, a desktop or privileges: use
+`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only
+the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
+
+## Hard requirements (from the assignment) — never regress these
+
+- Capture is invisible: no input lag (we never grab devices), **≤ 1 % average
+  CPU while typing, ≤ 32 MB RSS**, keeps working after sleep/wake.
+- `kill -9` of `run` at any moment + restart ⇒ no corruption
+  (`tests/crash_safety.rs` must stay green).
+- `query` works while `run` writes and always sees a consistent state.
+- Both commands take `--data-dir` (default `./brain-data`) and exit non-zero
+  with a message on stderr on error. Query output is JSON on stdout, with
+  times in local time (the log and database store UTC).
+
+## Decisions already made by the owner — do not re-litigate
+
+- `brain query text` reconstructs "stupidly": the keys typed in the time
+  range, per app and window title, run through the tier 0/1 adapters from
+  an empty text (no sessions involved); output `windows` + joined `text`.
+  It replaced the earlier raw-keystroke output at the owner's request.
+  Range: default last 10 min, `--at T` = the 10 minutes ending at T, or
+  `--from/--to`. Times accept relative (`-2h`), local and RFC 3339 forms.
+  `--app` may be part of the id; `text` resolves it to exactly one app and
+  reports the full id.
+- Sessions: keyed by (app, normalized window title); close after 30 s idle
+  in that context or on Enter in single-line contexts; focus loss alone
+  never closes a session; a title change of the typed window (a `renamed`
+  focus event) shortly after a keystroke keeps the session. With
+  `--vscode-replay`, every VS Code key (not only text edits) opens or
+  extends a session, and a session of shortcuts only (Ctrl+D, Ctrl+S) is
+  kept for the saved file's diff, or removed when there is none.
+- The mouse is not captured (owner's call): cursor moves made with the mouse
+  are a documented limitation, not something to work around.
+- Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
+  2 = VS Code real-ap
+… [4100 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+CLAUDE.md shows the same tier-2 drift, so it can't be treated as the source of truth either; I'm rerunning the thread check, which failed on a shell quirk.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for p in $(pgrep -f 'brain run'); do echo \"$p $(tr '\\0' ' ' </proc/$p/cmdline) threads=$(awk '/Threads/{print $2}' /proc/$p/status) rss=$(awk '/VmRSS/{print $2}' /proc/$p/status)kB\"; done",
+  "description": "Check running brain thread counts and RSS"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+591827 brain run  threads=13 rss=9932kB
+672348 /usr/bin/zsh -c source /home/juan/.claude/shell-snapshots/snapshot-zsh-1794778271008-qw1a1t.sh 2>/dev/null || true && uiltin setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL NO_BRACE_CCL NO_MAGIC_EQUAL_SUBST 2>/dev/null || true && { uiltin unalias -- 'which'; uiltin unset -f -- 'which'; } >/dev/null 2>&1 || true && { uiltin unalias -- 'unsetenv'; uiltin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'for p in $(pgrep -f '"'"'brain run'"'"'); do echo "$p $(tr '"'"' '"'"' '"'"' '"'"' </proc/$p/cmdline) threads=$(awk '"'"'/Threads/{print $2}'"'"' /proc/$p/status) rss=$(awk '"'"'/VmRSS/{print $2}'"'"' /proc/$p/status)kB"; done' && pwd -P >| /tmp/claude-a1e7-cwd  threads=1 rss=4940kB
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:20:59.104Z</sub>
+
+13 threads matches PLAN.md. The live service sits at about 10 MB RSS after hours of use, against PLAN's "idles at about 8 MB", so I'll state the measured figure. Now a scan of the code for leftovers:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'allow(dead_code)\\|allow(unused\\|#\\[allow' src | head; echo \"--- unwrap/expect outside tests:\"; for f in $(git ls-files 'src/*.rs'); do awk -v f=$f '/#\\[cfg\\(test\\)\\]/{exit} /\\.unwrap\\(\\)|\\.expect\\(/{print f\":\"NR\": \"$0}' $f; done | grep -v '// ' | head -30; echo \"--- changed_lines users:\"; grep -rn 'changed_lines' src | grep -v 'fn \\|mod.rs\\|tests' | head; wc -l src/*.rs src/*/*.rs src/*/*/*.rs | sort -n | tail -8",
+  "description": "Scan code for allow attributes, unwraps and big files"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/xkb.rs:17:#[allow(non_camel_case_types)]
+--- unwrap/expect outside tests:
+src/capture/input.rs:97:         let dir = CString::new(INPUT_DIR).unwrap();
+src/capture/synthetic.rs:79:                     strokes.insert(0, (us_keycode('x').unwrap().0, false));
+src/capture/xkb.rs:144:             (Mod::Shift, CString::new("Shift").unwrap()),
+src/capture/xkb.rs:145:             (Mod::Ctrl, CString::new("Control").unwrap()),
+src/capture/xkb.rs:146:             (Mod::Alt, CString::new("Mod1").unwrap()),
+src/capture/xkb.rs:147:             (Mod::Super, CString::new("Mod4").unwrap()),
+src/capture/xkb.rs:148:             (Mod::Altgr, CString::new("Mod5").unwrap()),
+src/event.rs:95:         serde_json::to_writer(&mut *buf, self).expect("serializing an Event cannot fail");
+src/sessions.rs:374:                             .expect("just opened")
+src/sessions.rs:380:                 let s = self.open.get_mut(&k).expect("just opened");
+src/sessions.rs:401:                 let s = self.open.get_mut(&k).expect("just opened");
+src/timefmt.rs:94:         let naive = date.and_hms_opt(0, 0, 0).expect("midnight is valid");
+--- changed_lines users:
+src/reconstruct/tier2.rs:474:        text: vscode::changed_lines(&initial_text, &saved),
+src/reconstruct/vscode/diff.rs:2://! ([`changed_lines`]), and a git-style unified diff of a saved file
+src/reconstruct/vscode/diff.rs:277:        assert_eq!(changed_lines("a\nb\n", "a\nb\n"), "");
+src/reconstruct/vscode/diff.rs:278:        assert_eq!(changed_lines("", ""), "");
+src/reconstruct/vscode/diff.rs:283:        assert_eq!(changed_lines("a\nb\n", "a\nb\nc\n"), "c");
+src/reconstruct/vscode/diff.rs:284:        assert_eq!(changed_lines("a\nc\n", "a\nb\nc\n"), "b");
+src/reconstruct/vscode/diff.rs:285:        assert_eq!(changed_lines("", "x\ny"), "x\ny");
+src/reconstruct/vscode/diff.rs:294:        assert_eq!(changed_lines("a\nb\nc\n", "a\nc\n"), "");
+src/reconstruct/vscode/diff.rs:301:        assert_eq!(changed_lines(before, after), "0\nthree\n7");
+src/reconstruct/vscode/diff.rs:306:        assert_eq!(changed_lines("x\nx\n", "x\nx\nx\n"), "x");
+   547 src/capture/desktop.rs
+   636 src/capture/keys.rs
+   647 src/reconstruct/buffer.rs
+   652 src/reconstruct/vscode/title.rs
+   714 src/query.rs
+  1168 src/reconstruct/vscode/mod.rs
+  1390 src/sessions.rs
+ 11418 total
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:21:06.907Z</sub>
+
+The code is clean: every `unwrap`/`expect` outside tests is on a constant or an invariant, and there's no dead code. Last doc to check is the `ai-logs/` index:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat ai-logs/README.md; ls -la ai-logs ai-logs/raw | head -20; head -5 ai-logs/design-doc.md",
+  "description": "Read the ai-logs index"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+# AI logs
+
+Everything the AI did on this project, as recorded.
+
+| File | What |
+|---|---|
+| `design-doc.md` | The design doc written with Claude on claude.ai before implementation ([live doc](https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9)). The design conversation itself lives on claude.ai. |
+| `session-1.md`, `session-2.md` | The Claude Code implementation session (one session, split in two when its context was compacted). |
+| `subagent-aa6364f0e0124dab2.md` | Background agent that drafted PLAN.md. |
+| `subagent-a8e3c9e477e3774ff.md` | Parallel agent that built the VS Code tier 2 adapter (`src/reconstruct/vscode/`). |
+| `raw/*.jsonl` | The complete raw transcripts the Markdown files are rendered from. |
+
+The Markdown files truncate long tool inputs and outputs; the raw JSONL
+files are complete. In both, the owner's email address is replaced with
+`<redacted>`. Regenerate with:
+
+```sh
+python3 -I scripts/export-ai-logs.py --redact <email> --redact <email-local-part>
+```
+ai-logs:
+total 1972
+drwxrwxr-x  3 juan juan    4096 Nov 17 12:10 .
+drwxrwxr-x 10 juan juan    4096 Nov 17 12:10 ..
+-rw-rw-r--  1 juan juan     987 Nov 16 13:46 README.md
+-rw-rw-r--  1 juan juan   24230 Nov 16 13:44 design-doc.md
+drwxrwxr-x  2 juan juan    4096 Nov 17 12:10 raw
+-rw-rw-r--  1 juan juan  411494 Nov 17 17:32 session-1.md
+-rw-rw-r--  1 juan juan 1360773 Nov 17 17:32 session-2.md
+-rw-rw-r--  1 juan juan  174391 Nov 17 17:32 subagent-a8e3c9e477e3774ff.md
+-rw-rw-r--  1 juan juan   24292 Nov 17 17:32 subagent-aa6364f0e0124dab2.md
+
+ai-logs/raw:
+total 18716
+drwxrwxr-x 2 juan juan     4096 Nov 17 12:10 .
+drwxrwxr-x 3 juan juan     4096 Nov 17 12:10 ..
+-rw-rw-r-- 1 juan juan  4729600 Nov 17 17:32 session-1.jsonl
+-rw-rw-r-- 1 juan juan 12569685 Nov 17 17:32 session-2.jsonl
+-rw-rw-r-- 1 juan juan  1297057 Nov 17 17:32 subagent-a8e3c9e477e3774ff.jsonl
+-rw-rw-r-- 1 juan juan   555753 Nov 17 17:32 subagent-aa6364f0e0124dab2.jsonl
+# brain — system design
+
+Nov 15, 2026 · @Chen Ohana
+
+## Overview
+````
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:21:18.846Z</sub>
+
+Review done. Here's what I found, and I'm fixing all of it now. Mostly tier-2 descriptions that predate the saved-file diff, plus stale numbers. First the CLI help text in `main.rs`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'vscode_replay\\|Reconstruct VS Code\\|starts empty at the window' -B3 -A3 src/main.rs | head -40",
+  "description": "Locate the help strings to fix"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+30-        /// input devices (no root or desktop needed).
+31-        #[arg(long, value_name = "RATE", hide = true)]
+32-        synthetic: Option<f64>,
+33:        /// Reconstruct VS Code sessions by replaying their keystrokes into a
+34-        /// sandboxed, invisible VS Code (no network, capped CPU/memory).
+35-        /// Falls back to generic reconstruction when it cannot.
+36-        #[arg(long)]
+37:        vscode_replay: bool,
+38-    },
+39-    /// Query what has been captured; prints JSON, with times in local time.
+40-    /// Safe to run while `brain run` is running.
+--
+92-    },
+93-    /// What was typed into an app in the time window, reconstructed (edits
+94-    /// applied) per window title with the app's rules; each window's text
+95:    /// starts empty at the window's start. Without time flags it covers the
+96-    /// last 10 minutes; --to alone means the 10 minutes ending at T.
+97-    #[command(after_help = TIME_HELP)]
+98-    Text {
+--
+122-    match cli.command {
+123-        Command::Run {
+124-            synthetic,
+125:            vscode_replay,
+126-        } => {
+127-            let opts = brain::capture::RunOptions {
+128-                synthetic_rate: synthetic,
+129:                vscode_replay,
+130-            };
+131-            brain::capture::run(&data_dir, &opts)
+132-        }
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\n\nedit('src/main.rs',[\n(\"\"\"        /// Reconstruct VS Code sessions by replaying their keystrokes into a\n        /// sandboxed, invisible VS Code (no network, capped CPU/memory).\n        /// Falls back to generic reconstruction when it cannot.\"\"\",\"\"\"        /// Reconstruct VS Code sessions with the real editor: a git-style diff\n        /// of the file when it was saved after the session, otherwise a\n        /// best-effort replay of the keystrokes into a sandboxed, invisible\n        /// VS Code (no network, capped CPU/memory). Keeps the generic\n        /// reconstruction when neither works.\"\"\"),\n(\"\"\"    /// What was typed into an app in the time window, reconstructed (edits\n    /// applied) per window title with the app's rules; each window's text\n    /// starts empty at the window's start. Without time flags it covers the\n    /// last 10 minutes; --to alone means the 10 minutes ending at T.\"\"\",\"\"\"    /// What was typed into an app in the time range, reconstructed (edits\n    /// applied) per window title with the app's rules; each window's text\n    /// starts empty at the start of the range. Without time flags it covers\n    /// the last 10 minutes; --to alone means the 10 minutes ending at T.\"\"\"),\n])\n\nedit('src/capture/mod.rs',[\n(\"\"\"//! * **tier2** (only with `--vscode-replay`): VS Code replays, one at a time.\"\"\",\"\"\"//! * **tier2** (only with `--vscode-replay`): VS Code tier 2 jobs (a saved\n//!   file's diff, or a replay), one at a time.\"\"\"),\n])\n\nedit('src/reconstruct/mod.rs',[\n(\"\"\"//! * [`buffer`] — tier 0, a generic text buffer replaying editing keys.\n//! * [`apps`] and [`editor`] — tier 1, per-app-class rules (single-line\n//!   fields, readline shortcuts, shell history, browser field changes) that\n//!   decide what each key does to the buffer.\n//!\n//! Tiers 0 and 1 are used by the session engine ([`crate::sessions`]) and,\n//! without sessions, by `brain query text` ([`crate::query::reconstruct_windows`]).\n//! * [`vscode`] and [`tier2`] — tier 2, VS Code sessions replayed into the\n//!   real editor, sandboxed (opt-in: `brain run --vscode-replay`).\"\"\",\"\"\"//! * [`buffer`] — tier 0, a generic text buffer replaying editing keys.\n//! * [`apps`] and [`editor`] — tier 1, per-app-class rules (single-line\n//!   fields, readline shortcuts, shell history, browser field changes) that\n//!   decide what each key does to the buffer.\n//! * [`vscode`] and [`tier2`] — tier 2, VS Code sessions from the real\n//!   editor: a git-style diff of the file when it was saved after the\n//!   session, otherwise a best-effort replay into a sandboxed VS Code\n//!   (opt-in: `brain run --vscode-replay`).\n//!\n//! Tiers 0 and 1 are used by the session engine ([`crate::sessions`]) and,\n//! without sessions, by `brain query text` ([`crate::query::reconstruct_windows`]).\"\"\"),\n])\n\nedit('src/sessions.rs',[\n(\"\"\"//! * `brain run` stopping or restarting closes all sessions: what was typed\n//!   while it was not running is unknown.\"\"\",\"\"\"//! * `brain run` stopping or restarting closes all sessions: what was typed\n//!   while it was not running is unknown.\n//! * With tier 2 (VS Code, `--vscode-replay`), every key except desktop\n//!   (Super) shortcuts is activity, even one tier 0/1 ignores (Ctrl+D,\n//!   Ctrl+S), and a session with a file snapshot is kept at close even if its\n//!   text is unchanged, for the saved file's diff to decide.\"\"\"),\n(\"\"\"//! **Determinism.** Everything here is a function of the log, except two\n//! wall-clock decisions that cannot change the result: closing an idle\n//! session before the next event arrives ([`Sessions::close_idle`] waits a\n//! grace period past the timeout, so the event-time rule would close it the\n//! sa
+… [781 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:21:56.655Z</sub>
+
+Now the README:
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,\ninvisible copy of VS Code (tier 2, below). It is off by default.\"\"\",\"\"\"Add `--vscode-replay` to reconstruct VS Code sessions with the real editor\n(tier 2, below): a diff of the file when you saved it, otherwise a replay in\na sandboxed, invisible copy of VS Code. It is off by default.\"\"\"),\n(\"\"\"* **Sessions that changed nothing leave no row** (cursor movement only, a\n  typo typed and deleted, whitespace).\"\"\",\"\"\"* **Sessions that changed nothing leave no row** (cursor movement only, a\n  typo typed and deleted, whitespace). With VS Code tier 2, the saved file\n  decides: a session whose diff is empty is removed once the worker has\n  checked it.\"\"\"),\n(\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's\n  content at session start, so it is skipped for unsaved new files\n  (`Untitled-1`), files with unsaved changes when the session started, and\n  files saved before they could be identified (within 2 minutes of the\n  session start). When the file is saved after the last edit, the session\n  text is a git-style diff of it (exact; the format matches `git diff -U3`,\n  though in very repetitive text an ambiguous line may be placed\n  differently than git's heuristics would). Search also matches words on\n  the diff's removed (`-`) and context lines. Otherwise a replay in VS Code is a best\n  effort: ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,\n  outside brain's budget), the cursor assumed at the end of the file, and no\n  extensions when yours exceed 300 MB, so autocomplete from extensions is\n  not reproduced.\"\"\",\"\"\"* **VS Code tier 2 is opt-in** (`--vscode-replay`). It needs the file's\n  content from before the session, so it is skipped for unsaved new files\n  (`Untitled-1`), for files with unsaved changes when the session started,\n  and for files brain could not identify, or copy before they were saved,\n  within 2 minutes of the session start.\n* **A saved file gives an exact diff.** Its format matches `git diff -U3`;\n  in very repetitive text an ambiguous line may be placed differently than\n  git's heuristics would. Search also matches words on the diff's removed\n  (`-`) and context lines.\n* **A replay is a best effort**: ~25 s for the first one and ~1.2 GB while\n  VS Code runs (capped, outside brain's budget), the cursor assumed at the\n  end of the file, and no extensions when yours exceed 300 MB, so\n  autocomplete from extensions is not reproduced.\"\"\"),\n(\"\"\"  no session boundaries, no text from before the range. (An earlier version returned\n  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)\"\"\",\"\"\"  no session boundaries, no text from before the range. (An earlier version\n  returned the raw keys with `<Backspace>` etc.; the owner asked for\n  reconstruction.)\"\"\"),\n(\"\"\"cargo test --release      # unit tests (~120) and the default integration tests:\n                          #   crash_safety  25 random kill -9s under load; sessions,\n                          #                 documents and checkpoints must equal a\n                          #                 clean rebuild from the log\n                          #   query_cli     the query commands through the binary,\n                          #                 incl. thousands of queries while run writes\n                          #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing\n```\"\"\",\"\"\"cargo test --release      # unit tests (~130) and the default integration tests:\n                          #   crash_safety  25 random kill -9s under load; sessions,\n                          #                 documents and checkpoints must
+… [2803 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+ok
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:22:15.896Z</sub>
+
+Now PLAN.md:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('PLAN.md',[\n(\"\"\"                                    tier 2 worker (opt-in): VS Code replay ──┘\"\"\",\"\"\"                    tier 2 worker (opt-in): VS Code diff / replay ──┘\"\"\"),\n(\"\"\"- Shortcuts with no modelled effect (Ctrl+C copy, Alt+Tab, Ctrl+S, F-keys)\n  are not activity: they neither open nor extend a session.\n- A session that changed nothing (cursor movement only, a typo typed and\n  deleted, whitespace) leaves no row; a committed non-empty line always\n  does (a shell command run again from history).\"\"\",\"\"\"- Shortcuts with no modelled effect (Ctrl+C copy, Alt+Tab, Ctrl+S, F-keys)\n  are not activity: they neither open nor extend a session. (With tier 2\n  on, VS Code is the exception, section 4.4: there they can change the\n  file.)\n- A session that changed nothing (cursor movement only, a typo typed and\n  deleted, whitespace) leaves no row; a committed non-empty line always\n  does (a shell command run again from history). A VS Code session with a\n  tier 2 snapshot is kept until its saved file shows whether it changed\n  anything.\"\"\"),\n(\"\"\"- **Tier 2, VS Code replayed in VS Code** (`reconstruct/vscode/`,\"\"\",\"\"\"- **Tier 2, VS Code from the real editor** (`reconstruct/vscode/`,\"\"\"),\n(\"\"\"  exact, VS Code not started; Myers line diff with git's \"slide down\"\n  placement of ambiguous runs). Otherwise the\n  worker replays the session's own keystrokes from the log into one warm,\n  headless VS Code (Electron's headless mode, no display server) over the\n  DevTools protocol on a pipe, in its own network namespace and a\n  CPU/memory-capped systemd scope, with the user's settings and keybindings,\n  saves, and takes the changed lines (`done: replayed (best effort,\n  unverified)`: cursor assumed at the end, no extensions above 300 MB, so\n  extension autocomplete is not reproduced). Failures and timeouts keep the\n  tier 0/1 text; pending jobs survive restarts.\"\"\",\"\"\"  exact, VS Code not started; Myers line diff with git's \"slide down\"\n  placement of ambiguous runs). Otherwise the worker replays the session's\n  own keystrokes from the log into one warm, headless VS Code (Electron's\n  headless mode, no display server) over the DevTools protocol on a pipe,\n  in its own network namespace and a CPU/memory-capped systemd scope, with\n  the user's settings and keybindings, saves, and takes the changed lines\n  (`done: replayed (best effort, unverified)`: cursor assumed at the end,\n  no extensions above 300 MB, so extension autocomplete is not reproduced).\n  Failures and timeouts keep the tier 0/1 text; pending jobs survive\n  restarts.\"\"\"),\n(\"\"\"key-to-action rules. The `start` event that follows closes them (input while\nbrain was not running is unknown). Everything the engine decides is a\nfunction of the log, so a database rebuilt from the log alone is identical;\n`sessions::tests::crash_recovery_reproduces_an_uninterrupted_run` restarts\ningest after every line to prove it.\"\"\",\"\"\"key-to-action rules. The `start` event that follows closes them (input while\nbrain was not running is unknown). Everything the engine decides is a\nfunction of the log, so a database rebuilt from the log alone is identical;\n`sessions::tests::crash_recovery_reproduces_an_uninterrupted_run` restarts\ningest after every line to prove it. The one exception is tier 2, which\ndepends on files on disk (section 10).\"\"\"),\n(\"\"\"  30 s through the whole pipeline with a query every 3 s: **0.1 % CPU, 8.1 MB\n  peak RSS**. A real run idles at about 8 MB.\"\"\",\"\"\"  30 s through the whole pipeline with a query every 3 s: **0.1 % CPU, 8.1 MB\n  peak RSS**. A real run (13 threads) sits at about 10 MB after hours of\n  use.\"\"\"),\n(\"\"\"- **Tests that need privileges** get
+… [4364 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+20:replay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).
+60:Add `--vscode-replay` to reconstruct VS Code sessions with the real editor
+61:(tier 2, below): a diff of the file when you saved it, otherwise a replay in
+85:without `--vscode-replay`; add it to `ExecStart` in
+96:| `vscode/`      | VS Code replay sandbox and file snapshots (tier 2 only) |
+206:That is the output for this typing (`tests/query_cli.rs` replays it):
+241:* **Tier 0**: keys are replayed into a virtual text field with a cursor,
+250:* **Tier 2** (`--vscode-replay`): when a VS Code session opens, the
+258:  2. otherwise the keystrokes are replayed into a headless VS Code with
+264:  The replay stores the lines it changed; tier 0/1 text stays if neither
+271:  and is never replayed; when the file was not saved after it, or the diff
+275:  the content to diff against. Without `--vscode-replay`, VS Code behaves
+287:  | `done: replayed (best effort, unverified)` | text from a replay in VS Code |
+288:  | `failed: …` | the replay failed; tier 0/1 text kept |
+381:* **Unknown cursor = end of the text**: after `brain run` restarts, and at
+382:  the start of a VS Code replay.
+390:* **VS Code tier 2 is opt-in** (`--vscode-replay`). It needs the file's
+399:* **A replay is a best effort**: ~25 s for the first one and ~1.2 GB while
+457:cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+540:13. **A status that overstated the result.** VS Code replays were marked
+542:    session with autocompletion replayed into garbage while the file the
+544:    a diff, and a replay is labelled best effort.
+550:15. **Incomplete instructions.** Asked how to trigger a VS Code replay, it
+554:    condition the replay needs.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\nold=\"\"\"desktops, keys are recorded under the app `unknown`. The optional VS Code\nreplay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).\"\"\"\nnew=\"\"\"desktops, keys are recorded under the app `unknown`. The optional VS Code\ntier 2 (`--vscode-replay`) replays into VS Code when a file was not saved,\nwhich needs VS Code installed (`/usr/bin/code`).\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt --check && echo fmt-ok; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -cE '^warning'; cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Final README fix; lint, docs and full test suite",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fmt-ok
+0
+0
+     Running unittests src/lib.rs 
+test result: ok. 130 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[This command modified 1 file you've previously read: README.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:24:37.418Z</sub>
+
+All green, and nothing I changed touches runtime logic (only docs and help text). Committing, then checking that a fresh clone builds and passes on its own and running the headless VS Code tests:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nAlign docs and help with tier 2 as built\n\nA final review found descriptions written before VS Code sessions got\nthe saved file's diff: the `--vscode-replay` help, the README's run\nsection and supported-OS note, PLAN.md's diagram, tier heading and\nlimitations, CLAUDE.md's tier list and code map, and three module docs\nstill described tier 2 as a replay only. PLAN.md 4.1 and the README\nsaid shortcuts never open a session and unchanged sessions leave no\nrow, without the VS Code tier 2 exception, and 4.5 claimed every\nresult is a function of the log, which tier 2 is not.\n\nAlso: test counts (~130 unit tests, tier2_e2e's default tests),\nthe rtcwake rule described as a test permission in PLAN.md, the live\nmemory figure (about 10 MB after hours, measured), `query text` help\nmixing up time range and app window, CLAUDE.md calling the design doc\nthe source of truth although PLAN.md records where the build differs,\nand three more entries in \"Where the agent failed\".\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\nC=$CLAUDE_JOB_DIR/tmp/clone; rm -rf $C; git clone -q . $C && cd $C && git status --short | wc -l && CARGO_TARGET_DIR=$CLAUDE_JOB_DIR/tmp/clone-target cargo test --release 2>&1 | grep -E 'test result|error' | head -12; cd /; rm -rf $C",
+  "description": "Commit, then build and test a fresh clone",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test datadir::tests::query_on_missing_dir_is_an_error ... ok
+test query::tests::bad_windows_are_errors ... ok
+test result: ok. 130 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.84s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+test errors_exit_non_zero_with_a_message ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.56s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Shell cwd was reset to /home/juan/Documents/shadow-assistant
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "rm -rf $CLAUDE_JOB_DIR/tmp/clone-target; cd /home/juan/Documents/shadow-assistant && cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'test result|FAILED|panicked'; echo \"leftovers: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') vscode=$(pgrep -fc 'ozone-platform=headles[s]') tmp=$(ls -d /tmp/.tmp* 2>/dev/null | wc -l)\"",
+  "description": "Run the headless VS Code tests; check leftovers",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 43.05s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 242.09s
+(eval):1: no matches found: /tmp/.tmp*
+leftovers: brain=0 vscode=0 tmp=0
+```
+
+</details>
+
