@@ -19244,3 +19244,1811 @@ leftover brain: 0
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src tests README.md PLAN.md && git commit -q -F - <<'EOF'\nStore a saved VS Code file's session as a diff\n\nThe owner wants a saved file's session text to show what was done to\nthe file in that session, like `git diff`, rather than only the new\nlines. When the file was saved after the session's last keystroke, the\ntext is now a unified diff from the content saved when the session\nopened to the file on disk: `--- a/` and `+++ b/` headers, `@@` hunks\nwith 3 lines of context, `-` removed and `+` added lines. Replays of\nunsaved sessions keep storing their changed lines.\n\nThe diff module now computes one Myers line diff with deletions as\nwell as insertions, used by both outputs, and slides ambiguous runs of\nadded or removed lines down as git does, so a function added after a\n`}` shows after it. Checked against `git diff -U3` on 300 random edits\nwith distinct lines: identical. On very repetitive text, git's extra\nheuristics can place an ambiguous line differently (51 of 300 cases).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2; git status --short",
+  "description": "Commit, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+2963383 Refresh AI logs
+aad7495 Store a saved VS Code file's session as a diff
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:07:01.749Z</sub>
+
+When the file was saved after your last keystroke, the session text is now a git-style diff with 3 lines of context. Everything else is unchanged: sessions whose file wasn't saved after the last keystroke still get the best-effort replay, and the worker, the statuses and the `--vscode-replay` flag stay as they were. It's committed and pushed (`aad7495`), and `ai-logs/` is refreshed.
+
+**What the session text looks like**, for a session that changed an include and added `main`:
+```
+--- a/test.cpp
++++ b/test.cpp
+@@ -1,7 +1,11 @@
+ // header
+ 
+-#include <stdio>
++#include <iostream>
+ 
+ int f() {
+     return 1;
+ }
++
++int main() {
++    return f();
++}
+```
+The status is still `done: saved file`. Replays still store just the lines they changed, under `done: replayed (best effort, unverified)`.
+
+**How it works:** I extended the existing diff code (`src/reconstruct/vscode/diff.rs`) instead of adding a second one. It now tracks removed lines as well as added ones, and both the diff and the replay's changed lines come from it. Like git, it places an ambiguous added block after a matching `}` rather than before it.
+
+**Checked against git:**
+- On 300 random edits of distinct lines, the output is identical to `git diff -U3`: headers, hunk boundaries and line numbers all match.
+- On very repetitive text (lines like `}`, blank lines, `return 0;`), 51 of 300 cases differ. Those cases have more than one equally correct diff, and git's extra heuristics sometimes pick a different one. The README says so.
+- Search covers the whole diff, so words on removed and context lines also match that session. The README notes this too.
+
+**Tests:**
+- Two new unit tests cover the format: hunk merging and splitting, an empty side (`@@ -0,0 +1 @@`), and single-line ranges.
+- The saved-file test now expects the exact diff.
+- All 129 unit tests and the default integration tests pass. Both replay tests pass with real VS Code.
+- No test left a `brain run` behind, and clippy and the generated docs are clean.
+
+To try it, install the new binary first, since last time `/usr/bin/brain` was the old build:
+```sh
+make install
+brain run --vscode-replay --data-dir /tmp/brain-manual3
+# edit and save ~/Desktop/test.cpp, then stop typing for 30+ s
+sqlite3 -readonly /tmp/brain-manual3/brain.db "SELECT id, tier2_status, reconstructed_text FROM sessions WHERE app LIKE '%VSCode%'"
+```
+
+## User  <sub>2026-11-17T15:17:25.680Z</sub>
+
+it works good, but it doesn't create a session if the text written is minimal. if i simply change focus and then press ctrl+d inside the file in the vscode in order to duplicate the line, the pressing ctrl+s, it wont create a session for it.
+I want these actions to be included too, every change to a file in vscode and only for the diff feature should have a session.
+
+## User  <sub>2026-11-17T15:17:39.359Z</sub>
+
+it works good, but it doesn't create a session if the text written is minimal. if i simply change focus and then press ctrl+d inside the file in the vscode in order to duplicate the line, the pressing ctrl+s, it wont create a session for it.
+I want these actions to be included too, every change to a file in vscode and only for the diff feature should have a session.
+explain how will you fix that
+
+## Assistant  <sub>2026-11-17T15:17:42.270Z</sub>
+
+Before proposing a fix, I'll check what opens a session today.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn on_key\\|fn handle_key\\|opens a session\\|open a session\\|fn open\\b\\|fn open(\\|is_edit\\|produces_text\\|fn starts_session\\|Tier2Start::' src/sessions.rs | head -40",
+  "description": "Find where sessions are opened"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+79:/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
+412:            if !matches!(outcome, Tier2Start::NotYet(_)) {
+465:            if matches!(outcome, Tier2Start::NotYet(_)) {
+519:                Tier2Start::NotYet(why) => Tier2Start::Skipped(why),
+625:        Tier2Start::NotApplicable => return Ok(false),
+626:        Tier2Start::Snapshot { file } => (
+631:        Tier2Start::NotYet(_) => ("resolving".to_string(), None, false),
+632:        Tier2Start::Skipped(why) => (format!("skipped: {why}"), None, false),
+1023:                super::Tier2Start::NotYet("not identified yet".into())
+1049:        let snapshot = super::Tier2Start::Snapshot {
+1096:                super::Tier2Start::Skipped("saved meanwhile".into()),
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'EventKind::Key' src/sessions.rs | head; grep -n 'pub fn on_event\\|fn apply_key\\|fn key(' src/sessions.rs",
+  "description": "Find key handling in sessions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+221:            EventKind::Key {
+333:            EventKind::Key {
+762:                EventKind::Key {
+328:    pub fn on_event(&mut self, tx: &Connection, offset: u64, next: u64, ev: &Event) -> Result<()> {
+758:        fn key(&mut self, ts: Millis, app: &str, win: &str, key: &str, mods: &[Mod]) {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 328,470p src/sessions.rs",
+  "description": "Read on_event"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    pub fn on_event(&mut self, tx: &Connection, offset: u64, next: u64, ev: &Event) -> Result<()> {
+        // Event-time idle rule: any session idle for the timeout before this
+        // event closed before it.
+        self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+        match &ev.kind {
+            EventKind::Key {
+                key, mods, window, ..
+            } => {
+                let k = self.resolve(&ev.app, window);
+                let class = classify(&ev.app);
+                let act = self.note_key(class, &k, key, mods, ev.ts);
+                if act == Action::Ignore {
+                    self.last_key = None;
+                    return Ok(());
+                }
+                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
+                let s = self.open.get_mut(&k).expect("just opened");
+                let mut hist = |n: usize| history_entry(tx, &ev.app, offset, n);
+                let outcome = s.editor.apply(&act, &mut hist);
+                s.touch(ev.ts, next);
+                self.last_key = Some((k.clone(), ev.ts));
+                let reason = match outcome {
+                    Outcome::Continue => return Ok(()),
+                    Outcome::Commit => "commit",
+                    Outcome::Cancel => "cancel",
+                    Outcome::FieldChange => "field",
+                };
+                self.close(tx, &k, reason, true)?;
+            }
+            EventKind::Paste { text, window } => {
+                let k = self.resolve(&ev.app, window);
+                if self.paste_suppressed(&k, ev.ts) {
+                    return Ok(());
+                }
+                // Unknown clipboard content (Klipper unavailable): nothing to insert.
+                let Some(text) = text else { return Ok(()) };
+                self.ensure_open(tx, &k, classify(&ev.app), window, ev.ts, offset)?;
+                let s = self.open.get_mut(&k).expect("just opened");
+                s.editor.paste(text);
+                s.touch(ev.ts, next);
+                self.last_key = Some((k, ev.ts));
+            }
+            EventKind::Focus { window, renamed } => {
+                let open: Vec<Key> = self.open.keys().cloned().collect();
+                self.note_focus(&ev.app, window, *renamed, ev.ts, &|k| open.contains(k));
+            }
+            EventKind::System { state } => match state {
+                SystemState::Start => {
+                    // A start without a preceding stop means a crash; either
+                    // way, input while not running is unknown.
+                    self.close_where(tx, "restart", |_| true)?;
+                    tx.execute("UPDATE context_state SET cursor_unknown = 1", [])?;
+                    tx.execute(
+                        "DELETE FROM context_state WHERE updated_at < ?1",
+                        [timefmt::format_ms(ev.ts - CONTEXT_TTL_MS)],
+                    )?;
+                    self.wrote = true;
+                }
+                SystemState:
+… [2955 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn note_key' -A40 src/sessions.rs | head -50; grep -n 'DELETE FROM sessions\\|empty session\\|start_hash' src/sessions.rs | head",
+  "description": "Read note_key and empty-session handling"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'Action::Ignore' src/reconstruct/*.rs | head -20; grep -n 'pub fn action\\|pub fn key_action\\|fn shortcut' src/reconstruct/editor.rs src/reconstruct/apps.rs",
+  "description": "Find where shortcuts map to Ignore"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/reconstruct/editor.rs:62:        return Action::Ignore; // desktop shortcuts
+src/reconstruct/editor.rs:77:            _ => Action::Ignore,
+src/reconstruct/editor.rs:85:        "Backspace" if alt && !term => Action::Ignore,
+src/reconstruct/editor.rs:87:        "Delete" if term && alt => Action::Ignore,
+src/reconstruct/editor.rs:89:        "Tab" if ctrl || alt => Action::Ignore,
+src/reconstruct/editor.rs:94:            _ => Action::Ignore,
+src/reconstruct/editor.rs:96:        "Left" | "Right" if alt => Action::Ignore, // browser back/forward, editor navigation
+src/reconstruct/editor.rs:103:        "Up" | "Down" if alt || ctrl => Action::Ignore, // move line / scroll
+src/reconstruct/editor.rs:118:        "PageUp" | "PageDown" if term || ctrl || alt => Action::Ignore,
+src/reconstruct/editor.rs:123:        _ => Action::Ignore,
+src/reconstruct/editor.rs:171:            _ => Action::Ignore,
+src/reconstruct/editor.rs:175:        return Action::Ignore; // menu accelerators
+src/reconstruct/editor.rs:190:        _ => Action::Ignore,
+src/reconstruct/editor.rs:273:            Action::Ignore => {}
+src/reconstruct/editor.rs:394:            assert_eq!(action(AppClass::Generic, k, m), Action::Ignore, "{k} {m:?}");
+src/reconstruct/editor.rs:396:        assert_eq!(action(AppClass::Terminal, "Tab", NONE), Action::Ignore);
+src/reconstruct/editor.rs:57:pub fn action(class: AppClass, key: &str, mods: &[Mod]) -> Action {
+src/reconstruct/editor.rs:384:    fn shortcuts_are_ignored() {
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+305:    fn note_key(
+306-        &mut self,
+307-        class: AppClass,
+308-        k: &Key,
+309-        key: &str,
+310-        mods: &[crate::event::Mod],
+311-        ts: Millis,
+312-    ) -> Action {
+313-        self.suppress_paste =
+314-            key_suppresses_paste(class, key, mods).then(|| (k.0.clone(), k.1.clone(), ts));
+315-        action(class, key, mods)
+316-    }
+317-
+318-    fn paste_suppressed(&mut self, k: &Key, ts: Millis) -> bool {
+319-        let hit = self
+320-            .suppress_paste
+321-            .as_ref()
+322-            .is_some_and(|(a, w, t)| *a == k.0 && *w == k.1 && *t == ts);
+323-        self.suppress_paste = None;
+324-        hit
+325-    }
+326-
+327-    /// Processes one log event inside the ingest transaction.
+328-    pub fn on_event(&mut self, tx: &Connection, offset: u64, next: u64, ev: &Event) -> Result<()> {
+329-        // Event-time idle rule: any session idle for the timeout before this
+330-        // event closed before it.
+331-        self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+332-        match &ev.kind {
+333-            EventKind::Key {
+334-                key, mods, window, ..
+335-            } => {
+336-                let k = self.resolve(&ev.app, window);
+337-                let class = classify(&ev.app);
+338-                let act = self.note_key(class, &k, key, mods, ev.ts);
+339-                if act == Action::Ignore {
+340-                    self.last_key = None;
+341-                    return Ok(());
+342-                }
+343-                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
+344-                let s = self.open.get_mut(&k).expect("just opened");
+345-                let mut hist = |n: usize| history_entry(tx, &ev.app, offset, n);
+101:    start_hash: u64,
+176:            let start_hash = text_hash(&buf.text());
+188:                    start_hash,
+446:        let start_hash = text_hash(&buf.text());
+480:                start_hash,
+529:        let changed = text_hash(&text) != s.start_hash;
+553:            tx.prepare_cached("DELETE FROM sessions WHERE id = ?1")?
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 150,192p src/reconstruct/editor.rs; sed -n 520,575p src/sessions.rs",
+  "description": "Read Ctrl shortcut mapping and session close discard"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+            },
+            (false, true, _, 'b') => Action::Move {
+                motion: Motion::WordLeft,
+                extend: false,
+            },
+            (false, true, _, 'f') => Action::Move {
+                motion: Motion::WordRight,
+                extend: false,
+            },
+            (true, false, false, 'h') => Action::Backspace { word: false },
+            (true, false, false, 'd') => Action::Delete { word: false },
+            (false, true, _, 'd') => Action::Delete { word: true },
+            (true, false, false, 'u') => Action::KillLineStart,
+            (true, false, false, 'k') => Action::KillLineEnd,
+            (true, false, false, 'w') => Action::KillWordBack,
+            (true, false, false, 'p') => Action::HistoryPrev,
+            (true, false, false, 'n') => Action::HistoryNext,
+            (true, false, false, 'c') => Action::Cancel,
+            (true, false, false, '_') | (true, false, true, '_') => Action::Undo,
+            // Ctrl+Shift+V pastes (the paste event carries the text); plain
+            // Ctrl+V is readline's quoted-insert, Ctrl+L clears the screen.
+            _ => Action::Ignore,
+        };
+    }
+    if alt {
+        return Action::Ignore; // menu accelerators
+    }
+    match (shift, k) {
+        (false, 'a') => Action::SelectAll,
+        (false, 'x') => Action::Cut,
+        (false, 'z') => Action::Undo,
+        (true, 'z') | (false, 'y') => Action::Redo,
+        // Moves focus into another field: the address bar (Ctrl+L), the
+        // search box (Ctrl+K/Ctrl+E), find (Ctrl+F), a new tab or window, or
+        // closes the tab (Ctrl+W).
+        (false, 'l' | 'k' | 'e' | 'f' | 't' | 'n' | 'w') if class == AppClass::Browser => {
+            Action::FieldChange
+        }
+        (false, 'k') if class == AppClass::Chat => Action::FieldChange,
+        // Ctrl+V/Ctrl+Shift+V: the paste event that follows carries the text.
+        _ => Action::Ignore,
+    }
+}
+                other => other,
+            };
+            s.tier2_snapshot = record_tier2(tx, s.id, outcome)?;
+        }
+        self.aliases.retain(|_, v| v != k);
+        if self.last_key.as_ref().is_some_and(|(lk, _)| lk == k) {
+            self.last_key = None;
+        }
+        let text = s.editor.buf.text();
+        let changed = text_hash(&text) != s.start_hash;
+        let keep = (changed || reason == "commit") && !text.trim().is_empty();
+        if keep {
+            tx.prepare_cached(
+                "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
+                    end_offset = ?3, end_reason = ?4,
+                    tier2_status = CASE tier2_status
+                        WHEN 'snapshot' THEN 'pending'
+                        -- still identifying when brain stopped or crashed
+                        WHEN 'resolving' THEN 'skipped: could not identify the file from the window title'
+                        ELSE tier2_status END
+                 WHERE id = ?5",
+            )?
+            .execute(pa
+… [1294 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'INGEST\\|Duration::from_millis\\|recv_timeout' src/capture/mod.rs | head; grep -n 'fn snapshot' -A45 src/reconstruct/tier2.rs | grep -n 'mtime\\|modified\\|started\\|dirty\\|untitled' ; grep -n 'tier2\\|vscode' tests/crash_safety.rs | head -3",
+  "description": "Check ingest cadence and snapshot timing rules"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+36:pub const INGEST_INTERVAL: Duration = Duration::from_secs(1);
+251:/// Tails the log into SQLite every [`INGEST_INTERVAL`] and fdatasyncs the log.
+292:                    std::thread::park_timeout(INGEST_INTERVAL);
+48:97:    fn snapshot(&self, app: &str, raw_title: &str, started_at: Millis, id: i64) -> Tier2Start {
+53:102-        if vscode::title_is_untitled(raw_title) {
+56:105-        if vscode::title_is_dirty(raw_title) {
+57:106-            return skip("the file had unsaved changes when the session started");
+65:114-            return if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
+78:127-        let modified_ms = meta
+79:128-            .modified()
+83:132-        if modified_ms.is_some_and(|m| m > started_at) {
+85:134-                "the file changed on disk after the session started \
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:18:58.414Z</sub>
+
+I've found the cause. Nothing is changed yet; here is the explanation and the proposed fix.
+
+## Why Ctrl+D + Ctrl+S makes no session
+There are two causes:
+
+1. **The keys never open a session.** Sessions open only for keys the tier 0/1 adapters understand as editing. Ctrl+D and Ctrl+S mean nothing to them (`src/reconstruct/editor.rs:190`), so they're ignored and nothing opens. Alt+Up (move line), Ctrl+/ (comment) and Ctrl+Shift+K (delete line) fall in the same gap.
+2. **Even an opened session would be thrown away.** When a session closes, it's deleted if its tier 0/1 text didn't change (`src/sessions.rs:529`). The tier 0/1 adapters don't know Ctrl+D duplicates a line, so the text looks unchanged and the session is removed before the diff code ever sees it.
+
+There's also a timing gap that could hit you even after these fixes. The file's starting content is copied when the session opens in the database, which can be up to 1 s after the first key. If you press Ctrl+D and Ctrl+S within that second, the file is already saved when it's copied, and the session is skipped as `changed on disk after the session started`.
+
+## Proposed fix
+All of this only applies with `--vscode-replay` and only in VS Code windows. Other apps and the tier 0/1 text are unchanged.
+
+1. **Every VS Code key counts toward the session.** Ctrl+D, Ctrl+S, Alt+Up and the rest open or extend the session for that file and reset its 30 s idle timer, even though tier 0/1 doesn't apply them. The exceptions are desktop shortcuts like Alt+Tab, which go to KDE, not VS Code.
+2. **Keep such sessions until the diff decides.** A VS Code session with a starting copy of its file isn't deleted at close just because its tier 0/1 text is unchanged. It closes as `pending` like the others.
+3. **Sessions whose typed text didn't change get only the diff, never a replay:**
+   - If the file was saved after the last key and the diff isn't empty: `done: saved file`, with the diff (your Ctrl+D case).
+   - Otherwise the session is deleted, because nothing changed in the file. That covers no save, Ctrl+S with no edits, and navigation only (Ctrl+P, arrows).
+
+   Sessions with typed text keep today's behaviour: diff if saved, best-effort replay if not. One side effect is that a shortcut-only session shows as `pending` for a moment before its diff or its deletion. There's no VS Code start in this path, so that's a few milliseconds after it closes.
+4. **Close the timing gap.** When a VS Code window gains focus, the recorder wakes the ingest thread right away instead of letting it wait up to 1 s. Ingest then copies that window's file at once. When a session opens for that window, it uses the copy if the file hasn't changed since. Focus changes are rare, so this costs no CPU while typing. The input thread is untouched.
+
+## Tests and docs
+- **Unit test:** a VS Code session made only of Ctrl+D then Ctrl+S, with the file saved after, gives `done: saved file` with the diff.
+- **Unit test:** a session with only Ctrl+S, or only navigation keys, leaves no session behind.
+- **Unit test:** focus, then Ctrl+D + Ctrl+S within a second still uses the copy taken at focus.
+- **Docs:** I'll update the README tier-2 section, PLAN.md and CLAUDE.md to match.
+
+Should I go ahead with all four, including the timing fix in step 4?
+
+## User  <sub>2026-11-17T15:22:19.315Z</sub>
+
+will this change only the code related to vscode-replay?
+
+## Assistant  <sub>2026-11-17T15:22:31.141Z</sub>
+
+Almost. Every new behaviour only happens when `--vscode-replay` is on and the key or focus is in a VS Code window. But some of the checks have to sit in shared code, because that's where the decisions happen today:
+
+| Step | File | Shared code? | Behaviour without the flag |
+|---|---|---|---|
+| 1. VS Code keys count | `src/sessions.rs` (key handling) | yes: the branch where ignored keys return early | unchanged: the new branch runs only if tier 2 is on and the app is VS Code |
+| 2. Keep sessions until the diff | `src/sessions.rs` (session close) | yes: the "delete if unchanged" rule | unchanged: it only applies to sessions that have a starting copy of their file, which only exist with the flag |
+| 3. Diff only, or delete | `src/reconstruct/tier2.rs`, `src/ingest.rs` (applying tier-2 results) | `tier2.rs` no; `ingest.rs` yes, but only its tier-2 result handling | unchanged: there are no tier-2 results without the flag |
+| 4. Wake on VS Code focus | `src/capture/recorder.rs` (focus events), `src/sessions.rs` | yes: capture code | unchanged: the recorder only gets a wake handle when the flag is on |
+
+So no Kate, browser, terminal or tier 0/1 behaviour changes. The tier 0/1 adapters (`editor.rs`, `apps.rs`) aren't edited at all. Step 4 is the only one that reaches into capture. It adds one check on focus events, which are rare, and nothing on the key path.
+
+To show nothing else changed, the existing tests (crash safety, query, perf budget, all sessions unit tests) must pass unchanged. They all run without the flag. The new tests cover the flag-on behaviour.
+
+If you'd rather keep capture untouched, I can drop step 4. The cost: pressing Ctrl+D and Ctrl+S within about a second of focusing the window would still be skipped. Do you want all four steps, or steps 1 to 3 only?
+
+## User  <sub>2026-11-17T15:23:19.578Z</sub>
+
+continue with all four
+
+## Assistant  <sub>2026-11-17T15:23:22.815Z</sub>
+
+I'll read the parts of the code the four steps touch.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 60,130p src/sessions.rs; sed -n 470,520p src/sessions.rs; sed -n 600,660p src/sessions.rs",
+  "description": "Read sessions.rs structures and tier2 recording"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,200p src/reconstruct/tier2.rs",
+  "description": "Read tier2.rs top half"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 225,380p src/reconstruct/tier2.rs",
+  "description": "Read tier2 worker and run_job"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Tier 2 plumbing: snapshots, the background worker, and the results path.
+//!
+//! When a VS Code session opens, [`VsCodeSnapshots`] copies the edited file
+//! (identified from the window title) into the data directory: its initial
+//! content. When the session closes as tier 0/1 text, it is marked
+//! `pending`, and [`Tier2Worker`] works out its real text, one job at a time:
+//!
+//! 1. If the file on disk was written after the session's last keystroke
+//!    (autosave, or Ctrl+S at the end), it holds exactly what VS Code made of
+//!    the session: the text is a git-style unified diff from the initial
+//!    content to the saved file, with 3 lines of context (status
+//!    `done: saved file`). VS Code is not started.
+//! 2. Otherwise the session's own keystrokes are replayed from the log into a
+//!    sandboxed VS Code ([`super::vscode`]), as a best effort that nothing
+//!    verifies (status `done: replayed (best effort, unverified)`).
+//!
+//! The text goes back to the ingest thread, which writes it over the tier
+//! 0/1 text. A failure or timeout leaves the tier 0/1 text in place and
+//! records why. Pending jobs survive restarts (they are rows in the
+//! database) and are retried.
+
+use super::apps::normalize_window;
+use super::vscode::{self, ReplayEvent, ReplayInput, VsCodeReplayer};
+use crate::event::EventKind;
+use crate::eventlog::LogReader;
+use crate::sessions::{Tier2Snapshotter, Tier2Start};
+use crate::store;
+use crate::timefmt::{Millis, now_ms};
+use anyhow::{Context, Result, bail};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+/// How long after a session starts its file is still looked for. VS Code
+/// records a newly opened file in its window state with a delay, so the
+/// lookup is retried on each ingest step until then. A late snapshot is safe
+/// because the file must not have changed on disk since the session started
+/// (checked below); the bound also skips sessions while ingest catches up on
+/// an old log.
+const MAX_SNAPSHOT_DELAY_MS: Millis = 120_000;
+/// Files larger than this are not replayed.
+const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+/// Shut the warm instance down after this long without jobs.
+const IDLE_SHUTDOWN: Duration = Duration::from_secs(600);
+
+fn snapshot_path(dir: &Path, id: i64) -> PathBuf {
+    dir.join(format!("snapshot-{id}"))
+}
+
+/// Takes VS Code file snapshots into `dir` (`<data-dir>/vscode/snapshots`).
+pub struct VsCodeSnapshots {
+    dir: PathBuf,
+    /// VS Code's config directory to read window state from; `None` means
+    /// the user's (`~/.config/Code`). Tests give a fake one.
+    vscode_config: Option<PathBuf>,
+}
+
+impl VsCodeSnapshots {
+    pub fn new(dir: PathBuf) -> Result<Self> {
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        Ok(Self {
+            dir,
+            vscode_config: None,
+        })
+    }
+
+    /// Reads VS Code's window state f
+… [5005 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+pub const RENAME_WINDOW_MS: Millis = 1_000;
+
+type Key = (String, String);
+
+/// How a VS Code session can be replayed in the real editor (tier 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Tier2Start {
+    /// Not a VS Code session, or replay is off.
+    NotApplicable,
+    /// The edited file was copied to the snapshot path for this session.
+    Snapshot { file: PathBuf },
+    /// The file cannot be identified yet (VS Code records newly opened files
+    /// with a delay); ask again later.
+    NotYet(String),
+    /// Replay is impossible; the reason is recorded.
+    Skipped(String),
+}
+
+/// Takes the file snapshot a tier 2 replay starts from, when a session opens
+/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
+pub trait Tier2Snapshotter: Send {
+    fn snapshot(
+        &self,
+        app: &str,
+        raw_title: &str,
+        started_at: Millis,
+        session_id: i64,
+    ) -> Tier2Start;
+    /// Removes the snapshot of a session that will never be replayed.
+    fn discard(&self, session_id: i64);
+}
+
+struct OpenSession {
+    id: i64,
+    editor: FieldEditor,
+    last_activity: Millis,
+    end_offset: u64,
+    tier2_snapshot: bool,
+    dirty: bool,
+    /// Hash of the document when the session opened: a session that ends
+    /// with the same text changed nothing.
+    start_hash: u64,
+    /// The window's latest title, when typing renamed it (see `aliases`).
+    latest: Option<Key>,
+    /// While the tier 2 file is not identified yet: the window title the
+    /// session started with, and when it started, to ask again.
+    tier2_retry: Option<(String, Millis)>,
+}
+
+fn text_hash(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+pub struct Sessions {
+    open: HashMap<Key, OpenSession>,
+    /// A plain Ctrl+V in a terminal at this (app, window, ts): drop the paste.
+    suppress_paste: Option<(String, String, Millis)>,
+    /// Titles a window took on while typing in it, mapped to the key of the
+    /// open session they belong to.
+    aliases: HashMap<Key, Key>,
+    /// The session the last applied keystroke went to, and when. Cleared by
+    /// any ignored key (a shortcut such as Ctrl+Tab may switch tabs).
+    last_key: Option<(Key, Millis)>,
+    tier2: Option<Box<dyn Tier2Snapshotter>>,
+    /// Effects to carry out only after the transaction commits.
+    staged_jobs: Vec<i64>,
+    staged_discards: Vec<i64>,
+    /// Whether anything was written in the current transaction.
+        self.wrote = true;
+        self.open.insert(
+            k.clone(),
+            OpenSession {
+                id,
+                editor: FieldEditor::new(class, buf),
+                last_activity: ts,
+                end_offset: offset,
+                tier2_snapshot,
+                dirty: false,
+                start_hash,
+                latest: None,
+                tier2_retry,
+            },
+        );
+        Ok(())
+    }
+
+   
+… [3494 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+    snapshots: &Path,
+    results: &Sender<Tier2Result>,
+) {
+    let mut queue: std::collections::VecDeque<i64> = match pending_jobs(db_path) {
+        Ok(ids) => ids.into(),
+        Err(e) => {
+            eprintln!("brain: warning: tier 2: could not list pending jobs: {e:#}");
+            Default::default()
+        }
+    };
+    loop {
+        let id = match queue.pop_front() {
+            Some(id) => id,
+            None => match rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(id) => id,
+                Err(RecvTimeoutError::Timeout) => {
+                    replayer.reap_idle(IDLE_SHUTDOWN);
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
+        };
+        let outcome =
+            run_job(&mut replayer, db_path, log_path, snapshots, id).map_err(|e| format!("{e:#}"));
+        if let Err(why) = &outcome {
+            eprintln!("brain: tier 2 replay of session {id} failed, keeping tier 0/1 text: {why}");
+        }
+        if results.send((id, outcome)).is_err() {
+            break; // ingest is gone: shutting down
+        }
+    }
+    replayer.shutdown();
+}
+
+fn pending_jobs(db_path: &Path) -> Result<Vec<i64>> {
+    let conn = store::open_reader(db_path)?;
+    let mut st =
+        conn.prepare("SELECT id FROM sessions WHERE tier2_status = 'pending' ORDER BY id")?;
+    let ids = st
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
+}
+
+fn run_job(
+    replayer: &mut VsCodeReplayer,
+    db_path: &Path,
+    log_path: &Path,
+    snapshots: &Path,
+    id: i64,
+) -> Result<Tier2Text> {
+    let conn = store::open_reader(db_path)?;
+    type Row = (
+        String,
+        String,
+        i64,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+    );
+    let (app, window, start, end, file, ended_at): Row = conn
+        .query_row(
+            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at FROM sessions
+             WHERE id = ?1 AND tier2_status = 'pending'",
+            [id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .context("session is no longer pending")?;
+    drop(conn);
+    let (Some(end), Some(file), Some(ended_at)) = (end, file, ended_at) else {
+        bail!("session has no end offset, file or end time");
+    };
+    let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
+    let initial_text = String::from_utf8_lossy(&initial);
+    // 1. The file as VS Code saved it after the last keystroke, if it was.
+    let last_key = crate::timefmt::parse_rfc3339_ms(&ended_at)?;
+    if let Some(saved) = saved_after(Path::new(&file), last_key) {
+        let name = Path::new(&file)
+            .file_name()
+            .
+… [2389 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:24:18.791Z</sub>
+
+I've traced all four steps. Now the capture wiring for step 4:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 240,330p src/capture/mod.rs; grep -n 'Focus\\|fn new\\|pub struct Recorder\\|unpark\\|Thread' src/capture/recorder.rs | head -30; grep -n 'Recorder::new\\|vscode_replay\\|tier2' src/capture/mod.rs | head -30",
+  "description": "Read ingest thread and recorder focus handling"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+            .name("synthetic".into())
+            .spawn(move || synthetic::run(keys, recorder, rate, stop))?
+    };
+    eprintln!("brain: synthetic input at {rate} keys/s");
+    Ok(Source::Synthetic {
+        recorder,
+        stop,
+        thread,
+    })
+}
+
+/// Tails the log into SQLite every [`INGEST_INTERVAL`] and fdatasyncs the log.
+struct IngestThread {
+    stop: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
+
+impl IngestThread {
+    fn spawn(
+        mut ingester: Ingester,
+        recorder: Arc<Recorder>,
+        tier2: Option<(Tier2Worker, std::sync::mpsc::Receiver<Tier2Result>)>,
+    ) -> Result<Self> {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = stop.clone();
+        let thread = std::thread::Builder::new()
+            .name("ingest".into())
+            .spawn(move || {
+                loop {
+                    // Read the flag first: the final pass after `stop()` must
+                    // still sync and ingest everything written before it.
+                    let stopping = flag.load(Ordering::Acquire);
+                    if let Err(e) = recorder.sync() {
+                        eprintln!("brain: warning: {e:#}");
+                    }
+                    if let Some((_, results)) = &tier2 {
+                        while let Ok((id, r)) = results.try_recv() {
+                            ingester.add_tier2_result(id, r);
+                        }
+                    }
+                    if let Err(e) = ingester.catch_up(1_000) {
+                        eprintln!("brain: warning: ingest failed (will retry): {e:#}");
+                    }
+                    let jobs = ingester.take_tier2_jobs();
+                    if let Some((worker, _)) = &tier2 {
+                        for id in jobs {
+                            worker.submit(id);
+                        }
+                    }
+                    if stopping {
+                        break;
+                    }
+                    std::thread::park_timeout(INGEST_INTERVAL);
+                }
+                // In-flight and queued replays stay pending in the database
+                // and are retried on the next start.
+                if let Some((worker, _)) = tier2 {
+                    worker.stop();
+                }
+            })?;
+        Ok(Self { stop, thread })
+    }
+
+    /// Runs a final sync + ingest pass and waits for it.
+    fn stop(self) {
+        self.stop.store(true, Ordering::Release);
+        self.thread.thread().unpark();
+        if self.thread.join().is_err() {
+            eprintln!("brain: warning: ingest thread panicked");
+        }
+    }
+}
+
+fn block_termination_signals() -> Result<libc::sigset_t> {
+    // SAFETY: sigset manipulation on a local, then pthread_sigmask on this thread.
+    unsafe {
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            libc::sigaddset(&mut set, s);
+        }
+        let rc = libc:
+… [1881 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 40,160p src/capture/recorder.rs; sed -n 50,100p src/capture/mod.rs",
+  "description": "Read Recorder focus code and run setup"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+            app: UNKNOWN_APP.to_string(),
+            window: String::new(),
+        }
+    }
+}
+
+struct Inner {
+    log: LogWriter,
+    focus: Focus,
+    paused: bool,
+}
+
+pub struct Recorder {
+    inner: Mutex<Inner>,
+    clipboard: Box<dyn ClipboardSource>,
+    write_errors: AtomicU64,
+}
+
+impl Recorder {
+    pub fn new(log: LogWriter, clipboard: Box<dyn ClipboardSource>) -> Self {
+        Self {
+            inner: Mutex::new(Inner {
+                log,
+                focus: Focus::default(),
+                paused: false,
+            }),
+            clipboard,
+            write_errors: AtomicU64::new(0),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+        // A panic while holding the lock cannot leave the log half-written
+        // (appends are single writes), so recovering from poisoning is safe.
+        self.inner.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn append(&self, inner: &mut Inner, event: Event) {
+        if let Err(e) = inner.log.append(&event) {
+            // Never take capture down over a write error (for example, the disk
+            // is full). Report the first one, then every 1000th.
+            let n = self.write_errors.fetch_add(1, Ordering::Relaxed);
+            if n.is_multiple_of(1000) {
+                eprintln!(
+                    "brain: failed to write capture log ({} errors so far): {e:#}",
+                    n + 1
+                );
+            }
+        }
+    }
+
+    pub fn focus(&self) -> Focus {
+        self.lock().focus.clone()
+    }
+
+    /// Records a focus change. A no-op if neither app nor window changed.
+    /// A window was activated (`renamed: false`) or the active window's title
+    /// changed (`renamed: true`).
+    pub fn set_focus(&self, app: &str, window: &str, renamed: bool) {
+        let mut g = self.lock();
+        if g.focus.app == app && g.focus.window == window {
+            return;
+        }
+        g.focus = Focus {
+            app: app.to_string(),
+            window: window.to_string(),
+        };
+        if g.paused {
+            return; // recorded on unlock, when it matters
+        }
+        let ev = Event {
+            ts: now_ms(),
+            app: app.to_string(),
+            kind: EventKind::Focus {
+                window: window.to_string(),
+                renamed,
+            },
+        };
+        self.append(&mut g, ev);
+    }
+
+    /// Pauses or resumes recording of input (screen lock). Lifecycle markers
+    /// are still written.
+    pub fn set_paused(&self, paused: bool) {
+        let mut g = self.lock();
+        if g.paused == paused {
+            return;
+        }
+        g.paused = paused;
+        let app = g.focus.app.clone();
+        let state = if paused {
+            SystemState::Lock
+        } else {
+            SystemState::Unlock
+        };
+        self.append(
+            &mut g,
+            Event {
+                ts: now_ms(),
+                app: app.clone(),
+                kind: EventKind::System { state },
+            
+… [2248 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:24:51.528Z</sub>
+
+I have what I need. One check on which keys count as desktop shortcuts:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 50,70p src/reconstruct/editor.rs; grep -n 'fn apply_tier2_result' -A30 src/ingest.rs; grep -n 'Meta\\|Super' src/event.rs | head -5",
+  "description": "Read desktop-shortcut rule and tier 2 result handling"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+}
+
+fn has(mods: &[Mod], m: Mod) -> bool {
+    mods.contains(&m)
+}
+
+/// Maps a logged key (already layout-resolved by capture) to an action.
+pub fn action(class: AppClass, key: &str, mods: &[Mod]) -> Action {
+    let ctrl = has(mods, Mod::Ctrl);
+    let alt = has(mods, Mod::Alt);
+    let shift = has(mods, Mod::Shift);
+    if has(mods, Mod::Super) {
+        return Action::Ignore; // desktop shortcuts
+    }
+    let mut chars = key.chars();
+    if let (Some(c), None) = (chars.next(), chars.clone().next()) {
+        return char_action(class, c, ctrl, alt, shift);
+    }
+    let term = class == AppClass::Terminal;
+    let mv = |motion| Action::Move {
+        motion,
+218:fn apply_tier2_result(
+219-    tx: &Connection,
+220-    id: i64,
+221-    result: &std::result::Result<Tier2Text, String>,
+222-) -> Result<()> {
+223-    match result {
+224-        Ok(done) => tx.execute(
+225-            "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2
+226-             WHERE id = ?3 AND tier2_status = 'pending'",
+227-            rusqlite::params![done.text, done.status, id],
+228-        )?,
+229-        Err(why) => tx.execute(
+230-            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status = 'pending'",
+231-            rusqlite::params![format!("failed: {why}"), id],
+232-        )?,
+233-    };
+234-    Ok(())
+235-}
+236-
+237-/// A new checkpoint is due when none exists yet for this app, or the last one is
+238-/// at least [`CHECKPOINT_INTERVAL_MS`] away in log time. The distance is absolute
+239-/// so that a backwards clock jump (NTP, manual change) cannot suppress
+240-/// checkpoints until the clock catches up again.
+241-fn checkpoint_due(last: Option<Millis>, ts: Millis) -> bool {
+242-    match last {
+243-        None => true,
+244-        Some(prev) => (ts - prev).abs() >= CHECKPOINT_INTERVAL_MS,
+245-    }
+246-}
+247-
+248-#[cfg(test)]
+66:    Super,
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'tier2_results\\|discard_snapshot\\|fn add_tier2_result\\|apply_tier2_result' src/ingest.rs; grep -n 'fn add_tier2_result' -A12 src/ingest.rs; grep -n 'tier2_results' -B3 -A12 src/ingest.rs | sed -n 1,200p | grep -n 'for\\|discard' ",
+  "description": "See how tier 2 results are applied in ingest"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+38:    tier2_results: Vec<Tier2Result>,
+86:            tier2_results: Vec::new(),
+96:    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<Tier2Text, String>) {
+97:        self.tier2_results.push((id, result));
+163:        let results = std::mem::take(&mut self.tier2_results);
+165:            apply_tier2_result(&tx, *id, result)?;
+176:            self.tier2_results = results; // retry them next time
+187:            sessions.discard_snapshot(id);
+190:            sessions.discard_snapshot(id);
+218:fn apply_tier2_result(
+96:    pub fn add_tier2_result(&mut self, id: i64, result: std::result::Result<Tier2Text, String>) {
+97-        self.tier2_results.push((id, result));
+98-    }
+99-
+100-    /// Tier 2 jobs committed since the last call.
+101-    pub fn take_tier2_jobs(&mut self) -> Vec<i64> {
+102-        std::mem::take(&mut self.tier2_jobs)
+103-    }
+104-
+105-    /// Ingests at most [`MAX_LINES_PER_STEP`] new complete lines, using the
+106-    /// wall clock for idle timeouts. Returns `lines == 0` when caught up.
+107-    pub fn step(&mut self) -> Result<StepStats> {
+108-        self.step_at(timefmt::now_ms)
+41:106-    /// wall clock for idle timeouts. Returns `lines == 0` when caught up.
+50:164-        for (id, result) in &results {
+70:184-        let (jobs, discards) = sessions.take_committed_effects();
+72:186-        for id in discards {
+73:187-            sessions.discard_snapshot(id);
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:25:06.404Z</sub>
+
+Everything is mapped. Implementing steps 2 and 3 (keep the session, decide by diff) together with the result type:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\n\n# ---------- sessions.rs ----------\nedit('src/sessions.rs',[\n(\"\"\"/// Takes the file snapshot a tier 2 replay starts from, when a session opens\n/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).\npub trait Tier2Snapshotter: Send {\"\"\",\"\"\"/// `tier2_status` of a closed VS Code session that only shortcuts touched\n/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the\n/// saved file's diff, or is removed; it is never replayed.\npub const TIER2_PENDING_SAVED_ONLY: &str = \"pending: saved file only\";\n\n/// Takes the file snapshot a tier 2 replay starts from, when a session opens\n/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).\npub trait Tier2Snapshotter: Send {\n    /// Whether keys in this app that tier 0/1 ignores (Ctrl+D, Ctrl+S, ...)\n    /// still open or extend a session: they may change the file.\n    fn counts_every_key(&self, _app: &str) -> bool {\n        false\n    }\n    /// A window of `app` was focused or retitled at `ts`: a chance to copy\n    /// its file before any key, in case it is saved before the session's\n    /// own snapshot is taken.\n    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}\"\"\"),\n(\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    return Ok(());\n                }\"\"\",\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    // Tier 2 only: a shortcut such as Ctrl+D may still change\n                    // the file, so it belongs to the session (the text stays).\n                    let counts = !mods.contains(&crate::event::Mod::Super)\n                        && self.tier2.as_ref().is_some_and(|t| t.counts_every_key(&ev.app));\n                    if counts {\n                        self.ensure_open(tx, &k, class, window, ev.ts, offset)?;\n                        let s = self.open.get_mut(&k).expect(\"just opened\");\n                        s.last_activity = s.last_activity.max(ev.ts);\n                        s.end_offset = next;\n                    }\n                    return Ok(());\n                }\"\"\"),\n(\"\"\"            EventKind::Focus { window, renamed } => {\n                let open: Vec<Key> = self.open.keys().cloned().collect();\"\"\",\"\"\"            EventKind::Focus { window, renamed } => {\n                if let Some(t2) = &self.tier2 {\n                    t2.on_focus(&ev.app, window, ev.ts);\n                }\n                let open: Vec<Key> = self.open.keys().cloned().collect();\"\"\"),\n(\"\"\"    /// Closes a session. A session that left the document as it found it\n    /// (cursor movement, a typo typed and deleted) or holds only whitespace\n    /// leaves no row behind, except a commit of a non-empty line, which is a\n    /// real submission (a shell command run again from history).\"\"\",\"\"\"    /// Closes a session. A session that left the document as it found it\n    /// (cursor movement, a typo typed and deleted) or holds only whitespace\n    /// leaves no row behind, except a commit of a non-empty line, which is a\n    /// real submission (a shell command run again from history), and a\n    /// session with a tier 2 snapshot, which stays until the saved file's\n    /// diff shows whether the file changed (shortcuts like Ctrl+D change it\n    /// without changing the tier 0/1 text).\"\"\"),\n(\"\"\"        let changed = text_hash(&text) != s.start_hash;\n        let keep = (changed || reason == \"commit\") && !text.trim().is_empty();\n        if keep {\n            tx.prepare_
+… [1287 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "<stdin>", line 4, in edit
+AssertionError: ('src/sessions.rs', '                let act = self.note_key(class, &k, key, mods, ev.ts);\n          ', 2)
+540:                 WHERE id = ?5",
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'let act = self.note_key' -B8 -A6 src/sessions.rs | sed -n 1,40p",
+  "description": "See both note_key call sites"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+218-        in_session: &dyn Fn(&Key) -> bool,
+219-    ) -> Result<()> {
+220-        match &ev.kind {
+221-            EventKind::Key {
+222-                key, mods, window, ..
+223-            } => {
+224-                let k = self.resolve(&ev.app, window);
+225-                let class = classify(&ev.app);
+226:                let act = self.note_key(class, &k, key, mods, ev.ts);
+227-                if act == Action::Ignore {
+228-                    self.last_key = None;
+229-                    return Ok(());
+230-                }
+231-                if !in_session(&k) {
+232-                    return Ok(());
+--
+330-        // event closed before it.
+331-        self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+332-        match &ev.kind {
+333-            EventKind::Key {
+334-                key, mods, window, ..
+335-            } => {
+336-                let k = self.resolve(&ev.app, window);
+337-                let class = classify(&ev.app);
+338:                let act = self.note_key(class, &k, key, mods, ev.ts);
+339-                if act == Action::Ignore {
+340-                    self.last_key = None;
+341-                    return Ok(());
+342-                }
+343-                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
+344-                let s = self.open.get_mut(&k).expect("just opened");
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:25:27.460Z</sub>
+
+There's a second key path: crash recovery replays open sessions from the log. It has to treat these keys the same way.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 140,260p src/sessions.rs",
+  "description": "Read crash recovery path"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        log_path: &Path,
+        upto: u64,
+        tier2: Option<Box<dyn Tier2Snapshotter>>,
+    ) -> Result<Self> {
+        let mut s = Self {
+            open: HashMap::new(),
+            suppress_paste: None,
+            aliases: HashMap::new(),
+            last_key: None,
+            tier2,
+            staged_jobs: Vec::new(),
+            staged_discards: Vec::new(),
+            wrote: false,
+        };
+        let mut stmt = conn.prepare(
+            "SELECT id, app, window, started_at, start_offset, tier2_status
+             FROM sessions WHERE status = 'open' ORDER BY start_offset",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        let mut starts: HashMap<Key, u64> = HashMap::new();
+        for (id, app, window, started_at, start_offset, tier2) in rows {
+            let started = timefmt::parse_rfc3339_ms(&started_at)
+                .with_context(|| format!("session {id}: bad started_at"))?;
+            let buf = load_context(conn, &app, &window, started, false)?;
+            let start_hash = text_hash(&buf.text());
+            let key = (app.clone(), window);
+            starts.insert(key.clone(), start_offset as u64);
+            s.open.insert(
+                key,
+                OpenSession {
+                    id,
+                    editor: FieldEditor::new(classify(&app), buf),
+                    last_activity: started,
+                    end_offset: start_offset as u64,
+                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
+                    dirty: false,
+                    start_hash,
+                    latest: None,
+                    tier2_retry: None,
+                },
+            );
+        }
+        let Some(&from) = starts.values().min() else {
+            return Ok(s);
+        };
+        let mut reader = LogReader::open(log_path, from)?;
+        while let Some(line) = reader.next_line()? {
+            if line.offset >= upto {
+                break;
+            }
+            let next = reader.offset();
+            let Some(ev) = line.event else { continue };
+            let in_session = |k: &Key| starts.get(k).is_some_and(|&st| line.offset >= st);
+            s.replay_event(conn, &ev, line.offset, next, &in_session)?;
+        }
+        Ok(s)
+    }
+
+    /// Applies one event to the open session it belongs to, without opening
+    /// or closing sessions (used for recovery).
+    fn replay_event(
+        &mut self,
+        conn: &Connection,
+        ev: &Event,
+        offset: u64,
+        next: u64,
+        in_session: &dyn Fn(&Key) -> bool,
+    ) -> Result<()> {
+        match &ev.kin
+… [1559 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/sessions.rs',[\n(\"\"\"/// Takes the file snapshot a tier 2 replay starts from, when a session opens\n/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).\npub trait Tier2Snapshotter: Send {\"\"\",\"\"\"/// `tier2_status` of a closed VS Code session that only shortcuts touched\n/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the\n/// saved file's diff, or is removed; it is never replayed.\npub const TIER2_PENDING_SAVED_ONLY: &str = \"pending: saved file only\";\n\n/// Takes the file snapshot a tier 2 replay starts from, when a session opens\n/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).\npub trait Tier2Snapshotter: Send {\n    /// Whether keys in this app that tier 0/1 ignores (Ctrl+D, Ctrl+S, ...)\n    /// still open or extend a session: they may change the file.\n    fn counts_every_key(&self, _app: &str) -> bool {\n        false\n    }\n    /// A window of `app` was focused or retitled at `ts`: a chance to copy\n    /// its file before any key, in case it is saved before the session's\n    /// own snapshot is taken.\n    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}\"\"\"),\n# recovery path\n(\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    return Ok(());\n                }\n                if !in_session(&k) {\n                    return Ok(());\n                }\"\"\",\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    if self.tier2_counts(&ev.app, mods)\n                        && in_session(&k)\n                        && let Some(s) = self.open.get_mut(&k)\n                    {\n                        s.extend(ev.ts, next);\n                    }\n                    return Ok(());\n                }\n                if !in_session(&k) {\n                    return Ok(());\n                }\"\"\"),\n# live path\n(\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    return Ok(());\n                }\n                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;\"\"\",\"\"\"                let act = self.note_key(class, &k, key, mods, ev.ts);\n                if act == Action::Ignore {\n                    self.last_key = None;\n                    // Tier 2 only: a shortcut such as Ctrl+D may still change\n                    // the file, so it belongs to the session (the text stays).\n                    if self.tier2_counts(&ev.app, mods) {\n                        self.ensure_open(tx, &k, class, window, ev.ts, offset)?;\n                        self.open.get_mut(&k).expect(\"just opened\").extend(ev.ts, next);\n                    }\n                    return Ok(());\n                }\n                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;\"\"\"),\n(\"\"\"    fn paste_suppressed(&mut self, k: &Key, ts: Millis) -> bool {\"\"\",\"\"\"    /// Whether a key that tier 0/1 ignores still belongs to a session: in\n    /// VS Code with tier 2 on, except desktop (Super) shortcuts.\n    fn tier2_counts(&self, app: &str, mods: &[crate::event::Mod]) -> bool {\n        !mods.contains(&crate::event::Mod::Super)\n            && self.tier2.as_ref().is_some_and(|t| t.counts_every_key(app))\n    }\n\n    fn paste_suppressed(&mut self, k: &Key, ts: Millis) -> bool {\"\"\"),\n(\"\"\"            EventKind::Focus { window, renamed } => {\n                let open: Vec<Key> = self.open.keys().cloned().co
+… [3311 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+ok
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:25:53.915Z</sub>
+
+Now the worker's decision (step 3) and the focus copy (step 4) in `tier2.rs`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/reconstruct/tier2.rs',[\n(\"\"\"//! The text goes back to the ingest thread, which writes it over the tier\n//! 0/1 text.\"\"\",\"\"\"//! A session that only shortcuts touched (Ctrl+D, Alt+Up, ... leave the tier\n//! 0/1 text as it was; status `pending: saved file only`) gets step 1 only.\n//! When the saved file shows no change, or a shortcut-only session was not\n//! saved, the session changed nothing and is removed.\n//!\n//! The text goes back to the ingest thread, which writes it over the tier\n//! 0/1 text.\"\"\"),\n(\"\"\"use crate::sessions::{Tier2Snapshotter, Tier2Start};\"\"\",\"\"\"use crate::sessions::{TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter, Tier2Start};\"\"\"),\n(\"\"\"/// Shut the warm instance down after this long without jobs.\nconst IDLE_SHUTDOWN: Duration = Duration::from_secs(600);\n\nfn snapshot_path(dir: &Path, id: i64) -> PathBuf {\n    dir.join(format!(\"snapshot-{id}\"))\n}\"\"\",\"\"\"/// Shut the warm instance down after this long without jobs.\nconst IDLE_SHUTDOWN: Duration = Duration::from_secs(600);\n/// A focus event is copied from only while it is this fresh (not while\n/// ingest catches up on an old log, when the file has changed since).\nconst LIVE_FOCUS_MS: Millis = 2_000;\n/// A copy taken on focus can stand in for a session's snapshot only if the\n/// session starts within this long after the focus.\nconst FOCUS_COPY_MS: Millis = 10_000;\n\nfn snapshot_path(dir: &Path, id: i64) -> PathBuf {\n    dir.join(format!(\"snapshot-{id}\"))\n}\n\n/// A file copied when its VS Code window was focused, before any key.\nstruct FocusCopy {\n    /// Where the copy is (`focus-<n>` in the snapshot directory).\n    path: PathBuf,\n    /// The file's modification time when it was copied.\n    modified: Millis,\n    /// When the window was focused.\n    focused_at: Millis,\n}\n\nfn modified_ms(meta: &std::fs::Metadata) -> Option<Millis> {\n    meta.modified()\n        .ok()\n        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())\n        .map(|d| d.as_millis() as Millis)\n}\"\"\"),\n(\"\"\"    /// VS Code's config directory to read window state from; `None` means\n    /// the user's (`~/.config/Code`). Tests give a fake one.\n    vscode_config: Option<PathBuf>,\n}\"\"\",\"\"\"    /// VS Code's config directory to read window state from; `None` means\n    /// the user's (`~/.config/Code`). Tests give a fake one.\n    vscode_config: Option<PathBuf>,\n    /// Files copied on focus, by file, for sessions whose file is saved\n    /// before their own snapshot is taken (Ctrl+D then Ctrl+S right away).\n    focus_copies: std::sync::Mutex<std::collections::HashMap<PathBuf, FocusCopy>>,\n    next_copy: std::sync::atomic::AtomicU64,\n}\"\"\"),\n(\"\"\"        Ok(Self {\n            dir,\n            vscode_config: None,\n        })\n    }\"\"\",\"\"\"        Ok(Self {\n            dir,\n            vscode_config: None,\n            focus_copies: Default::default(),\n            next_copy: Default::default(),\n        })\n    }\n\n    fn resolve(&self, raw_title: &str) -> Option<PathBuf> {\n        match &self.vscode_config {\n            Some(config) => vscode::resolve_file_in(raw_title, Some(config)),\n            None => vscode::resolve_file(raw_title),\n        }\n    }\n\n    fn focus_copies(\n        &self,\n    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<PathBuf, FocusCopy>> {\n        self.focus_copies.lock().unwrap_or_else(|p| p.into_inner())\n    }\n\n    /// Takes the focus copy of `file`, if it still shows the file as it was\n    /// when a session starting at `started_at` began: not modified after\n    /// that, and the focus recent enough that nothing else saved it between.\n    fn take_focus_copy(&self, file: &Path, started_at: Millis) -> Option<PathBuf> {\n 
+… [10719 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+18:use crate::reconstruct::tier2::{Tier2Result, Tier2Text};
+19:use crate::sessions::{Sessions, Tier2Snapshotter};
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:26:36.847Z</sub>
+
+Now the wake-up in capture (step 4):
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/ingest.rs',[\n(\"use crate::reconstruct::tier2::{Tier2Result, Tier2Text};\\nuse crate::sessions::{Sessions, Tier2Snapshotter};\",\n \"use crate::reconstruct::tier2::{Tier2Outcome, Tier2Result};\\nuse crate::sessions::{Sessions, TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter};\")])\nedit('src/capture/recorder.rs',[\n(\"\"\"pub struct Recorder {\n    inner: Mutex<Inner>,\n    clipboard: Box<dyn ClipboardSource>,\n    write_errors: AtomicU64,\n}\"\"\",\"\"\"pub struct Recorder {\n    inner: Mutex<Inner>,\n    clipboard: Box<dyn ClipboardSource>,\n    write_errors: AtomicU64,\n    /// With `--vscode-replay`: the ingest thread, woken right away when a\n    /// window of an app matching the predicate (VS Code) takes focus, so its\n    /// file is copied before the user can edit and save it.\n    wake_on_focus: std::sync::OnceLock<(std::thread::Thread, fn(&str) -> bool)>,\n}\"\"\"),\n(\"\"\"            clipboard,\n            write_errors: AtomicU64::new(0),\n        }\n    }\"\"\",\"\"\"            clipboard,\n            write_errors: AtomicU64::new(0),\n            wake_on_focus: std::sync::OnceLock::new(),\n        }\n    }\n\n    /// Wakes `thread` after recording a focus change to an app for which\n    /// `app_matches` is true.\n    pub fn wake_on_focus(&self, thread: std::thread::Thread, app_matches: fn(&str) -> bool) {\n        let _ = self.wake_on_focus.set((thread, app_matches));\n    }\"\"\"),\n(\"\"\"                renamed,\n            },\n        };\n        self.append(&mut g, ev);\n    }\"\"\",\"\"\"                renamed,\n            },\n        };\n        self.append(&mut g, ev);\n        drop(g);\n        if let Some((thread, app_matches)) = self.wake_on_focus.get()\n            && app_matches(app)\n        {\n            thread.unpark();\n        }\n    }\"\"\"),\n])\nedit('src/capture/mod.rs',[\n(\"\"\"    let ingest = IngestThread::spawn(ingester, recorder.clone(), tier2_worker)?;\n\"\"\",\"\"\"    let ingest = IngestThread::spawn(ingester, recorder.clone(), tier2_worker)?;\n    if opts.vscode_replay {\n        recorder.wake_on_focus(\n            ingest.thread.thread().clone(),\n            crate::reconstruct::vscode::is_vscode,\n        );\n    }\n\"\"\"),\n])\nEOF\ncargo build --release 2>&1 | grep -E '^(warning|error)' -A8 | head -40",
+  "description": "Wake ingest on VS Code focus; build",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:27:06.666Z</sub>
+
+It builds. Clippy and the existing tests, before writing new ones:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -30; cargo test --release --lib 2>&1 | grep -E 'test result|panicked|FAILED' | head",
+  "description": "Lint and run unit tests",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+warning: very complex type used. Consider factoring parts into `type` definitions
+  --> src/capture/recorder.rs:59:20
+   |
+59 |     wake_on_focus: std::sync::OnceLock<(std::thread::Thread, fn(&str) -> bool)>,
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.100.0/index.html#type_complexity
+   = note: `#[warn(clippy::type_complexity)]` on by default
+
+warning: `brain` (lib) generated 1 warning
+warning: `brain` (lib test) generated 1 warning (1 duplicate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.05s
+test result: ok. 129 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+[This command modified 2 files you've previously read: src/reconstruct/tier2.rs, src/sessions.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/capture/recorder.rs'; s=open(p).read()\ns=s.replace(\"\"\"pub struct Recorder {\n    inner: Mutex<Inner>,\"\"\",\"\"\"/// A thread to wake, and which apps' focus changes wake it.\ntype FocusWake = (std::thread::Thread, fn(&str) -> bool);\n\npub struct Recorder {\n    inner: Mutex<Inner>,\"\"\",1)\ns=s.replace(\"wake_on_focus: std::sync::OnceLock<(std::thread::Thread, fn(&str) -> bool)>,\",\"wake_on_focus: std::sync::OnceLock<FocusWake>,\")\nopen(p,'w').write(s)\nEOF\ncargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; grep -n 'struct LateSnapshots' -B2 -A40 src/sessions.rs | head -80",
+  "description": "Fix clippy warning; read existing tier 2 session test fakes"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+1065-    /// A tier 2 snapshotter that cannot identify the file for the first
+1066-    /// `not_yet` calls, then answers `then`.
+1067:    struct LateSnapshots {
+1068-        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+1069-        not_yet: usize,
+1070-        then: super::Tier2Start,
+1071-    }
+1072-    impl super::Tier2Snapshotter for LateSnapshots {
+1073-        fn snapshot(&self, _: &str, _: &str, _: Millis, _: i64) -> super::Tier2Start {
+1074-            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+1075-            if n < self.not_yet {
+1076-                super::Tier2Start::NotYet("not identified yet".into())
+1077-            } else {
+1078-                self.then.clone()
+1079-            }
+1080-        }
+1081-        fn discard(&self, _: i64) {}
+1082-    }
+1083-
+1084-    fn tier2_status(ing: &Ingester) -> Option<String> {
+1085-        ing.connection()
+1086-            .query_row("SELECT tier2_status FROM sessions", [], |r| r.get(0))
+1087-            .unwrap()
+1088-    }
+1089-
+1090-    #[test]
+1091-    fn tier2_file_identified_late_is_retried() {
+1092-        let mut l = Log::new();
+1093-        l.typ(T0, "code", "test.txt - ai-logs - Visual Studio Code", "abc");
+1094-        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+1095-        let late = |not_yet, then| -> Box<dyn super::Tier2Snapshotter> {
+1096-            Box::new(LateSnapshots {
+1097-                calls: calls.clone(),
+1098-                not_yet,
+1099-                then,
+1100-            })
+1101-        };
+1102-        let snapshot = super::Tier2Start::Snapshot {
+1103-            file: "/home/u/Desktop/test.txt".into(),
+1104-        };
+1105-        // Found on the third try (two ingest steps after the session opened).
+1106-        let mut ing = Ingester::with_tier2(
+1107-            store::open_writer(&l.dir.join("a.db")).unwrap(),
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:27:40.594Z</sub>
+
+Clean. Now the tests. They go in `tests/tier2_e2e.rs` alongside the existing saved-file test, using the real snapshotter and worker but no VS Code:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,40p tests/tier2_e2e.rs; grep -n '^fn \\|^#\\[test\\]\\|^#\\[ignore\\]' tests/tier2_e2e.rs",
+  "description": "Read tier2_e2e imports and layout"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! End to end through ingest: a VS Code session in the log is snapshotted
+//! when it opens, marked pending when it closes, replayed by the worker in a
+//! real (sandboxed, headless) VS Code, and its tier 2 text written back.
+//!
+//! The replay tests need /usr/bin/code, so they are ignored by default:
+//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.
+//! The saved-file test needs no VS Code and runs with `cargo test`.
+
+use brain::event::{Event, EventKind, Mod, SystemState};
+use brain::eventlog::LogWriter;
+use brain::ingest::Ingester;
+use brain::reconstruct::tier2::{Tier2Worker, VsCodeSnapshots};
+use brain::store;
+use brain::timefmt::now_ms;
+use rusqlite::Connection;
+use std::time::{Duration, Instant};
+
+#[test]
+#[ignore]
+fn vscode_session_is_upgraded_to_tier_2() {
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join("main.js");
+    std::fs::write(&file, "const a = 1;\n").unwrap();
+    std::thread::sleep(Duration::from_millis(20)); // file mtime < session start
+
+    let data = tmp.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    let log_path = data.join("events.jsonl");
+    let db_path = data.join("brain.db");
+    let mut log = LogWriter::open(&log_path).unwrap();
+    // Title with the absolute path (window.title = ${activeEditorLong}).
+    let title = format!("{} - project - Visual Studio Code", file.display());
+    let mut ts = now_ms();
+    let mut key = |log: &mut LogWriter, k: &str, mods: Vec<Mod>| {
+        log.append(&Event {
+            ts,
+            app: "code".into(),
+            kind: EventKind::Key {
+18:#[test]
+19:#[ignore]
+20:fn vscode_session_is_upgraded_to_tier_2() {
+143:fn write_window_state(
+183:#[test]
+184:#[ignore]
+185:fn file_outside_the_folder_is_identified_late_and_replayed() {
+289:#[test]
+290:fn saved_file_gives_the_session_text_without_replay() {
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:27:48.272Z</sub>
+
+I'll replace the saved-file test with a small shared harness and add the new cases on top of it, so the setup isn't duplicated:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/tier2_e2e.rs'; s=open(p).read()\ni=s.index(\"/// When VS Code saved the file after the session's last keystroke\")\ns=s[:i]+'''/// A VS Code window on a saved file, with brain's log and database, for the\n/// saved-file tests (no VS Code is started).\nstruct SavedFileCase {\n    _tmp: tempfile::TempDir,\n    file: std::path::PathBuf,\n    title: String,\n    log_path: std::path::PathBuf,\n    db_path: std::path::PathBuf,\n    vscode_dir: std::path::PathBuf,\n    log: LogWriter,\n    ing: Ingester,\n    ts: i64,\n}\n\nimpl SavedFileCase {\n    /// `tier2`: whether `--vscode-replay` is on.\n    fn new(initial: &str, tier2: bool) -> Self {\n        let tmp = tempfile::tempdir().unwrap();\n        let project = tmp.path().join(\"project\");\n        std::fs::create_dir_all(&project).unwrap();\n        let file = project.join(\"main.cpp\");\n        std::fs::write(&file, initial).unwrap();\n        std::thread::sleep(Duration::from_millis(20)); // file mtime < session start\n        let data = tmp.path().join(\"data\");\n        std::fs::create_dir_all(&data).unwrap();\n        let (log_path, db_path) = (data.join(\"events.jsonl\"), data.join(\"brain.db\"));\n        let vscode_dir = data.join(\"vscode\");\n        let snaps: Option<Box<dyn brain::sessions::Tier2Snapshotter>> = if tier2 {\n            Some(Box::new(VsCodeSnapshots::new(vscode_dir.join(\"snapshots\")).unwrap()))\n        } else {\n            None\n        };\n        let log = LogWriter::open(&log_path).unwrap();\n        let ing =\n            Ingester::with_tier2(store::open_writer(&db_path).unwrap(), &log_path, snaps).unwrap();\n        Self {\n            title: format!(\"{} - project - Visual Studio Code\", file.display()),\n            file,\n            log_path,\n            db_path,\n            vscode_dir,\n            log,\n            ing,\n            ts: now_ms(),\n            _tmp: tmp,\n        }\n    }\n\n    fn append(&mut self, kind: EventKind) {\n        let app = match kind {\n            EventKind::System { .. } => \"unknown\",\n            _ => \"com.microsoft.VSCode\",\n        };\n        self.log\n            .append(&Event {\n                ts: self.ts,\n                app: app.into(),\n                kind,\n            })\n            .unwrap();\n        self.ts += 30;\n    }\n\n    fn focus(&mut self) {\n        let window = self.title.clone();\n        self.append(EventKind::Focus {\n            window,\n            renamed: false,\n        });\n    }\n\n    fn keys(&mut self, keys: &[(&str, &[Mod])]) {\n        for (k, mods) in keys {\n            let window = self.title.clone();\n            self.append(EventKind::Key {\n                key: k.to_string(),\n                mods: mods.to_vec(),\n                repeat: false,\n                window,\n            });\n        }\n    }\n\n    /// Writes the file as VS Code saves it, after every logged event so far.\n    fn save(&self, content: &str) {\n        while now_ms() <= self.ts {\n            std::thread::sleep(Duration::from_millis(10));\n        }\n        std::fs::write(&self.file, content).unwrap();\n    }\n\n    /// Stops brain (closing the session) and runs the tier 2 jobs.\n    fn finish(mut self) -> Vec<(String, i64, String)> {\n        self.append(EventKind::System {\n            state: SystemState::Stop,\n        });\n        self.ing.catch_up(10).unwrap();\n        let jobs = self.ing.take_tier2_jobs();\n        if !jobs.is_empty() {\n            let (tx, rx) = std::sync::mpsc::channel();\n            let worker =\n                Tier2Worker::spawn(self.db_path.clone(), self.log_path.clone(), self.vscode_dir, tx)\n                    .unwrap();\n            for _ in &jobs {\n                let (id, result) = rx.recv_timeout(Duration::from_secs(10)).expect(\"tier 2 result\");\n                self.ing.add_tier2_result(id, result);\n            }\n            worker.stop();\n            self.ing.catch_up(10).unwrap();\n 
+… [4649 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test file_outside_the_folder_is_identified_late_and_replayed ... ignored
+test vscode_session_is_upgraded_to_tier_2 ... ignored
+test shortcut_only_session_without_change_is_removed ... ok
+test shortcuts_make_no_session_without_tier_2 ... ok
+test shortcut_only_session_gets_the_saved_files_diff ... FAILED
+test file_saved_before_its_snapshot_uses_the_copy_taken_on_focus ... ok
+test saved_file_gives_the_session_text_without_replay ... FAILED
+thread 'shortcut_only_session_gets_the_saved_files_diff' (652130) panicked at tests/tier2_e2e.rs:458:5:
+assertion `left == right` failed
+  left: []
+ right: [("--- a/main.cpp\n+++ b/main.cpp\n@@ -1,2 +1,3 @@\n a\n+a\n b", 2, "done: saved file")]
+thread 'saved_file_gives_the_session_text_without_replay' (652129) panicked at tests/tier2_e2e.rs:439:5:
+assertion `left == right` failed
+  left: [("\nst\n", 1, "skipped: the file changed on disk after the session started (saved before it could be snapshotted)")]
+ right: [("--- a/main.cpp\n+++ b/main.cpp\n@@ -1,2 +1,3 @@\n int main() {\n+    std\n }", 2, "done: saved file")]
+test result: FAILED. 3 passed; 2 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.33s
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Both failing tests are a harness problem: they save the file before ingest sees the keys. I'm adding a step that ingests the keys first, as live capture does.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/tier2_e2e.rs'; s=open(p).read()\nold1=\"\"\"    case.keys(&[(\"Enter\", NONE)]);\n    case.save(\"int main() {\\\\n    std\\\\n}\\\\n\");\"\"\"\nnew1=\"\"\"    case.keys(&[(\"Enter\", NONE)]);\n    case.ing.catch_up(10).unwrap(); // the session opens: file copied\n    case.save(\"int main() {\\\\n    std\\\\n}\\\\n\");\"\"\"\nold2=\"\"\"    let mut case = SavedFileCase::new(\"a\\\\nb\\\\n\", true);\n    case.focus();\n    case.keys(&[(\"d\", CTRL), (\"s\", CTRL)]);\n    case.save(\"a\\\\na\\\\nb\\\\n\");\"\"\"\nnew2=\"\"\"    let mut case = SavedFileCase::new(\"a\\\\nb\\\\n\", true);\n    case.keys(&[(\"d\", CTRL)]);\n    case.ing.catch_up(10).unwrap(); // the session opens: file copied\n    case.keys(&[(\"s\", CTRL)]);\n    case.save(\"a\\\\na\\\\nb\\\\n\");\"\"\"\nfor o,n in [(old1,new1),(old2,new2)]:\n    assert s.count(o)==1,o; s=s.replace(o,n)\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo test --release --test tier2_e2e 2>&1 | grep -E '^test |test result|panicked|left|right'",
+  "description": "Ingest keys before saving in the two non-race tests",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test file_outside_the_folder_is_identified_late_and_replayed ... ignored
+test vscode_session_is_upgraded_to_tier_2 ... ignored
+test shortcut_only_session_without_change_is_removed ... ok
+test shortcuts_make_no_session_without_tier_2 ... ok
+test shortcut_only_session_gets_the_saved_files_diff ... ok
+test file_saved_before_its_snapshot_uses_the_copy_taken_on_focus ... ok
+test saved_file_gives_the_session_text_without_replay ... ok
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.33s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:28:58.768Z</sub>
+
+All five pass. A unit test for the wake-up in the recorder too:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n '#\\[cfg(test)\\]' -A25 src/capture/recorder.rs | head -40",
+  "description": "Read recorder test module setup"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+260:#[cfg(test)]
+261-mod tests {
+262-    use super::*;
+263-    use crate::eventlog::LogReader;
+264-
+265-    struct FixedClipboard(&'static str);
+266-    impl ClipboardSource for FixedClipboard {
+267-        fn read(&self) -> Option<String> {
+268-            Some(self.0.to_string())
+269-        }
+270-    }
+271-
+272-    fn events(path: &std::path::Path) -> Vec<Event> {
+273-        let mut r = LogReader::open(path, 0).unwrap();
+274-        let mut v = Vec::new();
+275-        while let Some(l) = r.next_line().unwrap() {
+276-            v.push(l.event.unwrap());
+277-        }
+278-        v
+279-    }
+280-
+281-    #[test]
+282-    fn stamps_focus_and_handles_paste_and_lock() {
+283-        let tmp = tempfile::tempdir().unwrap();
+284-        let p = tmp.path().join("events.jsonl");
+285-        let rec = Recorder::new(
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 285,292p src/capture/recorder.rs && python3 - <<'EOF'\np='src/capture/recorder.rs'; s=open(p).read()\nanchor=\"\"\"    #[test]\n    fn stamps_focus_and_handles_paste_and_lock() {\"\"\"\nnew='''    #[test]\n    fn focus_on_a_matching_app_wakes_the_ingest_thread() {\n        let tmp = tempfile::tempdir().unwrap();\n        let p = tmp.path().join(\"events.jsonl\");\n        let rec = std::sync::Arc::new(Recorder::new(\n            LogWriter::open(&p).unwrap(),\n            Box::new(FixedClipboard(\"\")),\n        ));\n        let (ready_tx, ready) = std::sync::mpsc::channel();\n        let sleeper = std::thread::spawn(move || {\n            ready_tx.send(()).unwrap();\n            let t = std::time::Instant::now();\n            std::thread::park_timeout(std::time::Duration::from_secs(5));\n            t.elapsed()\n        });\n        rec.wake_on_focus(sleeper.thread().clone(), |app| app == \"code\");\n        ready.recv().unwrap();\n        std::thread::sleep(std::time::Duration::from_millis(100));\n        rec.set_focus(\"kate\", \"a.txt\", false); // not a match: no wake\n        std::thread::sleep(std::time::Duration::from_millis(100));\n        assert!(!sleeper.is_finished());\n        rec.set_focus(\"code\", \"a.txt - Visual Studio Code\", false);\n        let slept = sleeper.join().unwrap();\n        assert!(slept < std::time::Duration::from_secs(2), \"{slept:?}\");\n    }\n\n'''\nassert s.count(anchor)==1; s=s.replace(anchor,new+anchor); open(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head; cargo test --release --lib recorder 2>&1 | grep -E 'test |test result|panicked'",
+  "description": "Test that VS Code focus wakes the ingest thread",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        let rec = Recorder::new(
+            LogWriter::open(&p).unwrap(),
+            Box::new(FixedClipboard("pasted")),
+        );
+        rec.set_focus("code", "main.rs", false);
+        rec.set_focus("code", "main.rs", true); // same title: no event
+        rec.key(10, "h".into(), vec![], false);
+        rec.key(11, "v".into(), vec![Mod::Ctrl], false);
+test capture::recorder::tests::paste_shortcuts ... ok
+test capture::recorder::tests::truncation_respects_char_boundaries ... ok
+test capture::recorder::tests::stamps_focus_and_handles_paste_and_lock ... ok
+test capture::recorder::tests::focus_on_a_matching_app_wakes_the_ingest_thread ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 0.20s
+[This command modified 1 file you've previously read: src/capture/recorder.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:29:27.793Z</sub>
+
+Now the docs: README, PLAN.md, CLAUDE.md and the schema comment.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'tier2_status' src/store.rs; grep -n 'Sessions: keyed by' -A5 CLAUDE.md; grep -n '| `pending` |' README.md; grep -n 'The replay stores the lines it changed' -A2 README.md; grep -n 'tier 0/1 text; pending jobs survive restarts' PLAN.md",
+  "description": "Locate doc passages to update"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+37:  tier2_status       TEXT,                       -- VS Code tier 2: resolving | snapshot | pending | done: saved file
+43:- Sessions: keyed by (app, normalized window title); close after 30 s idle
+44-  in that context or on Enter in single-line contexts; focus loss alone
+45-  never closes a session; a title change of the typed window (a `renamed`
+46-  focus event) shortly after a keystroke keeps the session.
+47-- The mouse is not captured (owner's call): cursor moves made with the mouse
+48-  are a documented limitation, not something to work around.
+270:  | `pending` | session closed, waiting for the worker |
+263:  The replay stores the lines it changed; tier 0/1 text stays if neither
+264-  works. The `tier2_status` column says what happened:
+265-
+356:  tier 0/1 text; pending jobs survive restarts.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 36,39p src/store.rs; sed -n 248,280p README.md; sed -n 340,357p PLAN.md",
+  "description": "Read exact passages to edit"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+  end_reason         TEXT,                       -- idle | commit | cancel | field | stop | restart
+  tier2_status       TEXT,                       -- VS Code tier 2: resolving | snapshot | pending | done: saved file
+                                                 --   | done: replayed (best effort, unverified) | failed: .. | skipped: ..
+  tier2_file         TEXT                        -- the edited file, for VS Code replay
+  sessions. Single-line fields start empty each time.
+* **Tier 2** (`--vscode-replay`): when a VS Code session opens, the
+  edited file's initial content is saved. When the session closes:
+  1. if the file was saved after your last keystroke (autosave, or Ctrl+S
+     at the end), the session text is a **git-style diff** from the initial
+     content to the saved file (`--- a/test.cpp`, `+++ b/test.cpp`, `@@`
+     hunks with 3 lines of context, `-` removed and `+` added lines): what
+     you did to the file in that session, autocomplete and auto-indent
+     included; VS Code is not started;
+  2. otherwise the keystrokes are replayed into a headless VS Code with
+     your settings, in a network-less sandbox with capped CPU and memory, as
+     a best effort: the cursor is assumed at the end of the file, your
+     extensions are not loaded (so their autocomplete is not reproduced),
+     and nothing checks the result.
+
+  The replay stores the lines it changed; tier 0/1 text stays if neither
+  works. The `tier2_status` column says what happened:
+
+  | `tier2_status` | Meaning |
+  |---|---|
+  | `resolving` | looking for the edited file |
+  | `snapshot` | initial content saved, session open |
+  | `pending` | session closed, waiting for the worker |
+  | `done: saved file` | a diff of the file saved after the last edit (exact) |
+  | `done: replayed (best effort, unverified)` | text from a replay in VS Code |
+  | `failed: …` | the replay failed; tier 0/1 text kept |
+  | `skipped: …` | tier 2 impossible (unsaved new file, unsaved changes at the start, file not found, …) |
+
+  The edited file is found from the window title: VS Code's default title
+  only has the file and folder names, so `brain` looks the name up in VS
+  Code's own state for that window (the editors it has open, also for files
+  opened from outside the folder), under the folder, and in the window's
+  editor history. VS Code records a newly opened file there a little late,
+  unsaved changes when the session started, or changed on disk after the
+  session started (a late snapshot is therefore still the starting text).
+  When the session closes with its tier 0/1 text, a worker works out its
+  real text. If the file on disk was written after the session's last
+  keystroke (autosave, or Ctrl+S at the end), it already holds what VS Code
+  made of the keys: the session's text is a git-style unified diff from the
+  snapshot to the saved file, 3 lines of context (`done: saved file`,
+  exact, VS Code not started; Myers line diff with git's "slide down"
+  placement of ambiguous runs)
+… [572 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/store.rs',[(\"\"\"-- VS Code tier 2: resolving | snapshot | pending | done: saved file\"\"\",\"\"\"-- VS Code tier 2: resolving | snapshot | pending | pending: saved file only | done: saved file\"\"\")])\nedit('README.md',[\n(\"\"\"  The replay stores the lines it changed; tier 0/1 text stays if neither\n  works. The `tier2_status` column says what happened:\"\"\",\"\"\"  The replay stores the lines it changed; tier 0/1 text stays if neither\n  works.\n\n  Every key in a VS Code window counts toward its session, including\n  shortcuts the tier 0/1 adapters don't understand (Ctrl+D to duplicate a\n  line, Alt+Up to move one, Ctrl+/ to comment, Ctrl+S): they can change the\n  file. A session made only of such shortcuts gets the saved file's diff\n  and is never replayed; when the file was not saved after it, or the diff\n  is empty, the session changed nothing and is removed (as is any session\n  whose saved file shows no change). The file is also copied when a VS Code\n  window is focused, so Ctrl+D then Ctrl+S right after focusing still has\n  the content to diff against. Without `--vscode-replay`, VS Code behaves\n  like any other app.\n\n  The `tier2_status` column says what happened:\"\"\"),\n(\"\"\"  | `pending` | session closed, waiting for the worker |\"\"\",\"\"\"  | `pending` | session closed, waiting for the worker |\n  | `pending: saved file only` | a session of shortcuts only, waiting for the saved file's diff (removed if there is none) |\"\"\"),\n])\nedit('PLAN.md',[(\"\"\"  extension autocomplete is not reproduced). Failures and timeouts keep the\n  tier 0/1 text; pending jobs survive restarts.\"\"\",\"\"\"  extension autocomplete is not reproduced). Failures and timeouts keep the\n  tier 0/1 text; pending jobs survive restarts.\n\n  With tier 2 on, every VS Code key except desktop (Super) shortcuts opens\n  or extends the session, even ones tier 0/1 ignores (Ctrl+D, Alt+Up,\n  Ctrl+S), and a session with a snapshot is kept at close even if its tier\n  0/1 text is unchanged (`pending: saved file only`): it gets the saved\n  file's diff, or is removed when the file was not saved after it; any\n  session whose saved diff is empty is removed too. Because the snapshot is\n  taken when ingest opens the session (up to 1 s after the first key), a\n  focus change to VS Code wakes the ingest thread at once and the file is\n  copied on focus; a session that starts within 10 s and finds its file\n  saved before its own snapshot uses that copy, if the file was not\n  modified after the session started.\"\"\")])\nedit('CLAUDE.md',[(\"\"\"  focus event) shortly after a keystroke keeps the session.\"\"\",\"\"\"  focus event) shortly after a keystroke keeps the session. With\n  `--vscode-replay`, every VS Code key (not only text edits) opens or\n  extends a session, and a session of shortcuts only (Ctrl+D, Ctrl+S) is\n  kept for the saved file's diff, or removed when there is none.\"\"\")])\nEOF\ncargo doc --no-deps 2>&1 | grep -cE '^warning'; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'",
+  "description": "Update README, PLAN, CLAUDE.md and schema comment"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T15:29:48.785Z</sub>
+
+Full suite, plus the two replay tests with real VS Code (the replay path is unchanged but shares the worker):
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'; cargo test --release --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E '^test |test result|panicked'; echo \"leftover brain: $(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp')\"; ls -d /tmp/.tmp* 2>/dev/null | wc -l",
+  "description": "Run full suite and replay e2e tests; check leftovers",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+     Running unittests src/lib.rs 
+test result: ok. 130 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test file_outside_the_folder_is_identified_late_and_replayed ... ok
+test vscode_session_is_upgraded_to_tier_2 ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 48.03s
+leftover brain: 0
+(eval):1: no matches found: /tmp/.tmp*
+0
+```
+
+</details>
+
