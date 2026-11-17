@@ -228,18 +228,16 @@ fn search_time_windows() {
 }
 
 #[test]
-fn text_is_the_raw_stream() {
+fn text_is_reconstructed() {
     let f = fixture();
     let d = &f.dir;
-    // Session 1's window, absolute bounds: raw keys, no editing applied.
+    // Session 1's window, absolute bounds: "secret" was typed and deleted.
     let from = format_ms(f.t0);
     let to = format_ms(f.t0 + 5 * 60_000);
     let (code, v, _) = brain(d, &["text", "--app", "kate", "--from", &from, "--to", &to]);
     assert_eq!(code, 0);
-    assert_eq!(
-        v["text"],
-        format!("the cat sat secret{}", "<Backspace>".repeat(7))
-    );
+    assert_eq!(v["text"], "the cat sat");
+    assert_eq!(v["windows"][0]["window"], "notes.md — Kate");
     // The full app id, not the part that was given.
     assert_eq!(v["app"], "org.kde.kate");
     assert_eq!(v["at"], Value::Null);
@@ -247,17 +245,18 @@ fn text_is_the_raw_stream() {
     // --at: the 10 minutes ending at T; only that app's keys.
     let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
     let (_, v, _) = brain(d, &["text", "--app", "konsole", "--at", &at]);
-    assert_eq!(v["text"], "git status\n");
+    assert_eq!(v["text"], "git status");
     assert_eq!(v["app"], "org.kde.konsole");
     assert_eq!(instant(&v["at"]), parse_rfc3339_ms(&at).unwrap());
     assert_local(&v["at"]);
-    // Default: the last 10 minutes, with shortcuts named and pastes inline.
+    // Default: the last 10 minutes; the pasted text, submitted with Enter.
     let (_, v, _) = brain(d, &["text", "--app", "chrome"]);
-    assert_eq!(v["text"], "<Ctrl+V>pasted words\n");
+    assert_eq!(v["text"], "pasted words");
     assert_eq!(v["app"], "google-chrome");
     // A known app with nothing typed in the window: empty text, full id.
     let (code, v, _) = brain(d, &["text", "--app", "konsole", "--at", "-1m"]);
     assert_eq!((code, v["text"].as_str()), (0, Some("")));
+    assert_eq!(v["windows"], serde_json::json!([]));
     assert_eq!(v["app"], "org.kde.konsole");
     // An unknown app, or one matching several apps, is an error.
     let (code, _, err) = brain(d, &["text", "--app", "nosuchapp"]);
@@ -269,6 +268,161 @@ fn text_is_the_raw_stream() {
     let (code, _, err) = brain(d, &["text", "--app", "org.kde"]);
     assert_ne!(code, 0);
     assert!(err.contains("several apps"), "{err}");
+}
+
+/// The detailed example from the README, through the binary: two Kate
+/// windows (notes.md edited in two separate sessions) and a Konsole prompt,
+/// with Hebrew, an emoji, quotes, a backslash and a Tab.
+#[test]
+fn text_example_from_the_readme() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("data");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut w = LogWriter::open(&dir.join("events.jsonl")).unwrap();
+    let t0 = now_ms() - 30 * 60_000; // "10:00"
+    // Types `s` (⏎ Enter, ⌫ Backspace, ⇥ Tab) from `ts`, 100 ms apart.
+    let typ = |w: &mut LogWriter, ts: Millis, app: &str, win: &str, s: &str| -> Millis {
+        let mut t = ts;
+        for c in s.chars() {
+            let k = match c {
+                '⏎' => "Enter".to_string(),
+                '⌫' => "Backspace".to_string(),
+                '⇥' => "Tab".to_string(),
+                c => c.to_string(),
+            };
+            key(w, t, app, win, &k, &[]);
+            t += 100;
+        }
+        t
+    };
+    let kate = "org.kde.kate";
+    let notes = "notes.md — Kate";
+    typ(&mut w, t0, kate, notes, "Shopping list:⏎- milk⏎- breadd⌫");
+    typ(
+        &mut w,
+        t0 + 60_000,
+        kate,
+        "todo.md — Kate",
+        "TODO: call Dana⏎⇥send the \"Q3\" report⏎path: C:\\temp",
+    );
+    // 10:03: a new session on notes.md (unsaved title, same window).
+    let s2 = t0 + 180_000;
+    let dirty = "notes.md * — Kate";
+    key(&mut w, s2, kate, dirty, "Home", &[Mod::Ctrl]);
+    key(&mut w, s2 + 100, kate, dirty, "Down", &[]);
+    key(&mut w, s2 + 200, kate, dirty, "End", &[]);
+    key(&mut w, s2 + 300, kate, dirty, "Backspace", &[Mod::Ctrl]);
+    let t = typ(&mut w, s2 + 400, kate, dirty, "oat milk");
+    key(&mut w, t, kate, dirty, "End", &[Mod::Ctrl]);
+    let t = typ(&mut w, t + 100, kate, dirty, "⏎- קפה");
+    key(&mut w, t, kate, dirty, "v", &[Mod::Ctrl]);
+    w.append(&Event {
+        ts: t,
+        app: kate.into(),
+        kind: EventKind::Paste {
+            text: Some(" ☕ x2".into()),
+            window: dirty.into(),
+        },
+    })
+    .unwrap();
+    key(&mut w, t + 100, kate, dirty, "z", &[Mod::Ctrl]);
+    typ(&mut w, t + 200, kate, dirty, " x2");
+    // 10:05: Konsole.
+    let k = "org.kde.konsole";
+    let t = typ(&mut w, t0 + 300_000, k, "~", "git stauts⌫⌫⌫tus⏎");
+    key(&mut w, t, k, "~", "Up", &[]);
+    let t = typ(&mut w, t + 100, k, "~", " -s⏎rm -rf build");
+    key(&mut w, t, k, "~", "c", &[Mod::Ctrl]);
+    typ(&mut w, t + 100, k, "~", "echo \"שלום\" > out.txt⏎");
+    drop(w);
+    let log = dir.join("events.jsonl");
+    let mut ing = Ingester::new(store::open_writer(&dir.join("brain.db")).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    // The database has two sessions for notes.md; `text` does not care.
+    let notes_sessions: i64 = ing
+        .connection()
+        .query_row(
+            "SELECT count(*) FROM sessions WHERE window = ?1",
+            [notes],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(notes_sessions, 2);
+
+    let at = |ms: Millis| format_ms(t0 + ms);
+    // Query 1: Kate, 10:00–10:10.
+    let (code, v, err) = brain(
+        &dir,
+        &[
+            "text",
+            "--app",
+            "kate",
+            "--from",
+            &at(0),
+            "--to",
+            &at(600_000),
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let notes_text = "Shopping list:\n- oat milk\n- bread\n- קפה x2";
+    let todo_text = "TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp";
+    assert_eq!(v["app"], "org.kde.kate");
+    assert_eq!(v["text"], format!("{notes_text}\n{todo_text}"));
+    assert_eq!(
+        v["windows"],
+        serde_json::json!([
+            {"window": notes, "text": notes_text},
+            {"window": "todo.md — Kate", "text": todo_text},
+        ])
+    );
+    assert_local(&v["from"]);
+    assert_local(&v["to"]);
+    // Query 2: from 10:02, notes.md starts empty.
+    let (_, v, _) = brain(
+        &dir,
+        &[
+            "text",
+            "--app",
+            "kate",
+            "--from",
+            &at(120_000),
+            "--to",
+            &at(600_000),
+        ],
+    );
+    assert_eq!(v["text"], "oat milk\n- קפה x2");
+    assert_eq!(v["windows"].as_array().unwrap().len(), 1);
+    // Query 3: Konsole, --at 10:10.
+    let (_, v, _) = brain(&dir, &["text", "--app", "konsole", "--at", &at(600_000)]);
+    let konsole_text = "git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt";
+    assert_eq!(v["app"], "org.kde.konsole");
+    assert_eq!(v["text"], konsole_text);
+    assert_eq!(
+        v["windows"],
+        serde_json::json!([{"window": "~", "text": konsole_text}])
+    );
+    // The JSON escapes quotes, backslashes, newlines and tabs; Hebrew stays UTF-8.
+    let raw = Command::new(env!("CARGO_BIN_EXE_brain"))
+        .args([
+            "query",
+            "text",
+            "--app",
+            "kate",
+            "--from",
+            &at(0),
+            "--to",
+            &at(600_000),
+            "--data-dir",
+        ])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(raw.stdout).unwrap();
+    assert!(
+        stdout.contains(r#""TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp""#),
+        "{stdout}"
+    );
+    assert!(stdout.contains("קפה x2"), "{stdout}");
 }
 
 #[test]

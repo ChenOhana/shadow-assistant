@@ -32,8 +32,11 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 
 ## Decisions already made by the owner — do not re-litigate
 
-- `brain query text` returns the **raw decoded keystroke stream** (no
-  backspace/cursor editing applied) over a window: default last 10 min,
+- `brain query text` reconstructs "stupidly": the keys typed in the time
+  window, per app and window title, run through the tier 0/1 adapters from
+  an empty text (no sessions involved); output `windows` + joined `text`.
+  It replaced the earlier raw-keystroke output at the owner's request.
+  Window: default last 10 min,
   `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
   relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
   `text` resolves it to exactly one app and reports the full id.

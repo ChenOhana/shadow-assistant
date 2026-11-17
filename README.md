@@ -6,7 +6,7 @@ lets you search it later.
 ```
 brain run                      # capture keystrokes + focus changes, store them
 brain query search "<words>"   # full-text search over writing sessions
-brain query text --app A       # the raw typed stream of an app
+brain query text --app A       # what was typed into an app, reconstructed
 ```
 
 > **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
@@ -119,10 +119,15 @@ brain query text --app A [--from T] [--to T] [--at T]
   a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
   first (default limit 20). Open sessions are included with what has been
   typed so far (`ended_at: null`).
-* **`text`**: the raw stream typed into the app, as captured, with no
-  editing applied: characters as typed, Enter as a newline, Tab as a tab,
-  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
-  pasted text inline.
+* **`text`**: what was typed into the app during the window,
+  **reconstructed**: the window's keys and pastes, per window title, run
+  through the app's tier 0/1 rules (Backspace, selections, undo, Enter
+  submitting a shell line, …), each window starting empty at the window's
+  start. Sessions play no part: a document edited in several sessions is one
+  text. `windows` lists each window's text, ordered by its first keystroke;
+  `text` joins them one per line. Edits reaching into text typed before the
+  window (Backspace past its start, Ctrl+A) only affect what was typed
+  inside it.
 * **`--app A`** can be part of the app id, ignoring case (`--app chrome`
   finds `google-chrome`). `search` keeps every app that matches. `text`
   resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
@@ -169,13 +174,36 @@ database store UTC.
 
 ```json
 {
-  "app": "org.kde.konsole",
-  "at": "2026-11-16T16:51:22.680+02:00",
-  "from": "2026-11-16T16:41:22.680+02:00",
-  "to": "2026-11-16T16:51:22.680+02:00",
-  "text": "git status\ncargo test\nls -la\n"
+  "app": "org.kde.kate",
+  "at": null,
+  "from": "2026-11-17T10:00:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "Shopping list:\n- oat milk\n- bread\n- קפה x2\nTODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp",
+  "windows": [
+    {
+      "window": "notes.md — Kate",
+      "text": "Shopping list:\n- oat milk\n- bread\n- קפה x2"
+    },
+    {
+      "window": "todo.md — Kate",
+      "text": "TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp"
+    }
+  ]
 }
 ```
+
+That is the output for this typing (`tests/query_cli.rs` replays it):
+
+| When | Window | Keys |
+|---|---|---|
+| 10:00 | `notes.md — Kate` | `Shopping list:⏎- milk⏎- breadd⌫` |
+| 10:01 | `todo.md — Kate` | `TODO: call Dana⏎⇥send the "Q3" report⏎path: C:\temp` |
+| 10:03 (a new session) | `notes.md * — Kate` | Ctrl+Home `↓` End Ctrl+⌫ `oat milk` Ctrl+End `⏎- קפה` Ctrl+V (`" ☕ x2"`) Ctrl+Z `" x2"` |
+
+With `--from 10:02` instead, `notes.md` starts empty and the result is
+`"oat milk\n- קפה x2"`. In Konsole, `git stauts⌫⌫⌫tus⏎`, `↑ -s⏎`,
+`rm -rf build` Ctrl+C, `echo "שלום" > out.txt⏎` give
+`"git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt"`.
 
 ## Sessions and reconstruction
 
@@ -305,10 +333,11 @@ sqlite3 ~/brain-data/brain.db \
   extensions exceed 300 MB. Suggestion acceptance may not replay the same.
 
 **Queries**
-* **`query text` is the raw stream, `search` the edited text.** As the
-  owner decided, `text` returns exactly what was typed (with `<Backspace>`
-  and other keys visible) rather than reconstructed text; reconstructed,
-  edit-aware text is what `search` matches and returns.
+* **`query text` reconstructs "stupidly", by window.** It takes the keys
+  typed in the time window and runs them through the same tier 0/1 adapters
+  the sessions use, per app and window title, from an empty text: no session
+  boundaries, no text from before the window. (An earlier version returned
+  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and
   accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`

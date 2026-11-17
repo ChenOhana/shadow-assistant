@@ -410,7 +410,7 @@ shorter than 3 characters cannot use the trigram index and are matched with
 
 ### 5.5 Log checkpoints
 
-`query text` must read raw keys from the log for a time window without
+`query text` must read the keys of a time window from the log without
 scanning it from the start. Each checkpoint says "the event at this byte has
 this timestamp". Because the log is written in time order, starting at the
 latest checkpoint at or before the window misses nothing, and reads at most
@@ -428,11 +428,17 @@ window has to be read anyway. Clock steps backwards are discussed in section
   case), newest first, default limit 20, with a snippet around the first
   match. Open sessions are included with their live text and
   `ended_at: null`. A session is in a time window if it overlaps it.
-- **`brain query text --app A [--from T] [--to T] [--at T]`**: the raw stream
-  typed into the app over the window: characters as typed, Enter as a
-  newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
-  `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
-  decision: an audit-style trail, distinct from the edited session text).
+- **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed
+  into the app during the window, reconstructed. The window's key and paste
+  events (read from the log, section 5.5) are split per window title and
+  each window's events run, from an empty text, through the app's tier 0/1
+  adapter: the same `editor::action` and `FieldEditor` the session engine
+  uses, without sessions. A submit in a single-line field (Enter at a shell
+  prompt) keeps the line and continues on a fresh one; Up recalls lines
+  submitted earlier in the window. Output: `windows` (each window's text,
+  by first keystroke) and `text` (them joined, one per line). *Differs from
+  the design*, where `text` was the raw keystroke stream; the owner changed
+  it.
 - **`--app A`** can be part of an app id, ignoring case. `search` keeps
   every matching app; `text` resolves it to one full id (exact match first,
   else the single id containing it; ambiguous or unknown is an error) and
