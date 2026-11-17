@@ -22,10 +22,13 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// A snapshot taken this long after the session started may already include
-/// the user's edits (a save in between), so it is not attempted. This also
-/// skips snapshots while ingest catches up on an old log.
-const MAX_SNAPSHOT_DELAY_MS: Millis = 10_000;
+/// How long after a session starts its file is still looked for. VS Code
+/// records a newly opened file in its window state with a delay, so the
+/// lookup is retried on each ingest step until then. A late snapshot is safe
+/// because the file must not have changed on disk since the session started
+/// (checked below); the bound also skips sessions while ingest catches up on
+/// an old log.
+const MAX_SNAPSHOT_DELAY_MS: Millis = 120_000;
 /// Files larger than this are not replayed.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 /// Shut the warm instance down after this long without jobs.
@@ -38,12 +41,24 @@ fn snapshot_path(dir: &Path, id: i64) -> PathBuf {
 /// Takes VS Code file snapshots into `dir` (`<data-dir>/vscode/snapshots`).
 pub struct VsCodeSnapshots {
     dir: PathBuf,
+    /// VS Code's config directory to read window state from; `None` means
+    /// the user's (`~/.config/Code`). Tests give a fake one.
+    vscode_config: Option<PathBuf>,
 }
 
 impl VsCodeSnapshots {
     pub fn new(dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
-        Ok(Self { dir })
+        Ok(Self {
+            dir,
+            vscode_config: None,
+        })
+    }
+
+    /// Reads VS Code's window state from `config` instead of the user's.
+    pub fn with_vscode_config(mut self, config: PathBuf) -> Self {
+        self.vscode_config = Some(config);
+        self
     }
 
     /// Removes snapshots no session needs any more (left behind when `brain
@@ -74,14 +89,23 @@ impl Tier2Snapshotter for VsCodeSnapshots {
             return Tier2Start::NotApplicable;
         }
         let skip = |why: &str| Tier2Start::Skipped(why.to_string());
-        if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
-            return skip("session ingested too late to snapshot its file");
+        if vscode::title_is_untitled(raw_title) {
+            return skip("unsaved new file (nothing on disk to replay from)");
         }
         if vscode::title_is_dirty(raw_title) {
             return skip("the file had unsaved changes when the session started");
         }
-        let Some(file) = vscode::resolve_file(raw_title) else {
-            return skip("could not identify the file from the window title");
+        let unidentified = "could not identify the file from the window title";
+        let resolved = match &self.vscode_config {
+            Some(config) => vscode::resolve_file_in(raw_title, Some(config)),
+            None => vscode::resolve_file(raw_title),
+        };
+        let Some(file) = resolved else {
+            return if now_ms() - started_at > MAX_SNAPSHOT_DELAY_MS {
+                skip(unidentified)
+            } else {
+                Tier2Start::NotYet(unidentified.to_string())
+            };
         };
         let meta = match std::fs::metadata(&file) {
             Ok(m) if m.is_file() => m,
@@ -96,7 +120,10 @@ impl Tier2Snapshotter for VsCodeSnapshots {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as Millis);
         if modified_ms.is_some_and(|m| m > started_at) {
-            return skip("the file changed on disk after the session started");
+            return skip(
+                "the file changed on disk after the session started \
+                 (saved before it could be snapshotted)",
+            );
         }
         match std::fs::copy(&file, snapshot_path(&self.dir, id)) {
             Ok(_) => Tier2Start::Snapshot { file },

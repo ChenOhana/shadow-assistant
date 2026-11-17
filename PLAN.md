@@ -329,10 +329,16 @@ session.
   plain Ctrl+V does not paste in a terminal.
 - **Tier 2, VS Code replayed in VS Code** (`reconstruct/vscode/`,
   `tier2.rs`, opt-in with `--vscode-replay`): when a VS Code session opens,
-  the file is identified from the window title (an absolute path, or the
-  default title resolved through VS Code's recently opened folders) and
-  copied, unless it had unsaved changes or changed on disk after the session
-  started. When the session closes with its tier 0/1 text, a worker replays
+  the file is identified from the window title: an absolute path if the
+  title has one, otherwise the title's file name looked up in VS Code's
+  per-workspace state for the window's folder (its open editors, which also
+  covers files opened from outside the folder), under that folder, then in
+  the window's editor history; one existing match is required. VS Code
+  writes that state with a delay, so an unidentified file is looked up
+  again on each ingest step while the session is open, for up to 2 minutes.
+  The file is copied, unless it is an unsaved new file (`Untitled-1`), had
+  unsaved changes when the session started, or changed on disk after the
+  session started (a late snapshot is therefore still the starting text). When the session closes with its tier 0/1 text, a worker replays
   the session's own keystrokes from the log into one warm, headless VS Code
   (Electron's headless mode, no display server) over the DevTools protocol on
   a pipe, in its own network namespace and a CPU/memory-capped systemd scope,
@@ -547,7 +553,8 @@ window has to be read anyway. Clock steps backwards are discussed in section
   replays faster than a human (so accepting a suggestion may not replay the
   same), runs without extensions when they exceed 300 MB, and is the one part
   of `brain.db` a rebuild from the log does not reproduce (its file snapshot
-  must be taken within 10 s of the session starting).
+  must be taken within 2 minutes of the session starting, before the file
+  is saved).
 - **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
   be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
   are captured on any Linux, attributed to `unknown`.

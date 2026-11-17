@@ -96,6 +96,19 @@ pub(crate) fn parse_title(title: &str) -> Option<ParsedTitle> {
 /// Absolute path of the file being edited, from the window title; see the
 /// module docs of `vscode` for the two supported title shapes.
 pub fn resolve_file(window_title: &str) -> Option<PathBuf> {
+    resolve_file_in(window_title, vscode_config_dir().as_deref())
+}
+
+/// [`resolve_file`] with VS Code's config directory given (tests use a fake).
+///
+/// With the default title (`<file> - <rootName> - Visual Studio Code`) the
+/// file name is looked up, in order, among: the editors open in the window
+/// for folder `<rootName>` (VS Code's per-workspace state), files under that
+/// folder, and that window's editor history. The first place with exactly
+/// one existing file of that name wins; two different files of the same name
+/// in one place make the title ambiguous (`None`). The per-workspace state
+/// is what finds files opened from outside the folder.
+pub fn resolve_file_in(window_title: &str, config: Option<&Path>) -> Option<PathBuf> {
     let parsed = parse_title(window_title)?;
     let home = std::env::var_os("HOME").map(PathBuf::from);
     // (1) A custom window.title that contains a full path.
@@ -111,11 +124,17 @@ pub fn resolve_file(window_title: &str) -> Option<PathBuf> {
     if name.contains('/') || name == "." || name == ".." {
         return None;
     }
-    let config = vscode_config_dir()?;
-    let history = RecentHistory::load(&config);
-    let mut found: BTreeSet<PathBuf> = BTreeSet::new();
+    let config = config?;
+    let history = RecentHistory::load(config);
     match &parsed.root {
         Some(root) => {
+            let ws = WorkspaceEditors::load(config, root);
+            match pick(&ws.open, name) {
+                Pick::One(p) => return Some(p),
+                Pick::Many => return None,
+                Pick::None => {}
+            }
+            let mut found: BTreeSet<PathBuf> = BTreeSet::new();
             for folder in history.folders.iter().filter(|f| {
                 f.file_name().and_then(|n| n.to_str()) == Some(root.as_str()) && f.is_dir()
             }) {
@@ -124,23 +143,101 @@ pub fn resolve_file(window_title: &str) -> Option<PathBuf> {
                     return None;
                 }
             }
-        }
-        None => {
-            // A single file opened without a folder.
-            for f in history
-                .files
-                .iter()
-                .filter(|f| f.file_name().and_then(|n| n.to_str()) == Some(name) && f.is_file())
-            {
-                found.insert(f.clone());
+            if let Some(p) = found.into_iter().next() {
+                return Some(p);
+            }
+            match pick(&ws.history, name) {
+                Pick::One(p) => Some(p),
+                _ => None,
             }
         }
+        // A single file opened without a folder.
+        None => match pick(&history.files.iter().cloned().collect::<Vec<_>>(), name) {
+            Pick::One(p) => Some(p),
+            _ => None,
+        },
     }
-    if found.len() == 1 {
-        found.into_iter().next()
-    } else {
-        None
+}
+
+enum Pick {
+    One(PathBuf),
+    Many,
+    None,
+}
+
+/// The one existing regular file named `name` among `candidates`.
+fn pick(candidates: &[PathBuf], name: &str) -> Pick {
+    let found: BTreeSet<&PathBuf> = candidates
+        .iter()
+        .filter(|p| p.file_name().and_then(|n| n.to_str()) == Some(name) && p.is_file())
+        .collect();
+    let mut it = found.into_iter();
+    match (it.next(), it.next()) {
+        (Some(p), None) => Pick::One(p.clone()),
+        (Some(_), Some(_)) => Pick::Many,
+        _ => Pick::None,
     }
+}
+
+/// Whether the title is an unsaved new file (`Untitled-1`, or VS Code's
+/// `first line • Untitled-1` form): there is no file on disk to replay from.
+pub fn title_is_untitled(window_title: &str) -> bool {
+    parse_title(window_title).is_some_and(|p| {
+        let last = p.editor.rsplit(" • ").next().unwrap_or("");
+        last.strip_prefix("Untitled-")
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    })
+}
+
+/// Files of one window, from VS Code's per-workspace state
+/// (`User/workspaceStorage/<id>/state.vscdb`, the workspace whose folder is
+/// named `root`): the editors it has open, and its editor history.
+#[derive(Default, Debug)]
+struct WorkspaceEditors {
+    open: Vec<PathBuf>,
+    history: Vec<PathBuf>,
+}
+
+impl WorkspaceEditors {
+    fn load(config: &Path, root: &str) -> Self {
+        let mut w = WorkspaceEditors::default();
+        let Ok(rd) = std::fs::read_dir(config.join("User/workspaceStorage")) else {
+            return w;
+        };
+        for e in rd.flatten().take(5000) {
+            let dir = e.path();
+            let folder = read_json(&dir.join("workspace.json")).and_then(|v| {
+                v.get("folder")
+                    .and_then(|f| f.as_str())
+                    .and_then(file_uri_to_path)
+            });
+            if folder.is_none_or(|f| f.file_name().and_then(|n| n.to_str()) != Some(root)) {
+                continue;
+            }
+            let db = dir.join("state.vscdb");
+            if let Some(v) = read_state_value(&db, "memento/workbench.parts.editor") {
+                w.open.extend(file_uris_in(&v));
+            }
+            if let Some(v) = read_state_value(&db, "history.entries") {
+                w.history.extend(file_uris_in(&v));
+            }
+        }
+        w
+    }
+}
+
+/// Every `file:///...` URI in a piece of (possibly nested, escaped) JSON, as
+/// local paths.
+fn file_uris_in(text: &str) -> Vec<PathBuf> {
+    text.match_indices("file:///")
+        .filter_map(|(i, _)| {
+            let rest = &text[i..];
+            let end = rest
+                .find(|c: char| c == '"' || c == '\\' || c.is_whitespace())
+                .unwrap_or(rest.len());
+            file_uri_to_path(&rest[..end])
+        })
+        .collect()
 }
 
 fn expand_path(seg: &str, home: Option<&Path>) -> Option<PathBuf> {
@@ -262,6 +359,12 @@ fn read_json(path: &Path) -> Option<serde_json::Value> {
 }
 
 fn read_state_db(path: &Path) -> Option<serde_json::Value> {
+    let raw = read_state_value(path, "history.recentlyOpenedPathsList")?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// One value of a VS Code `state.vscdb` (a key/value SQLite table), read-only.
+fn read_state_value(path: &Path, key: &str) -> Option<String> {
     if !path.is_file() {
         return None;
     }
@@ -271,14 +374,10 @@ fn read_state_db(path: &Path) -> Option<serde_json::Value> {
     )
     .ok()?;
     let _ = conn.busy_timeout(std::time::Duration::from_millis(200));
-    let raw: String = conn
-        .query_row(
-            "SELECT value FROM ItemTable WHERE key = 'history.recentlyOpenedPathsList'",
-            [],
-            |r| r.get(0),
-        )
-        .ok()?;
-    serde_json::from_str(&raw).ok()
+    conn.query_row("SELECT value FROM ItemTable WHERE key = ?1", [key], |r| {
+        r.get(0)
+    })
+    .ok()
 }
 
 /// `file:///home/a%20b/x` → `/home/a b/x`. Other schemes (remote, vscode-vfs) → None.
@@ -406,6 +505,129 @@ mod tests {
         let folders: Vec<_> = h.folders.iter().map(|p| p.to_str().unwrap()).collect();
         assert_eq!(folders, vec!["/a/proj", "/b/other", "/d/x"]);
         assert!(h.files.contains(Path::new("/c/n.md")));
+    }
+
+    /// A fake VS Code config dir with one workspace (folder `ai-logs`) whose
+    /// state lists `open` as open editors and `history` as editor history,
+    /// in the JSON shapes VS Code writes.
+    fn fake_config(dir: &Path, folder: &Path, open: &[&Path], history: &[&Path]) -> PathBuf {
+        let config = dir.join("Code");
+        let ws = config.join("User/workspaceStorage/0123abcd");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(
+            ws.join("workspace.json"),
+            format!(r#"{{"folder":"file://{}"}}"#, folder.display()),
+        )
+        .unwrap();
+        let editors: Vec<String> = open
+            .iter()
+            .map(|p| {
+                format!(
+                    r#"{{"id":"workbench.editors.files.fileEditorInput","value":"{{\"resourceJSON\":{{\"$mid\":1,\"fsPath\":\"{p}\",\"external\":\"file://{p}\",\"path\":\"{p}\",\"scheme\":\"file\"}}}}"}}"#,
+                    p = p.display()
+                )
+            })
+            .collect();
+        let parts = format!(
+            r#"{{"editorpart.state":{{"serializedGrid":{{"root":{{"type":"branch","data":[{{"type":"leaf","data":{{"id":0,"editors":[{}]}}}}]}}}}}}}}"#,
+            editors.join(",")
+        );
+        let entries: Vec<String> = history
+            .iter()
+            .map(|p| {
+                format!(
+                    r#"{{"editor":{{"resource":"file://{}","forceFile":true}}}}"#,
+                    p.display()
+                )
+            })
+            .collect();
+        let db = rusqlite::Connection::open(ws.join("state.vscdb")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO ItemTable VALUES ('memento/workbench.parts.editor', ?1), ('history.entries', ?2)",
+            [parts, format!("[{}]", entries.join(","))],
+        )
+        .unwrap();
+        config
+    }
+
+    #[test]
+    fn finds_files_opened_from_outside_the_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("ai-logs");
+        let desktop = tmp.path().join("Desktop");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&desktop).unwrap();
+        let outside = desktop.join("test.txt");
+        std::fs::write(&outside, "hello").unwrap();
+        let title = "test.txt - ai-logs - Visual Studio Code";
+
+        // Not under the folder: only the window's open editors know it.
+        let config = fake_config(tmp.path(), &folder, &[&outside], &[]);
+        assert_eq!(resolve_file_in(title, Some(&config)), Some(outside.clone()));
+        assert_eq!(
+            resolve_file_in(&format!("● {title}"), Some(&config)),
+            Some(outside.clone())
+        );
+
+        // Only in the editor history: still found.
+        let tmp2 = tempfile::tempdir().unwrap();
+        let config = fake_config(tmp2.path(), &folder, &[], &[&outside]);
+        assert_eq!(resolve_file_in(title, Some(&config)), Some(outside.clone()));
+
+        // Not listed anywhere yet (VS Code saves this state late): not found.
+        let tmp3 = tempfile::tempdir().unwrap();
+        let config = fake_config(tmp3.path(), &folder, &[], &[]);
+        assert_eq!(resolve_file_in(title, Some(&config)), None);
+    }
+
+    #[test]
+    fn same_file_name_open_twice_is_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().join("ai-logs");
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&folder, &a, &b] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(a.join("test.txt"), "").unwrap();
+        std::fs::write(b.join("test.txt"), "").unwrap();
+        let config = fake_config(
+            tmp.path(),
+            &folder,
+            &[&a.join("test.txt"), &b.join("test.txt")],
+            &[],
+        );
+        assert_eq!(
+            resolve_file_in("test.txt - ai-logs - Visual Studio Code", Some(&config)),
+            None
+        );
+        // An open editor wins over a file of the same name inside the folder.
+        std::fs::write(folder.join("x.md"), "").unwrap();
+        std::fs::write(a.join("x.md"), "").unwrap();
+        let tmp2 = tempfile::tempdir().unwrap();
+        let config = fake_config(tmp2.path(), &folder, &[&a.join("x.md")], &[]);
+        assert_eq!(
+            resolve_file_in("x.md - ai-logs - Visual Studio Code", Some(&config)),
+            Some(a.join("x.md"))
+        );
+    }
+
+    #[test]
+    fn untitled_titles() {
+        assert!(title_is_untitled(
+            "Untitled-1 - ai-logs - Visual Studio Code"
+        ));
+        assert!(title_is_untitled(
+            "● first line • Untitled-12 - ai-logs - Visual Studio Code"
+        ));
+        assert!(!title_is_untitled(
+            "test.txt - ai-logs - Visual Studio Code"
+        ));
+        assert!(!title_is_untitled("Untitled-notes.md - Visual Studio Code"));
+        assert!(!title_is_untitled("Untitled-1 - Google Chrome"));
     }
 
     #[test]

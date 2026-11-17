@@ -157,6 +157,7 @@ impl Ingester {
         if stats.lines < MAX_LINES_PER_STEP {
             // Caught up with the log: idle sessions can close on the wall clock.
             sessions.close_idle(&tx, clock())?;
+            sessions.retry_tier2(&tx)?;
         }
         let results = std::mem::take(&mut self.tier2_results);
         for (id, result) in &results {

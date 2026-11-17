@@ -68,11 +68,15 @@ pub enum Tier2Start {
     NotApplicable,
     /// The edited file was copied to the snapshot path for this session.
     Snapshot { file: PathBuf },
+    /// The file cannot be identified yet (VS Code records newly opened files
+    /// with a delay); ask again later.
+    NotYet(String),
     /// Replay is impossible; the reason is recorded.
     Skipped(String),
 }
 
-/// Takes the file snapshot a tier 2 replay starts from, when a session opens.
+/// Takes the file snapshot a tier 2 replay starts from, when a session opens
+/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
 pub trait Tier2Snapshotter: Send {
     fn snapshot(
         &self,
@@ -97,6 +101,9 @@ struct OpenSession {
     start_hash: u64,
     /// The window's latest title, when typing renamed it (see `aliases`).
     latest: Option<Key>,
+    /// While the tier 2 file is not identified yet: the window title the
+    /// session started with, and when it started, to ask again.
+    tier2_retry: Option<(String, Millis)>,
 }
 
 fn text_hash(s: &str) -> u64 {
@@ -180,6 +187,7 @@ impl Sessions {
                     dirty: false,
                     start_hash,
                     latest: None,
+                    tier2_retry: None,
                 },
             );
         }
@@ -390,6 +398,26 @@ impl Sessions {
         })
     }
 
+    /// Asks again for the tier 2 snapshot of open sessions whose file could
+    /// not be identified yet. Call once per ingest step, when caught up.
+    pub fn retry_tier2(&mut self, tx: &Connection) -> Result<()> {
+        let Some(t2) = &self.tier2 else {
+            return Ok(());
+        };
+        for (k, s) in self.open.iter_mut() {
+            let Some((raw, started)) = &s.tier2_retry else {
+                continue;
+            };
+            let outcome = t2.snapshot(&k.0, raw, *started, s.id);
+            if !matches!(outcome, Tier2Start::NotYet(_)) {
+                s.tier2_retry = None;
+                s.tier2_snapshot = record_tier2(tx, s.id, outcome)?;
+                self.wrote = true;
+            }
+        }
+        Ok(())
+    }
+
     /// Writes the current text of open sessions that changed, so live
     /// searches see what is being typed right now.
     pub fn flush(&mut self, tx: &Connection) -> Result<()> {
@@ -431,24 +459,13 @@ impl Sessions {
         ])?;
         let id = tx.last_insert_rowid();
         let mut tier2_snapshot = false;
+        let mut tier2_retry = None;
         if let Some(t2) = &self.tier2 {
-            let (status, file) = match t2.snapshot(&k.0, raw_window, ts, id) {
-                Tier2Start::NotApplicable => (None, None),
-                Tier2Start::Snapshot { file } => {
-                    tier2_snapshot = true;
-                    (
-                        Some("snapshot".to_string()),
-                        Some(file.to_string_lossy().into_owned()),
-                    )
-                }
-                Tier2Start::Skipped(why) => (Some(format!("skipped: {why}")), None),
-            };
-            if status.is_some() {
-                tx.execute(
-                    "UPDATE sessions SET tier2_status = ?1, tier2_file = ?2 WHERE id = ?3",
-                    params![status, file, id],
-                )?;
+            let outcome = t2.snapshot(&k.0, raw_window, ts, id);
+            if matches!(outcome, Tier2Start::NotYet(_)) {
+                tier2_retry = Some((raw_window.to_string(), ts));
             }
+            tier2_snapshot = record_tier2(tx, id, outcome)?;
         }
         self.wrote = true;
         self.open.insert(
@@ -462,6 +479,7 @@ impl Sessions {
                 dirty: false,
                 start_hash,
                 latest: None,
+                tier2_retry,
             },
         );
         Ok(())
@@ -492,9 +510,17 @@ impl Sessions {
     /// leaves no row behind, except a commit of a non-empty line, which is a
     /// real submission (a shell command run again from history).
     fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
-        let Some(s) = self.open.remove(k) else {
+        let Some(mut s) = self.open.remove(k) else {
             return Ok(());
         };
+        // Last chance to identify the tier 2 file; after that it is skipped.
+        if let (Some((raw, started)), Some(t2)) = (s.tier2_retry.take(), &self.tier2) {
+            let outcome = match t2.snapshot(&k.0, &raw, started, s.id) {
+                Tier2Start::NotYet(why) => Tier2Start::Skipped(why),
+                other => other,
+            };
+            s.tier2_snapshot = record_tier2(tx, s.id, outcome)?;
+        }
         self.aliases.retain(|_, v| v != k);
         if self.last_key.as_ref().is_some_and(|(lk, _)| lk == k) {
             self.last_key = None;
@@ -506,8 +532,11 @@ impl Sessions {
             tx.prepare_cached(
                 "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
                     end_offset = ?3, end_reason = ?4,
-                    tier2_status = CASE WHEN tier2_status = 'snapshot' THEN 'pending'
-                                        ELSE tier2_status END
+                    tier2_status = CASE tier2_status
+                        WHEN 'snapshot' THEN 'pending'
+                        -- still identifying when brain stopped or crashed
+                        WHEN 'resolving' THEN 'skipped: could not identify the file from the window title'
+                        ELSE tier2_status END
                  WHERE id = ?5",
             )?
             .execute(params![
@@ -587,6 +616,24 @@ impl Sessions {
     pub fn into_tier2(self) -> Option<Box<dyn Tier2Snapshotter>> {
         self.tier2
     }
+}
+
+/// Records a tier 2 snapshot outcome on the session row; returns whether a
+/// snapshot was taken.
+fn record_tier2(tx: &Connection, id: i64, outcome: Tier2Start) -> Result<bool> {
+    let (status, file, taken) = match outcome {
+        Tier2Start::NotApplicable => return Ok(false),
+        Tier2Start::Snapshot { file } => (
+            "snapshot".to_string(),
+            Some(file.to_string_lossy().into_owned()),
+            true,
+        ),
+        Tier2Start::NotYet(_) => ("resolving".to_string(), None, false),
+        Tier2Start::Skipped(why) => (format!("skipped: {why}"), None, false),
+    };
+    tx.prepare_cached("UPDATE sessions SET tier2_status = ?1, tier2_file = ?2 WHERE id = ?3")?
+        .execute(params![status, file, id])?;
+    Ok(taken)
 }
 
 impl OpenSession {
@@ -960,6 +1007,105 @@ mod tests {
         let mut ing = l.ingester("b.db");
         run(&mut ing, clock_late);
         assert_eq!(texts(ing.connection()), vec!["one", "two", "three"]);
+    }
+
+    /// A tier 2 snapshotter that cannot identify the file for the first
+    /// `not_yet` calls, then answers `then`.
+    struct LateSnapshots {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        not_yet: usize,
+        then: super::Tier2Start,
+    }
+    impl super::Tier2Snapshotter for LateSnapshots {
+        fn snapshot(&self, _: &str, _: &str, _: Millis, _: i64) -> super::Tier2Start {
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n < self.not_yet {
+                super::Tier2Start::NotYet("not identified yet".into())
+            } else {
+                self.then.clone()
+            }
+        }
+        fn discard(&self, _: i64) {}
+    }
+
+    fn tier2_status(ing: &Ingester) -> Option<String> {
+        ing.connection()
+            .query_row("SELECT tier2_status FROM sessions", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn tier2_file_identified_late_is_retried() {
+        let mut l = Log::new();
+        l.typ(T0, "code", "test.txt - ai-logs - Visual Studio Code", "abc");
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let late = |not_yet, then| -> Box<dyn super::Tier2Snapshotter> {
+            Box::new(LateSnapshots {
+                calls: calls.clone(),
+                not_yet,
+                then,
+            })
+        };
+        let snapshot = super::Tier2Start::Snapshot {
+            file: "/home/u/Desktop/test.txt".into(),
+        };
+        // Found on the third try (two ingest steps after the session opened).
+        let mut ing = Ingester::with_tier2(
+            store::open_writer(&l.dir.join("a.db")).unwrap(),
+            &l.log_path(),
+            Some(late(2, snapshot.clone())),
+        )
+        .unwrap();
+        ing.step_at(clock_t0).unwrap(); // opens (try 1), retries (try 2)
+        assert_eq!(tier2_status(&ing).as_deref(), Some("resolving"));
+        ing.step_at(clock_t0).unwrap(); // try 3: found
+        assert_eq!(tier2_status(&ing).as_deref(), Some("snapshot"));
+        let file: String = ing
+            .connection()
+            .query_row("SELECT tier2_file FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(file, "/home/u/Desktop/test.txt");
+        ing.step_at(clock_late).unwrap(); // idle close: queued for replay
+        assert_eq!(tier2_status(&ing).as_deref(), Some("pending"));
+        assert_eq!(ing.take_tier2_jobs(), vec![1]);
+
+        // Never identified: the session closes as skipped, with the reason.
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut ing = Ingester::with_tier2(
+            store::open_writer(&l.dir.join("b.db")).unwrap(),
+            &l.log_path(),
+            Some(late(usize::MAX, snapshot.clone())),
+        )
+        .unwrap();
+        ing.step_at(clock_t0).unwrap();
+        ing.step_at(clock_late).unwrap();
+        assert_eq!(
+            tier2_status(&ing).as_deref(),
+            Some("skipped: not identified yet")
+        );
+        assert!(ing.take_tier2_jobs().is_empty());
+
+        // Identified, but impossible to replay (saved in between): skipped
+        // with that reason, and not asked again.
+        calls.store(0, std::sync::atomic::Ordering::SeqCst);
+        let mut ing = Ingester::with_tier2(
+            store::open_writer(&l.dir.join("c.db")).unwrap(),
+            &l.log_path(),
+            Some(late(
+                1,
+                super::Tier2Start::Skipped("saved meanwhile".into()),
+            )),
+        )
+        .unwrap();
+        ing.step_at(clock_t0).unwrap();
+        let after_skip = calls.load(std::sync::atomic::Ordering::SeqCst);
+        ing.step_at(clock_t0).unwrap();
+        ing.step_at(clock_late).unwrap();
+        assert_eq!(
+            tier2_status(&ing).as_deref(),
+            Some("skipped: saved meanwhile")
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), after_skip);
     }
 
     #[test]

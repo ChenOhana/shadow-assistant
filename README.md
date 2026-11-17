@@ -251,7 +251,15 @@ Ingest (inside `brain run`, about once a second) turns the log into
   network-less sandbox with capped CPU and memory. The session text then
   comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
   The session stores the changed lines. If replay is impossible or fails,
-  the tier 0/1 text stays.
+  the tier 0/1 text stays, and the `tier2_status` column says why.
+  The edited file is found from the window title: VS Code's default title
+  only has the file and folder names, so `brain` looks the name up in VS
+  Code's own state for that window (the editors it has open, also for files
+  opened from outside the folder), under the folder, and in the window's
+  editor history. VS Code records a newly opened file there a little late,
+  so the lookup is retried while the session is open (up to 2 minutes).
+  For an instant, exact match, put the full path in the title (VS Code
+  setting `"window.title": "${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"`).
 
 Inspect the result:
 
@@ -337,7 +345,10 @@ sqlite3 ~/brain-data/brain.db \
 * **Sessions that changed nothing leave no row** (cursor movement only, a
   typo typed and deleted, whitespace).
 * **VS Code tier 2 is opt-in** (`--vscode-replay`): it needs the file's
-  content at session start (snapshot within 10 s, no unsaved changes),
+  content at session start, so it is skipped for unsaved new files
+  (`Untitled-1`), files with unsaved changes when the session started, and
+  files saved before they could be identified (within 2 minutes of the
+  session start);
   costs ~25 s for the first replay and ~1.2 GB while VS Code runs (capped,
   outside brain's budget), and runs with extensions disabled when your
   extensions exceed 300 MB. Suggestion acceptance may not replay the same.
@@ -392,6 +403,8 @@ Tests against real software are opt-in (`-- --ignored`):
 cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
 # Drive a real (headless) VS Code:
 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+#   (tier2_e2e includes a file opened from outside the window's folder,
+#    identified late through VS Code's window state)
 ```
 
 The Kate tests need two narrow permissions, granted once by

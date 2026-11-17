@@ -34,7 +34,7 @@ CREATE TABLE sessions (
   start_offset       INTEGER NOT NULL,           -- log offset of the session's first event
   end_offset         INTEGER,                    -- log offset just past its last event
   end_reason         TEXT,                       -- idle | commit | cancel | field | stop | restart
-  tier2_status       TEXT,                       -- VS Code replay: snapshot | pending | done | failed: .. | skipped: ..
+  tier2_status       TEXT,                       -- VS Code replay: resolving | snapshot | pending | done | failed: .. | skipped: ..
   tier2_file         TEXT                        -- the edited file, for VS Code replay
 );
 CREATE INDEX idx_sessions_app_time ON sessions(app, started_at);
