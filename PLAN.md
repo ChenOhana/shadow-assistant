@@ -429,16 +429,16 @@ window has to be read anyway. Clock steps backwards are discussed in section
   match. Open sessions are included with their live text and
   `ended_at: null`. A session is in a time window if it overlaps it.
 - **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed
-  into the app during the window, reconstructed. The window's key and paste
-  events (read from the log, section 5.5) are split per window title and
-  each window's events run, from an empty text, through the app's tier 0/1
-  adapter: the same `editor::action` and `FieldEditor` the session engine
-  uses, without sessions. A submit in a single-line field (Enter at a shell
-  prompt) keeps the line and continues on a fresh one; Up recalls lines
-  submitted earlier in the window. Output: `windows` (each window's text,
-  by first keystroke) and `text` (them joined, one per line). *Differs from
-  the design*, where `text` was the raw keystroke stream; the owner changed
-  it.
+  into the app during the time range, reconstructed. The range's key and
+  paste events (read from the log, section 5.5) are split per app window
+  (window title) and each app window's events run, from an empty text,
+  through the app's tier 0/1 adapter: the same `editor::action` and
+  `FieldEditor` the session engine uses, without sessions. A submit in a
+  single-line field (Enter at a shell prompt) keeps the line and continues
+  on a fresh one; Up recalls lines submitted earlier in the same app window.
+  Output: `windows` (each app window's text, by first keystroke) and `text`
+  (them joined, one per line). *Differs from the design*, where `text` was
+  the raw keystroke stream; the owner changed it.
 - **`--app A`** can be part of an app id, ignoring case. `search` keeps
   every matching app; `text` resolves it to one full id (exact match first,
   else the single id containing it; ambiguous or unknown is an error) and
@@ -501,11 +501,13 @@ window has to be read anyway. Clock steps backwards are discussed in section
   independent model, with random early and late wakeups), the recorder, the
   log's torn-tail repair, schema and search, ingest, the tier 0 buffer and
   tier 1 rules, title normalization and renames, every session rule, crash
-  recovery after every line, time parsing and query windows.
+  recovery after every line, time parsing, query windows, and `query text`'s
+  per-window reconstruction (the README's example, event for event).
 - **Integration tests run by default**: `crash_safety` (25 `kill -9`s under
   load, compared with a clean rebuild), `query_cli` (the binary's JSON
-  output, search semantics through the CLI, time windows, raw text, errors,
-  and thousands of queries while `run` writes), `perf_budget` (CPU and
+  output, search semantics through the CLI, time windows, reconstructed
+  text including the README's example, errors, and thousands of queries
+  while `run` writes), `perf_budget` (CPU and
   memory budget).
 - **Opt-in tests against real software**: `repeat_e2e` and
   `real_keyboard_e2e` type through a uinput keyboard into real Kate windows

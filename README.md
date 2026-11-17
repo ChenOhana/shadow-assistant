@@ -119,15 +119,15 @@ brain query text --app A [--from T] [--to T] [--at T]
   a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
   first (default limit 20). Open sessions are included with what has been
   typed so far (`ended_at: null`).
-* **`text`**: what was typed into the app during the window,
-  **reconstructed**: the window's keys and pastes, per window title, run
-  through the app's tier 0/1 rules (Backspace, selections, undo, Enter
-  submitting a shell line, …), each window starting empty at the window's
-  start. Sessions play no part: a document edited in several sessions is one
-  text. `windows` lists each window's text, ordered by its first keystroke;
-  `text` joins them one per line. Edits reaching into text typed before the
-  window (Backspace past its start, Ctrl+A) only affect what was typed
-  inside it.
+* **`text`**: what was typed into the app during the time range,
+  **reconstructed**: the keys and pastes of the range, split per app window
+  (window title), run through the app's tier 0/1 rules (Backspace,
+  selections, undo, Enter submitting a shell line, …), each app window
+  starting empty at the start of the range. Sessions play no part: a
+  document edited in several sessions is one text. `windows` lists each app
+  window's text, ordered by its first keystroke; `text` joins them one per
+  line. Edits reaching into text typed before the range (Backspace past its
+  start, Ctrl+A) only affect what was typed inside it.
 * **`--app A`** can be part of the app id, ignoring case (`--app chrome`
   finds `google-chrome`). `search` keeps every app that matches. `text`
   resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
@@ -154,6 +154,8 @@ too, with their offset (`2026-11-17T00:04:38.044+02:00`, still RFC 3339),
 and the resolved window is echoed (`from`, `to`, `at`). The log and the
 database store UTC.
 
+`search` output:
+
 ```json
 {
   "query": "migration blocked",
@@ -171,6 +173,8 @@ database store UTC.
   ]
 }
 ```
+
+`text` output:
 
 ```json
 {
@@ -333,10 +337,10 @@ sqlite3 ~/brain-data/brain.db \
   extensions exceed 300 MB. Suggestion acceptance may not replay the same.
 
 **Queries**
-* **`query text` reconstructs "stupidly", by window.** It takes the keys
-  typed in the time window and runs them through the same tier 0/1 adapters
-  the sessions use, per app and window title, from an empty text: no session
-  boundaries, no text from before the window. (An earlier version returned
+* **`query text` reconstructs "stupidly", per app window.** It takes the
+  keys typed in the time range and runs them through the same tier 0/1
+  adapters the sessions use, per app and window title, from an empty text:
+  no session boundaries, no text from before the range. (An earlier version returned
   the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
 * **Search matches substrings.** The index uses SQLite FTS5's trigram
   tokenizer: a query word matches anywhere inside a word, ignoring case and

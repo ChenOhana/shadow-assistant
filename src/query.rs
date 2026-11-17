@@ -1,10 +1,11 @@
-//! `brain query`: `search` over sessions and `text` over the raw log.
+//! `brain query`: `search` over sessions and `text` over the log.
 //!
 //! Both run while `brain run` writes. `search` is a single SELECT on a
 //! read-only connection, so it sees one consistent snapshot of the index
 //! (WAL). `text` reads the capture log, whose reader only returns complete
-//! lines, starting at the checkpoint just before its window, and runs the
-//! window's keys through the tier 0/1 reconstruction, one text per window.
+//! lines, starting at the checkpoint just before its time range, and runs
+//! the range's keys through the tier 0/1 reconstruction, one text per app
+//! window.
 
 use crate::datadir::DataDir;
 use crate::event::EventKind;
@@ -302,7 +303,7 @@ pub struct TextWindow {
 /// The text typed into one app over the window, reconstructed: the window's
 /// keys and pastes, per window title, run through the app's tier 0/1 adapter
 /// (see [`reconstruct_windows`]). `app` may be part of the app id; see
-/// [`resolve_app`].
+/// `resolve_app`.
 pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
     let w = resolve(flags, Command::Text, now)?;
     let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));

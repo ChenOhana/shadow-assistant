@@ -16,7 +16,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 use std::time::Duration;
 
-/// Bumped whenever the schema changes; see [`init_schema`].
+/// Bumped whenever the schema changes; see `init_schema`.
 pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"

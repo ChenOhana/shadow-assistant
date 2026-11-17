@@ -33,13 +33,13 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 ## Decisions already made by the owner — do not re-litigate
 
 - `brain query text` reconstructs "stupidly": the keys typed in the time
-  window, per app and window title, run through the tier 0/1 adapters from
+  range, per app and window title, run through the tier 0/1 adapters from
   an empty text (no sessions involved); output `windows` + joined `text`.
   It replaced the earlier raw-keystroke output at the owner's request.
-  Window: default last 10 min,
-  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
-  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
-  `text` resolves it to exactly one app and reports the full id.
+  Range: default last 10 min, `--at T` = the 10 minutes ending at T, or
+  `--from/--to`. Times accept relative (`-2h`), local and RFC 3339 forms.
+  `--app` may be part of the id; `text` resolves it to exactly one app and
+  reports the full id.
 - Sessions: keyed by (app, normalized window title); close after 30 s idle
   in that context or on Enter in single-line contexts; focus loss alone
   never closes a session; a title change of the typed window (a `renamed`
