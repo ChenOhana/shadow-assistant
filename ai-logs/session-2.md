@@ -11141,3 +11141,1831 @@ The commit and push went through (`e8aad3f`), but my last PLAN.md edit didn't ap
 
 </details>
 
+## Assistant  <sub>2026-11-16T21:46:09.243Z</sub>
+
+Last step: the final `ai-logs/` refresh.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Final transcripts, through the end-to-end verification.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -1 && git status --short | head",
+  "description": "Final ai-logs refresh, commit, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+ee3f508 Refresh AI logs
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T21:46:25.323Z</sub>
+
+Everything is done and pushed (`ee3f508`), and every test suite passes on the finished build, including both Kate tests. Your real-keyboard run found one more real bug in `brain`, which is now fixed.
+
+**The bug:** text typed in a second Kate window was filed under the first window's session. The rule that keeps VS Code's new-file session together (a title change shortly after typing counts as a rename) also fired when another Kate window opened less than a second after typing.
+
+**The fix:** KWin knows whether focus moved to a different window or the same window's title changed, and now passes that on. Focus events in the log carry `"renamed": true` for title changes. Only a title change of the window you typed in can count as a rename. Activating any other window, including by mouse click, never does. A regression test reproduces the exact Kate sequence.
+
+**Final results:**
+- **119 unit tests**, crash safety, `query_cli`, and `perf_budget` (0.1% CPU, 8.1 MB): pass.
+- **Real keyboard test:** passes. Kate and `brain` agree exactly: A = `hello שלום world againx`, B = `beta`, one session each. The layout was restored to English, and no Kate windows were left open.
+- **Repeat test:** passes. I fixed a flaw in it as well. For holds ending exactly on a repeat's due time, the test's own sleep makes the real hold a fraction of a millisecond longer, which legitimately adds that repeat. Kate got the same extra character.
+- **VS Code** (12 replay tests and the tier-2 end-to-end test): pass.
+
+**Docs:**
+- README and PLAN.md describe the activation-vs-title-change rule.
+- The mouse caveat is narrower now: only switching *tabs* within one window by mouse, within 1 s of typing, can still be mistaken for a rename.
+- The bug is item 11 in "Where the agent failed".
+- `ai-logs/` has the final transcripts, with your email redacted.
+
+The repo has every deliverable the assignment asks for: the code, README (build/run, supported OS, permissions, decisions and edge cases, where the agent failed), PLAN.md, CLAUDE.md and `ai-logs/`.
+
+To use the final build, delete the database once (the focus event format changed) and reinstall:
+```
+! rm ~/brain-data/brain.db && make
+```
+
+## User  <sub>2026-11-16T21:48:14.848Z</sub>
+
+ok so what's left now?
+
+## Assistant  <sub>2026-11-16T21:48:35.060Z</sub>
+
+Nothing required is left. Every deliverable is in the repo and every test passes.
+
+**Before you submit, two things only you can do:**
+1. **Give the reviewers access.** The repo is private (`ChenOhana/shadow-assistant`), so either add them as collaborators or make it public.
+2. **Read it once as a reviewer would:** README, PLAN.md, and the "Where the agent failed" section. Tell me anything you want changed.
+
+**Optional, if you want to go further:**
+- **Try it yourself:** run `make install-service` to have `brain` running all the time, and try `brain run --vscode-replay` on real VS Code typing. Tier 2 has only been tested with keystrokes I generated.
+- **More tests** from the earlier list:
+  - automated sleep/wake (suspends the machine on each run)
+  - screen lock and unlock
+  - KWin restarting while `brain` runs
+  - live clipboard paste through Klipper
+  - the 24 h document expiry
+  - the VS Code snapshot refusals
+- **The exact `query text` window** for clock jumps, which you said not to do for now.
+- **Future work from PLAN.md:** the accessibility bus (AT-SPI) as a second source of real text, replay in a real terminal or Chrome like the VS Code tier, and pruning old log data.
+
+Pick any of these, or I can stop here.
+
+## User  <sub>2026-11-16T21:50:43.976Z</sub>
+
+the tests you mentioned don't  already exist?
+
+## Assistant  <sub>2026-11-16T21:50:58.372Z</sub>
+
+No, those specific ones don't exist as automated tests. Some of the logic underneath is unit-tested, but the live path through the real system isn't:
+
+| Scenario | What exists today | What's missing |
+|---|---|---|
+| **Sleep/wake** | Tested by hand once, with a real suspend | No automated test. Nothing checks the keyboard reopen path after wake |
+| **Screen lock/unlock** | A unit test with a fake recorder: keys are dropped while paused, lock and unlock events are written, focus is re-stated. Plus one manual lock and unlock | No test of the real screen-lock signal from KDE |
+| **KWin restarting** (or not up yet when `brain` starts) | Nothing, only the code | Any test |
+| **Live clipboard paste** | A unit test with a fake clipboard: Ctrl+V writes a paste event, long text is truncated. The sessions and query tests use paste events from the log | No test of actually reading Klipper |
+| **24 h document expiry** | Nothing | Any test |
+| **VS Code snapshot refusals** (unsaved changes, file changed after the session started, too late, file not found, too large) | Nothing. The end-to-end test only covers the case where the snapshot succeeds | Any test |
+
+Of these, three can be automated with no effect on your desktop, and I'd write them:
+- **24 h document expiry:** a session test on a hand-written log.
+- **VS Code snapshot refusals:** unit tests with temporary files.
+- **KWin "not up yet" and "restarted":** testable at the D-Bus level with a fake KWin name on a private test bus.
+
+The other three touch your real session, so they'd run only when you start them:
+- **Sleep/wake:** suspends the machine.
+- **Lock/unlock:** locks your screen, and you'd have to unlock it.
+- **Live Klipper paste:** replaces your clipboard contents.
+
+Should I write the three that don't touch your desktop?
+
+## User  <sub>2026-11-16T22:01:45.669Z</sub>
+
+i want query commands to output local time and in text the app output should be the full real app name as saved in the db and not the substring that was given
+
+## Assistant  <sub>2026-11-16T22:02:10.047Z</sub>
+
+Two changes:
+1. **Local times in all `query` output:** result times and the echoed window become RFC 3339 with your offset, e.g. `2026-11-16T16:51:14.684+02:00` instead of `…14:51:14.684Z`. The log and database keep storing UTC.
+2. **`text` reports the real app id.** `--app` still accepts part of a name, but the output's `app` is the full id, e.g. `--app kate` gives `"app": "org.kde.kate"`. How the name gets resolved:
+   - The candidates are the app ids in the database plus those seen in the requested window.
+   - If one matches the input exactly (ignoring case), that one wins.
+   - Otherwise, if exactly one id contains it, that's the app.
+   - If several contain it, it's an error listing them, so text from different apps never gets mixed.
+   - If none do, it's an error too, listing the known apps. An app that exists but had no typing in the window still returns empty text.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fmt_opt\\|format_ms\\|pub fn text' src/query.rs | head -20; grep -n 'pub fn format_ms' -B2 -A8 src/timefmt.rs",
+  "description": "Locate time formatting in query and timefmt"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+104:            timefmt::format_ms(f),
+105:            timefmt::format_ms(t)
+111:fn fmt_opt(t: Option<Millis>) -> Option<String> {
+112:    t.map(timefmt::format_ms)
+199:        params.push(Box::new(timefmt::format_ms(to)));
+203:        params.push(Box::new(timefmt::format_ms(from)));
+205:        params.push(Box::new(timefmt::format_ms(now)));
+225:        from: fmt_opt(w.from),
+226:        to: fmt_opt(w.to),
+289:pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
+293:    let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;
+318:        at: fmt_opt(w.at),
+319:        from: fmt_opt(w.from),
+320:        to: fmt_opt(w.to),
+25-
+26-/// Formats as `YYYY-MM-DDTHH:MM:SS.mmmZ`.
+27:pub fn format_ms(ms: Millis) -> String {
+28-    match Utc.timestamp_millis_opt(ms).single() {
+29-        Some(dt) => dt.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
+30-        // Out of chrono's range; cannot happen for real clock readings.
+31-        None => "1970-01-01T00:00:00.000Z".to_string(),
+32-    }
+33-}
+34-
+35-/// Parses an RFC 3339 timestamp (any offset), as written in the log.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 205,232p src/query.rs; sed -n 280,325p src/query.rs",
+  "description": "Read search row mapping and text function"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        params.push(Box::new(timefmt::format_ms(now)));
+        sql += &format!(" AND COALESCE(ended_at, ?{}) >= ?{n}", params.len());
+    }
+    params.push(Box::new(limit as i64));
+    sql += &format!(" ORDER BY started_at DESC, id DESC LIMIT ?{}", params.len());
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+        let text: String = r.get(5)?;
+        Ok(SearchResult {
+            session_id: r.get::<_, i64>(0)?.to_string(),
+            app: r.get(1)?,
+            window: r.get(2)?,
+            started_at: r.get(3)?,
+            ended_at: r.get(4)?,
+            snippet: snippet(&text, &words),
+        })
+    })?;
+    Ok(SearchOutput {
+        query: query.to_string(),
+        from: fmt_opt(w.from),
+        to: fmt_opt(w.to),
+        results: rows.collect::<rusqlite::Result<_>>()?,
+    })
+}
+
+/// About 40 characters on each side of the first match of any query word,
+/// on one line, with "…" where the text was cut.
+    pub at: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub text: String,
+}
+
+/// The raw typed stream of the apps matching `app`, over the window: every
+/// key as captured, with no editing applied (see [`render_key`]), and pasted
+/// text inline.
+pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
+    let w = resolve(flags, Command::Text, now)?;
+    let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));
+    let conn = store::open_reader(&dir.db_path())?;
+    let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;
+    drop(conn);
+    let needle = app.to_lowercase();
+    let mut out = String::new();
+    if dir.log_path().exists() {
+        let mut reader = LogReader::open(&dir.log_path(), start)?;
+        while let Some(line) = reader.next_line()? {
+            let Some(ev) = line.event else { continue };
+            if ev.ts > to.saturating_add(CLOCK_SLACK_MS) {
+                break;
+            }
+            if ev.ts < from || ev.ts > to || !ev.app.to_lowercase().contains(&needle) {
+                continue;
+            }
+            match ev.kind {
+                EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),
+                EventKind::Paste {
+                    text: Some(text), ..
+                } => out.push_str(&text),
+                _ => {}
+            }
+        }
+    }
+    Ok(TextOutput {
+        app: app.to_string(),
+        at: fmt_opt(w.at),
+        from: fmt_opt(w.from),
+        to: fmt_opt(w.to),
+        text: out,
+    })
+}
+
+/// One key of the raw stream: a typed character as itself, Enter as a
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/timefmt.rs',[\n(\"\"\"/// Parses an RFC 3339 timestamp (any offset), as written in the log.\"\"\",\"\"\"/// Formats in the local time zone with its offset, for people:\n/// `2026-11-16T16:51:14.684+02:00` (still RFC 3339).\npub fn format_local(ms: Millis) -> String {\n    match Local.timestamp_millis_opt(ms).single() {\n        Some(dt) => dt.format(\"%Y-%m-%dT%H:%M:%S%.3f%:z\").to_string(),\n        None => format_ms(ms),\n    }\n}\n\n/// Re-formats a stored (UTC) timestamp in local time; unparsable input is\n/// returned unchanged.\npub fn to_local(stored: &str) -> String {\n    parse_rfc3339_ms(stored)\n        .map(format_local)\n        .unwrap_or_else(|_| stored.to_string())\n}\n\n/// Parses an RFC 3339 timestamp (any offset), as written in the log.\"\"\"),\n(\"\"\"    #[test]\n    fn parses_relative_times() {\"\"\",\"\"\"    #[test]\n    fn local_output_is_the_same_instant() {\n        let ms = 1_800_000_000_123;\n        let local = format_local(ms);\n        assert_eq!(parse_rfc3339_ms(&local).unwrap(), ms);\n        assert_eq!(to_local(&format_ms(ms)), local);\n        assert_eq!(to_local(\"garbage\"), \"garbage\");\n    }\n\n    #[test]\n    fn parses_relative_times() {\"\"\"),\n])\nedit('src/query.rs',[\n(\"\"\"            \"the time window is empty: it starts at {} and ends at {}\",\n            timefmt::format_ms(f),\n            timefmt::format_ms(t)\"\"\",\"\"\"            \"the time window is empty: it starts at {} and ends at {}\",\n            timefmt::format_local(f),\n            timefmt::format_local(t)\"\"\"),\n(\"\"\"fn fmt_opt(t: Option<Millis>) -> Option<String> {\n    t.map(timefmt::format_ms)\n}\"\"\",\"\"\"/// Output times are local, with their offset (the database stores UTC).\nfn fmt_opt(t: Option<Millis>) -> Option<String> {\n    t.map(timefmt::format_local)\n}\"\"\"),\n(\"\"\"            started_at: r.get(3)?,\n            ended_at: r.get(4)?,\"\"\",\"\"\"            started_at: timefmt::to_local(&r.get::<_, String>(3)?),\n            ended_at: r.get::<_, Option<String>>(4)?.map(|t| timefmt::to_local(&t)),\"\"\"),\n(\"\"\"/// The raw typed stream of the apps matching `app`, over the window: every\n/// key as captured, with no editing applied (see [`render_key`]), and pasted\n/// text inline.\npub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {\n    let w = resolve(flags, Command::Text, now)?;\n    let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));\n    let conn = store::open_reader(&dir.db_path())?;\n    let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;\n    drop(conn);\n    let needle = app.to_lowercase();\n    let mut out = String::new();\n    if dir.log_path().exists() {\n        let mut reader = LogReader::open(&dir.log_path(), start)?;\n        while let Some(line) = reader.next_line()? {\n            let Some(ev) = line.event else { continue };\n            if ev.ts > to.saturating_add(CLOCK_SLACK_MS) {\n                break;\n            }\n            if ev.ts < from || ev.ts > to || !ev.app.to_lowercase().contains(&needle) {\n                continue;\n            }\n            match ev.kind {\n                EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),\n                EventKind::Paste {\n                    text: Some(text), ..\n                } => out.push_str(&text),\n                _ => {}\n            }\n        }\n    }\n    Ok(TextOutput {\n        app: app.to_string(),\"\"\",\"\"\"/// The raw typed stream of one app over the window: every key as captured,\n/// with no editing applied (see [`render_key`]), and pasted text inline.\n/// `app` may be part of the app id; see [`resolve_app`].\npub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, n
+… [4446 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T22:02:57.051Z</sub>
+
+Unit tests pass, including the new name-resolution tests. Now updating the CLI tests for local times, full app ids, and "no such app" being an error:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/query_cli.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:70]; s=s.replace(old,new)\nrep(\"\"\"use brain::timefmt::{Millis, format_ms, now_ms};\"\"\",\"\"\"use brain::timefmt::{Millis, format_ms, now_ms, parse_rfc3339_ms};\"\"\")\nrep(\"\"\"fn ids(v: &Value) -> Vec<String> {\"\"\",\"\"\"/// An output timestamp as epoch milliseconds (output is local time).\nfn instant(v: &Value) -> Millis {\n    parse_rfc3339_ms(v.as_str().unwrap_or_else(|| panic!(\"not a time: {v}\"))).unwrap()\n}\n\n/// Output times are local, with the local offset (not UTC \"Z\").\nfn assert_local(v: &Value) {\n    let s = v.as_str().unwrap();\n    let ms = parse_rfc3339_ms(s).unwrap();\n    assert_eq!(s, brain::timefmt::format_local(ms), \"not local time: {s}\");\n}\n\nfn ids(v: &Value) -> Vec<String> {\"\"\")\nrep(\"\"\"    for field in [\"session_id\", \"app\", \"window\", \"started_at\", \"ended_at\", \"snippet\"] {\n        assert!(r.get(field).is_some(), \"missing {field}: {r}\");\n    }\"\"\",\"\"\"    for field in [\"session_id\", \"app\", \"window\", \"started_at\", \"ended_at\", \"snippet\"] {\n        assert!(r.get(field).is_some(), \"missing {field}: {r}\");\n    }\n    assert_eq!(r[\"app\"], \"org.kde.kate\");\n    assert_local(&r[\"started_at\"]);\n    assert_local(&r[\"ended_at\"]);\"\"\")\nrep(\"\"\"    // The resolved window is echoed back.\n    let (_, v, _) = brain(d, &[\"search\", \"git\", \"--from\", &at]);\n    assert_eq!(v[\"from\"], Value::String(at));\"\"\",\"\"\"    // The resolved window is echoed back, in local time.\n    let (_, v, _) = brain(d, &[\"search\", \"git\", \"--from\", &at]);\n    assert_eq!(instant(&v[\"from\"]), parse_rfc3339_ms(&at).unwrap());\n    assert_local(&v[\"from\"]);\n    assert_local(&v[\"to\"]);\"\"\")\nrep(\"\"\"    assert_eq!(v[\"app\"], \"kate\");\n    assert_eq!(v[\"at\"], Value::Null);\"\"\",\"\"\"    // The full app id, not the part that was given.\n    assert_eq!(v[\"app\"], \"org.kde.kate\");\n    assert_eq!(v[\"at\"], Value::Null);\n    assert_local(&v[\"from\"]);\"\"\")\nrep(\"\"\"    assert_eq!(v[\"text\"], \"git status\\\\n\");\n    assert_eq!(v[\"at\"], Value::String(at));\"\"\",\"\"\"    assert_eq!(v[\"text\"], \"git status\\\\n\");\n    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    assert_eq!(instant(&v[\"at\"]), parse_rfc3339_ms(&at).unwrap());\n    assert_local(&v[\"at\"]);\"\"\")\nrep(\"\"\"    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"chrome\"]);\n    assert_eq!(v[\"text\"], \"<Ctrl+V>pasted words\\\\n\");\n    // Nothing typed in the window: empty text, not an error.\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"nosuchapp\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\"\"\",\"\"\"    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"chrome\"]);\n    assert_eq!(v[\"text\"], \"<Ctrl+V>pasted words\\\\n\");\n    assert_eq!(v[\"app\"], \"google-chrome\");\n    // A known app with nothing typed in the window: empty text, full id.\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", \"-1m\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\n    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    // An unknown app, or one matching several apps, is an error.\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"nosuchapp\"]);\n    assert_ne!(code, 0);\n    assert!(err.contains(\"no app matches\") && err.contains(\"org.kde.kate\"), \"{err}\");\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"org.kde\"]);\n    assert_ne!(code, 0);\n    assert!(err.contains(\"several apps\"), \"{err}\");\"\"\")\nrep(\"\"\"                assert!(r[\"started_at\"].as_str().unwrap().ends_with('Z'));\"\"\",\"\"\"                assert_local(&r[\"started_at\"]);\"\"\")\nrep(\"\"\"        let (code, v, err) = brain(&dir, &[\"text\", \"--app\", \"synthetic\", \"--from\", \"-5s\"]);\n        assert_eq!(code, 0, \"{err}\");\n        ass
+… [572 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 19, in <module>
+  File "<stdin>", line 4, in rep
+AssertionError:     for field in ["session_id", "app", "window", "started_at", "ended_
+test text_is_the_raw_stream ... FAILED
+test errors_exit_non_zero_with_a_message ... ok
+test search_time_windows ... FAILED
+test search_semantics_and_shapes ... ok
+test queries_are_consistent_while_run_writes ... FAILED
+thread 'text_is_the_raw_stream' (406505) panicked at tests/query_cli.rs:226:5:
+assertion `left == right` failed
+  left: String("org.kde.kate")
+ right: "kate"
+thread 'search_time_windows' (406504) panicked at tests/query_cli.rs:210:5:
+[This command modified 1 file you've previously read: src/query.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T22:03:37.708Z</sub>
+
+The script stopped because `cargo fmt` had re-wrapped one of the lines I was replacing, so nothing was written. Let me see the current formatting.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'for field in' -A10 tests/query_cli.rs",
+  "description": "Show the reformatted field-check block"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+149:    for field in [
+150-        "session_id",
+151-        "app",
+152-        "window",
+153-        "started_at",
+154-        "ended_at",
+155-        "snippet",
+156-    ] {
+157-        assert!(r.get(field).is_some(), "missing {field}: {r}");
+158-    }
+159-    // Newest first: session 2 (still contains "sat"), then session 1.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/query_cli.rs'; s=open(p).read()\nimport re\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:70]; s=s.replace(old,new)\nrep(\"\"\"use brain::timefmt::{Millis, format_ms, now_ms};\"\"\",\"\"\"use brain::timefmt::{Millis, format_ms, now_ms, parse_rfc3339_ms};\"\"\")\nrep(\"\"\"fn ids(v: &Value) -> Vec<String> {\"\"\",\"\"\"/// An output timestamp as epoch milliseconds (output is local time).\nfn instant(v: &Value) -> Millis {\n    parse_rfc3339_ms(v.as_str().unwrap_or_else(|| panic!(\"not a time: {v}\"))).unwrap()\n}\n\n/// Output times are local, with the local offset (not UTC \"Z\").\nfn assert_local(v: &Value) {\n    let s = v.as_str().unwrap();\n    let ms = parse_rfc3339_ms(s).unwrap();\n    assert_eq!(s, brain::timefmt::format_local(ms), \"not local time: {s}\");\n}\n\nfn ids(v: &Value) -> Vec<String> {\"\"\")\nrep(\"\"\"        assert!(r.get(field).is_some(), \"missing {field}: {r}\");\n    }\n    // Newest first\"\"\",\"\"\"        assert!(r.get(field).is_some(), \"missing {field}: {r}\");\n    }\n    assert_eq!(r[\"app\"], \"org.kde.kate\");\n    assert_local(&r[\"started_at\"]);\n    assert_local(&r[\"ended_at\"]);\n    // Newest first\"\"\")\nopen(p,'w').write(s)\nEOF\ngrep -n 'resolved window is echoed\\|assert_eq!(v\\[\"app\"\\], \"kate\")\\|Value::String(at)\\|nosuchapp\\|ends_with(.Z.)\\|\"--app\", \"synthetic\"' -A3 tests/query_cli.rs",
+  "description": "Apply first edits; locate the rest in formatted form"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+223:    // The resolved window is echoed back.
+224-    let (_, v, _) = brain(d, &["search", "git", "--from", &at]);
+225:    assert_eq!(v["from"], Value::String(at));
+226-}
+227-
+228-#[test]
+--
+241:    assert_eq!(v["app"], "kate");
+242-    assert_eq!(v["at"], Value::Null);
+243-    // --at: the 10 minutes ending at T; only that app's keys.
+244-    let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
+--
+247:    assert_eq!(v["at"], Value::String(at));
+248-    // Default: the last 10 minutes, with shortcuts named and pastes inline.
+249-    let (_, v, _) = brain(d, &["text", "--app", "chrome"]);
+250-    assert_eq!(v["text"], "<Ctrl+V>pasted words\n");
+--
+252:    let (code, v, _) = brain(d, &["text", "--app", "nosuchapp"]);
+253-    assert_eq!((code, v["text"].as_str()), (0, Some("")));
+254-}
+255-
+--
+305:                assert!(r["started_at"].as_str().unwrap().ends_with('Z'));
+306-                hits += 1;
+307-            }
+308-            searches += 1;
+--
+310:        let (code, v, err) = brain(&dir, &["text", "--app", "synthetic", "--from", "-5s"]);
+311-        assert_eq!(code, 0, "{err}");
+312-        assert!(v["text"].is_string());
+313-    }
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/query_cli.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:70]; s=s.replace(old,new)\nrep(\"\"\"    // The resolved window is echoed back.\n    let (_, v, _) = brain(d, &[\"search\", \"git\", \"--from\", &at]);\n    assert_eq!(v[\"from\"], Value::String(at));\"\"\",\"\"\"    // The resolved window is echoed back, in local time.\n    let (_, v, _) = brain(d, &[\"search\", \"git\", \"--from\", &at]);\n    assert_eq!(instant(&v[\"from\"]), parse_rfc3339_ms(&at).unwrap());\n    assert_local(&v[\"from\"]);\n    assert_local(&v[\"to\"]);\"\"\")\nrep(\"\"\"    assert_eq!(v[\"app\"], \"kate\");\n    assert_eq!(v[\"at\"], Value::Null);\"\"\",\"\"\"    // The full app id, not the part that was given.\n    assert_eq!(v[\"app\"], \"org.kde.kate\");\n    assert_eq!(v[\"at\"], Value::Null);\n    assert_local(&v[\"from\"]);\"\"\")\nrep(\"\"\"    assert_eq!(v[\"at\"], Value::String(at));\"\"\",\"\"\"    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    assert_eq!(instant(&v[\"at\"]), parse_rfc3339_ms(&at).unwrap());\n    assert_local(&v[\"at\"]);\"\"\")\nrep(\"\"\"    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"nosuchapp\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\"\"\",\"\"\"    assert_eq!(v[\"app\"], \"google-chrome\");\n    // A known app with nothing typed in the window: empty text, full id.\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", \"-1m\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\n    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    // An unknown app, or one matching several apps, is an error.\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"nosuchapp\"]);\n    assert_ne!(code, 0);\n    assert!(err.contains(\"no app matches\") && err.contains(\"org.kde.kate\"), \"{err}\");\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"org.kde\"]);\n    assert_ne!(code, 0);\n    assert!(err.contains(\"several apps\"), \"{err}\");\"\"\")\nrep(\"\"\"                assert!(r[\"started_at\"].as_str().unwrap().ends_with('Z'));\"\"\",\"\"\"                assert_local(&r[\"started_at\"]);\"\"\")\nrep(\"\"\"        assert!(v[\"text\"].is_string());\n    }\"\"\",\"\"\"        assert!(v[\"text\"].is_string());\n        assert_eq!(v[\"app\"], \"synthetic\");\n    }\"\"\")\ns=s.replace(\"    // Nothing typed in the window: empty text, not an error.\\n\",\"\")\nopen(p,'w').write(s)\nEOF\ngrep -n 'Nothing typed' tests/query_cli.rs; cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A6 | head; cargo test --release --test query_cli 2>&1 | grep -E '^test |test result|panicked|left|right' | head",
+  "description": "Apply remaining test edits; run CLI tests",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test errors_exit_non_zero_with_a_message ... ok
+test search_time_windows ... ok
+test text_is_the_raw_stream ... ok
+test search_semantics_and_shapes ... ok
+test queries_are_consistent_while_run_writes ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+[This command modified 1 file you've previously read: tests/query_cli.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T22:04:17.748Z</sub>
+
+All five pass. A quick live look at the new output:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo build --release 2>&1 | tail -1; D=$(mktemp -d); B=./target/release/brain; $B run --synthetic 40 --data-dir $D/d 2>/dev/null & P=$!; sleep 5; $B query search \"git\" --app konsole --limit 1 --data-dir $D/d; $B query text --app kons --from -3s --data-dir $D/d; $B query text --app o --data-dir $D/d; echo \"exit $?\"; kill -INT $P; wait $P; rm -rf $D",
+  "description": "Show local-time output and full app id live"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    Finished `release` profile [optimized] target(s) in 17.11s
+{
+  "query": "git",
+  "from": null,
+  "to": null,
+  "results": [
+    {
+      "session_id": "2",
+      "app": "org.kde.konsole",
+      "window": "~",
+      "started_at": "2026-11-17T00:04:38.044+02:00",
+      "ended_at": "2026-11-17T00:04:38.294+02:00",
+      "snippet": "git status"
+    }
+  ]
+}
+{
+  "app": "org.kde.konsole",
+  "at": null,
+  "from": "2026-11-17T00:04:38.875+02:00",
+  "to": "2026-11-17T00:04:41.875+02:00",
+  "text": "cargo test\n"
+}
+brain: error: "o" matches several apps: org.kde.konsole, unknown; be more specific
+exit 1
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Typing-candidate detection works, but `unknown` was leaking in from the `start` system event, so I'm restricting candidates to apps with actual keys or pastes.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\nold=\"\"\"            if ev.ts >= from && ev.ts <= to && ev.app.to_lowercase().contains(&needle) {\n                if !known.contains(&ev.app) {\"\"\"\nnew=\"\"\"            let typed = matches!(ev.kind, EventKind::Key { .. } | EventKind::Paste { .. });\n            if typed && ev.ts >= from && ev.ts <= to && ev.app.to_lowercase().contains(&needle) {\n                if !known.contains(&ev.app) {\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\ns=s.replace(\"\"\"/// The full app id `given` refers to, among the `known` ones (all apps with\n/// sessions, plus those in the queried window)\"\"\",\"\"\"/// The full app id `given` refers to, among the `known` ones (all apps with\n/// sessions, plus those with keys or pastes in the queried window)\"\"\")\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo build --release 2>&1 | tail -1; D=$(mktemp -d); B=./target/release/brain; $B run --synthetic 40 --data-dir $D/d 2>/dev/null & P=$!; sleep 4; $B query text --app o --data-dir $D/d | head -3; $B query text --app zzz --data-dir $D/d; kill -INT $P; wait $P; rm -rf $D",
+  "description": "Only typing events make an app a candidate; recheck"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    Finished `release` profile [optimized] target(s) in 16.87s
+{
+  "app": "org.kde.konsole",
+  "at": null,
+brain: error: no app matches "zzz" (known apps: org.kde.konsole, synthetic)
+[This command modified 1 file you've previously read: src/query.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T22:05:24.642Z</sub>
+
+Now the docs: README and PLAN said output times were UTC.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'UTC\\|\\*\\*`--app A`\\*\\*\\|--app A`\\*\\* matches\\|\"started_at\": \"2026\\|\"ended_at\": \"2026\\|\"from\": \"2026\\|\"to\": \"2026\\|\"at\": \"2026\\|\"app\": \"konsole\"' README.md PLAN.md | cut -c1-140",
+  "description": "Find doc passages to update for local time and app ids"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+README.md:113:* **`--app A`** matches apps whose id contains `A`, ignoring case
+README.md:130:Times without a zone are in the local time zone. Output times are UTC
+README.md:144:      "started_at": "2026-11-16T14:51:14.684Z",
+README.md:154:  "app": "konsole",
+README.md:155:  "at": "2026-11-16T14:51:22.680Z",
+README.md:156:  "from": "2026-11-16T14:41:22.680Z",
+README.md:157:  "to": "2026-11-16T14:51:22.680Z",
+PLAN.md:226:`sleep`, `wake`, `lock`, `unlock`). Timestamps are RFC 3339 UTC with
+PLAN.md:461:- **`--app A`** matches app ids containing `A`, ignoring case.
+PLAN.md:469:  Output times are UTC, and the resolved window is echoed.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 111,160p README.md; sed -n 459,470p PLAN.md",
+  "description": "Read the query sections to edit"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
+  pasted text inline.
+* **`--app A`** matches apps whose id contains `A`, ignoring case
+  (`--app chrome` finds `google-chrome`).
+
+**Time flags** (both commands): `--at T` is the 10 minutes ending at T;
+`--from T` alone runs to now; `--from` and `--to` together are an explicit
+window. `--to T` alone means the 10 minutes ending at T for `text`, and
+everything up to T for `search`. With no flags, `text` covers the last 10
+minutes and `search` all time. T can be:
+
+| Form | Example |
+|---|---|
+| relative to now | `-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now` |
+| local date and time | `"2026-11-16 14:00"`, `2026-11-16T14:00:30` |
+| local date (midnight) | `2026-11-16` |
+| local time of day (today) | `14:00`, `14:00:30` |
+| RFC 3339 with a zone | `2026-11-16T12:00:00Z`, `2026-11-16T14:00:00+02:00` |
+
+Times without a zone are in the local time zone. Output times are UTC
+(`…Z`), and the resolved window is echoed (`from`, `to`, `at`) so it is
+visible how a local time was read.
+
+```json
+{
+  "query": "migration blocked",
+  "from": null,
+  "to": null,
+  "results": [
+    {
+      "session_id": "1",
+      "app": "synthetic",
+      "window": "corpus.txt",
+      "started_at": "2026-11-16T14:51:14.684Z",
+      "ended_at": null,
+      "snippet": "the migration is blocked on the schema change. Dana a…"
+    }
+  ]
+}
+```
+
+```json
+{
+  "app": "konsole",
+  "at": "2026-11-16T14:51:22.680Z",
+  "from": "2026-11-16T14:41:22.680Z",
+  "to": "2026-11-16T14:51:22.680Z",
+  "text": "git status\ncargo test\nls -la\n"
+}
+```
+  `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
+  decision: an audit-style trail, distinct from the edited session text).
+- **`--app A`** matches app ids containing `A`, ignoring case.
+- **Windows**: `--at T` is the 10 minutes ending at T; `--from` alone runs to
+  now; `--from` and `--to` together are explicit; `--to` alone is the 10
+  minutes ending at T for `text` and everything up to T for `search`; no
+  flags means the last 10 minutes for `text` and all time for `search`.
+- **Times**: relative (`-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now`), local
+  (`2026-11-16 14:00`, a date, or a time of day meaning today; DST folds
+  take the earlier instant, DST gaps are an error), or RFC 3339 with a zone.
+  Output times are UTC, and the resolved window is echoed.
+- Errors (empty query, bad time, empty window, `--at` with `--from`/`--to`,
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"* **`--app A`** matches apps whose id contains `A`, ignoring case\n  (`--app chrome` finds `google-chrome`).\"\"\",\"\"\"* **`--app A`** can be part of the app id, ignoring case (`--app chrome`\n  finds `google-chrome`). `search` keeps every app that matches. `text`\n  resolves `A` to one app and reports its full id (`\"app\": \"google-chrome\"`):\n  an exact match wins, otherwise the one id that contains `A`; if several do,\n  or none, it is an error that lists them, so text of different apps is\n  never mixed.\"\"\"),\n(\"\"\"Times without a zone are in the local time zone. Output times are UTC\n(`…Z`), and the resolved window is echoed (`from`, `to`, `at`) so it is\nvisible how a local time was read.\"\"\",\"\"\"Times without a zone are in the local time zone. Output times are local\ntoo, with their offset (`2026-11-17T00:04:38.044+02:00`, still RFC 3339),\nand the resolved window is echoed (`from`, `to`, `at`). The log and the\ndatabase store UTC.\"\"\"),\n(\"\"\"      \"session_id\": \"1\",\n      \"app\": \"synthetic\",\n      \"window\": \"corpus.txt\",\n      \"started_at\": \"2026-11-16T14:51:14.684Z\",\n      \"ended_at\": null,\"\"\",\"\"\"      \"session_id\": \"1\",\n      \"app\": \"synthetic\",\n      \"window\": \"corpus.txt\",\n      \"started_at\": \"2026-11-16T16:51:14.684+02:00\",\n      \"ended_at\": null,\"\"\"),\n(\"\"\"  \"app\": \"konsole\",\n  \"at\": \"2026-11-16T14:51:22.680Z\",\n  \"from\": \"2026-11-16T14:41:22.680Z\",\n  \"to\": \"2026-11-16T14:51:22.680Z\",\"\"\",\"\"\"  \"app\": \"org.kde.konsole\",\n  \"at\": \"2026-11-16T16:51:22.680+02:00\",\n  \"from\": \"2026-11-16T16:41:22.680+02:00\",\n  \"to\": \"2026-11-16T16:51:22.680+02:00\",\"\"\"),\n])\nedit('PLAN.md',[\n(\"\"\"- **`--app A`** matches app ids containing `A`, ignoring case.\"\"\",\"\"\"- **`--app A`** can be part of an app id, ignoring case. `search` keeps\n  every matching app; `text` resolves it to one full id (exact match first,\n  else the single id containing it; ambiguous or unknown is an error) and\n  reports that id.\"\"\"),\n(\"\"\"  Output times are UTC, and the resolved window is echoed.\"\"\",\"\"\"  Output times are local with their offset (RFC 3339), and the resolved\n  window is echoed; the log and the database store UTC.\"\"\"),\n])\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED'",
+  "description": "Update docs; lint and full test run",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.88s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[This command modified 2 files you've previously read: README.md, PLAN.md. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src tests README.md PLAN.md && git commit -q -F - <<'EOF'\nShow local times and full app ids in queries\n\nQuery output now uses the local time zone with its offset\n(2026-11-17T00:04:38.044+02:00, still RFC 3339): session start and end\ntimes in `search` and the echoed window in both commands. The log and\nthe database keep storing UTC.\n\n`query text` reports the full app id instead of echoing `--app`. The\ngiven name is resolved among the apps with sessions and those with keys\nor pastes in the window: an exact match (ignoring case) wins, otherwise\nthe one id that contains it. Several matches, or none, are an error\nlisting the candidates, so text of different apps is never mixed in\none stream.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1",
+  "description": "Commit and push the query output changes"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+c9f9bb9 Show local times and full app ids in queries
+```
+
+</details>
+
+## Assistant  <sub>2026-11-16T22:07:44.488Z</sub>
+
+Both changes are in, tested and pushed (`c9f9bb9`).
+
+**1. Local times in query output.** Every time in `search` results (`started_at`, `ended_at`) and the echoed window in both commands (`from`, `to`, `at`) is now in your local zone, with the offset:
+```
+"started_at": "2026-11-17T00:04:38.044+02:00"
+```
+That's still standard RFC 3339, so it stays unambiguous. The log and the database keep storing UTC.
+
+**2. `text` reports the full app id.**
+```
+$ brain query text --app kons --from -3s
+{ "app": "org.kde.konsole", ... }
+```
+- The candidates are the apps that have sessions, plus any app with keys or pastes in the requested window. Events that aren't typing, like the `start` event, don't count.
+- An exact match wins, ignoring case. So `--app code` means `code` even though `com.microsoft.VSCode` also contains "code".
+- Otherwise the one id that contains your text wins.
+- **If several match, it's an error** listing them, so `text` never mixes two apps into one stream:
+  `brain: error: "o" matches several apps: org.kde.konsole, synthetic; be more specific`
+- **If none match, it's also an error**, listing the known apps. Before, it quietly returned empty text.
+- A known app that had no typing in the window still returns empty text, with its full id.
+- `search --app` is unchanged: it keeps every matching app, and each result already shows its full id.
+
+**Tests:** new unit tests for the name resolution (exact over partial, several matches, none) and for local-time formatting. The CLI tests now check local times, full ids, and both error cases. Everything passes: 121 unit tests, crash safety, `query_cli`, `perf_budget`. The README and PLAN.md describe the new behavior.
+
+No database change this time, so `! make` is all you need to use it.
+
+## User  <sub>2026-11-17T08:55:23.988Z</sub>
+
+ok, let's now run a final review, go over the whole project you made, the code the tests, the docs, make sure there are no mismatches or weird things. make sure the brain cli outputs correspond to the real capabillities of the program.
+
+## Assistant  <sub>2026-11-17T08:55:57.854Z</sub>
+
+I'll go through it in layers: the CLI's own help text, stale wording across code and docs, dead code, the docs against actual behavior, and finally a fresh clean run. First, the CLI help text:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=./target/release/brain; $B --help; echo ======; $B run --help; echo ======; $B query --help; echo ======; $B query search --help; echo ======; $B query text --help; echo =====; $B --version",
+  "description": "Show all brain CLI help texts"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Exit code 1
+Shadow assistant: captures what you type and makes it searchable
+
+Usage: brain [OPTIONS] <COMMAND>
+
+Commands:
+  run    Capture keystrokes and focus changes until stopped (Ctrl+C / SIGTERM)
+  query  Query what has been captured. Safe to run while `brain run` is running
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+  -h, --help            Print help
+  -V, --version         Print version
+(eval):1: ===== not found
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=./target/release/brain; for a in \"run\" \"query\" \"query search\" \"query text\"; do echo \"--- brain $a --help\"; $B $a --help; done; $B --version",
+  "description": "Show subcommand help texts"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+--- brain run --help
+Capture keystrokes and focus changes until stopped (Ctrl+C / SIGTERM)
+
+Usage: brain run [OPTIONS]
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --vscode-replay   Reconstruct VS Code sessions by replaying their keystrokes into a sandboxed, invisible VS Code (no network, capped CPU/memory). Falls back to generic reconstruction when it cannot
+  -h, --help            Print help
+--- brain query --help
+Query what has been captured. Safe to run while `brain run` is running
+
+Usage: brain query [OPTIONS] <COMMAND>
+
+Commands:
+  search  Full-text search over writing sessions, newest first. Every word must appear in the same session, anywhere inside a word, in any case. Without time flags it searches all sessions; --to alone means up to T
+  text    The raw typed stream of an app (no editing applied): characters as typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>... Without time flags it covers the last 10 minutes; --to alone means the 10 minutes ending at T
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+  -h, --help            Print help
+--- brain query search --help
+error: unrecognized subcommand 'query search'
+
+  tip: a similar subcommand exists: 'query'
+
+Usage: brain [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+--- brain query text --help
+error: unrecognized subcommand 'query text'
+
+  tip: a similar subcommand exists: 'query'
+
+Usage: brain [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+brain 0.1.0
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=./target/release/brain; $B query search --help; echo; $B query text --help",
+  "description": "Show search and text help"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Full-text search over writing sessions, newest first. Every word must appear in the same session, anywhere inside a word, in any case. Without time flags it searches all sessions; --to alone means up to T
+
+Usage: brain query search [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>  One or more words
+
+Options:
+      --app <A>         Only apps whose id contains A (case-insensitive), e.g. chrome
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --at <T>          The 10 minutes ending at T
+      --from <T>        Start of the window (with no --to: up to now)
+      --to <T>          End of the window
+      --limit <N>       At most N results [default: 20]
+  -h, --help            Print help
+
+T is relative (-30s, -15m, -2h, -1d, -1h30m, now), RFC 3339 (2026-11-16T14:00:00Z, 2026-11-16T16:00:00+02:00), or local time (2026-11-16 14:00[:SS], 2026-11-16 for midnight, 14:00 for today).
+
+The raw typed stream of an app (no editing applied): characters as typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>... Without time flags it covers the last 10 minutes; --to alone means the 10 minutes ending at T
+
+Usage: brain query text [OPTIONS] --app <A>
+
+Options:
+      --app <A>         Apps whose id contains A (case-insensitive), e.g. chrome
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --at <T>          The 10 minutes ending at T
+      --from <T>        Start of the window (with no --to: up to now)
+      --to <T>          End of the window
+  -h, --help            Print help
+
+T is relative (-30s, -15m, -2h, -1d, -1h30m, now), RFC 3339 (2026-11-16T14:00:00Z, 2026-11-16T16:00:00+02:00), or local time (2026-11-16 14:00[:SS], 2026-11-16 for midnight, 14:00 for today).
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The CLI help has two mismatches: `query text --app` still describes the old matching behavior, and the help doesn't mention JSON output or local times. I'll fix both after the rest of the review, then address the stale wording in code and docs.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rniE 'stage [1-4]|\\(stage|click|touchpad|tap\\b|porter|per.app checkpoint|GLOBAL_CHECKPOINT|migrat|xvfb|timerfd|durable offset|kxkbrc only|not implemented|TODO|FIXME|XXX|unimplemented|todo!' src tests scripts packaging Makefile Cargo.toml CLAUDE.md README.md PLAN.md ai-logs/README.md 2>/dev/null | grep -v 'ai-logs/raw' | cut -c1-170",
+  "description": "Grep code and docs for stale terms"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/query.rs:493:        let t = "The migration is blocked on the schema change. Dana asked whether we can ship search on Friday.";
+src/store.rs:135:/// Creates the schema in a new database. There is no migration (see
+src/store.rs:226:             VALUES ('a', 'w', '2026-01-01T00:00:00.000Z', 'the migration is blocked', 0)",
+src/store.rs:238:        assert_eq!(hits("migration"), 1);
+src/store.rs:244:        assert_eq!(hits("migration"), 0);
+src/capture/synthetic.rs:23:const CORPUS: &str = "the migration is blocked on the schema change. \
+src/ingest.rs:148:                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
+src/sessions.rs:792:        let t = l.typ(T0, "notes", "todo", "the cat");
+src/sessions.rs:794:        l.typ(t + 31_000, "notes", "todo", "\u{8}\u{8}\u{8}dog");
+src/sessions.rs:816:            "todo",
+src/reconstruct/vscode/mod.rs:12://!   (`--ozone-platform=headless`): nothing is drawn on screen and no Xvfb or
+src/reconstruct/vscode/mod.rs:435:            "--disable-crash-reporter",
+src/capture/keys.rs:560:                    0 => rng.below(120) as Millis,      // a tap
+tests/query_cli.rs:317:        for word in ["migration", "status", "ship"] {
+src/capture/input.rs:3://! Mice and touchpads are not read: the mouse position is invisible to
+src/capture/input.rs:4://! `brain`, so a click could only say "the cursor moved somewhere", which
+src/capture/input.rs:293:                // A keyboard with a built-in touchpad also reports mouse
+tests/perf_budget.rs:66:            .args(["query", "search", "migration", "--data-dir"])
+tests/crash_safety.rs:163:        r.6.contains("the migration is blocked on the schema change.")
+CLAUDE.md:44:  not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
+CLAUDE.md:77:  migration, compatibility shims or legacy-format handling. Test data
+README.md:101:brain query search "migration blocked" [--app A] [--from T] [--to T] [--at T] [--limit N]
+README.md:141:  "query": "migration blocked",
+README.md:151:      "snippet": "the migration is blocked on the schema change. Dana a…"
+README.md:240:  click can move the text cursor, but its position on screen tells `brain`
+README.md:243:  after the cursor was moved with the mouse** (clicking into the middle of a
+README.md:299:  finds "Café"). This replaces the design's English-only porter stemmer,
+README.md:355:   built** (a "durable offset", timerfds, text session ids, an in-memory
+README.md:374:7. **Work the owner did not want.** It built touchpad tap detection for
+README.md:375:   click logging, then the owner pointed out that clicks without a cursor
+README.md:377:   removed. It also added backward-compatibility code (a schema migration,
+README.md:379:8. **Imprecise explanation.** It told the owner the porter stemmer makes
+PLAN.md:60:| B | **libinput as a library** (path/udev backend over the same nodes) | Yes | Same keycodes, normalized; adds touchpad/gesture processing | Same as A (udev b
+PLAN.md:74:  value is pointer acceleration,
+… [972 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Most of these matches are legitimate, but PLAN.md repeats "touchpad gestures" on lines 74 and 101, so the "close calls" notes may appear twice. I'm checking that now.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 68,100p PLAN.md | cut -c1-110",
+  "description": "Inspect possible duplicate notes in PLAN.md"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+| J | **Per-app extensions** (browser extension, VS Code extension, shell `PROMPT_COMMAND`/zsh hooks) | Yes | 
+| K | **xdg-desktop-portal** (GlobalShortcuts, InputCapture, RemoteDesktop/EIS) | n/a | GlobalShortcuts: only 
+
+**Notes on the rows that were close calls:**
+
+- **evdev (A) vs libinput (B).** Both read the same device nodes. libinput's
+  value is pointer acceleration, touchpad gestures and tablet handling, none of
+  which we need. For keys it adds nothing over `struct input_event`. Reading
+  evdev directly keeps the dependency set and the memory footprint small, and
+  gives full control over hotplug and resync.
+- **Why not grab (D).** A passive reader is *not on the input path*: the kernel
+  delivers each event to every open evdev client independently. If brain
+  stalls, the user notices nothing. A grab-and-forward proxy makes every
+  keystroke wait on brain, needs root for `/dev/uinput`, and its failure mode
+  (frozen keyboard) is the worst one possible. It only makes sense for tools
+  that *modify* input (remappers); we only observe.
+- **AT-SPI (F)** is the only system-wide source that sees real text rather than
+  keys, and it is tempting for exactly that reason. In practice, coverage
+  decides: our three target app classes (Chrome/Electron, VS Code, terminals)
+  are the weak spots. It needs browser flags and a11y forced on, and terminal
+  emulators expose little of their contents. It stays a future enhancement, as
+  a *second source* that could correct key-based reconstruction for GTK/Qt
+  apps. It would not replace evdev.
+- **Compositor hook (H)** has the best key-level fidelity, but a plugin
+  compiled against one KWin version and loaded into the user's compositor is a
+  bad trade for a home-assignment tool: an ABI mismatch or a bug takes down the
+  desktop. We take the one thing we need from the compositor (focus) through
+  its *supported* scripting interface, and copy its keymap and repeat settings
+  instead of hooking it.
+
+**Notes on the close calls:**
+
+- **evdev (A) vs libinput (B).** Both read the same device nodes. libinput's
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:56:40.754Z</sub>
+
+Confirmed: the old draft's notes were copied in along with the table, so they appear twice. Removing the older copy, then checking the focus table for the same problem:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\ni=s.index(\"**Notes on the rows that were close calls:**\")\nj=s.index(\"**Notes on the close calls:**\")\ns=s[:i]+s[j:]\nopen(p,'w').write(s)\nEOF\ngrep -c 'Notes on the' PLAN.md; awk '/### 2.3/,/Decision: a KWin script/' PLAN.md | tail -5 | cut -c1-100",
+  "description": "Remove the duplicated notes block in PLAN.md"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+1
+| AT-SPI focus events | Partly | Focused accessible object + its app | None | Event-driven | Same co
+| GNOME Shell extension | GNOME only | Equivalent of the KWin script (`global.display` `notify::focu
+| `/proc` + compositor-agnostic heuristics | No | — | — | — | No way to know focus from process stat
+
+**Decision: a KWin script that pushes focus changes into brain over D-Bus.**
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:56:51.307Z</sub>
+
+Next, dead code. The compiler doesn't warn about unused `pub` functions in a library, so I'll check every `pub fn` for callers outside its own definition:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re,glob\nfiles=glob.glob('src/**/*.rs',recursive=True)+glob.glob('tests/**/*.rs',recursive=True)\ntext={f:open(f).read() for f in files}\nalltext=\"\\n\".join(text.values())\nfor f in sorted(files):\n    if f.startswith('tests'): continue\n    for m in re.finditer(r'pub(?:\\(crate\\))?\\s+(?:const\\s+)?fn\\s+(\\w+)|pub(?:\\(crate\\))?\\s+const\\s+(\\w+)',text[f]):\n        name=m.group(1) or m.group(2)\n        n=len(re.findall(r'\\b'+re.escape(name)+r'\\b',alltext))\n        if n<=1:\n            print(f, name, n)\nEOF",
+  "description": "Find pub functions and consts with no other references"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/recorder.rs is_paused 1
+src/sessions.rs open_count 1
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:57:00.509Z</sub>
+
+Two unused functions, `Recorder::is_paused` and `Sessions::open_count`. Removing them:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub fn is_paused' -B2 -A4 src/capture/recorder.rs; grep -n 'pub fn open_count' -B1 -A4 src/sessions.rs",
+  "description": "Show the unused functions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+158-    }
+159-
+160:    pub fn is_paused(&self) -> bool {
+161-        self.lock().paused
+162-    }
+163-
+164-    pub fn system(&self, state: SystemState) {
+590-
+591:    pub fn open_count(&self) -> usize {
+592-        self.open.len()
+593-    }
+594-}
+595-
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nfor p,old in [('src/capture/recorder.rs',\"\"\"    pub fn is_paused(&self) -> bool {\n        self.lock().paused\n    }\n\n\"\"\"),('src/sessions.rs',\"\"\"\n    pub fn open_count(&self) -> usize {\n        self.open.len()\n    }\n\"\"\")]:\n    s=open(p).read(); assert s.count(old)==1; s=s.replace(old,\"\"); open(p,'w').write(s)\nEOF\ncargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A6 | head",
+  "description": "Remove unused functions; lint"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:57:14.632Z</sub>
+
+Clippy is still clean. Next, the module-level docs in every source file, checked against behavior:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for f in src/lib.rs src/main.rs src/capture/mod.rs src/capture/recorder.rs src/capture/desktop.rs src/capture/keys.rs src/eventlog.rs src/event.rs src/ingest.rs src/store.rs src/datadir.rs src/reconstruct/mod.rs src/reconstruct/tier2.rs src/timefmt.rs; do echo \"=== $f\"; awk '/^\\/\\/!/{print; next} NR>1 && !/^\\/\\/!/{exit}' $f; done",
+  "description": "Print module doc comments of every source file"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+=== src/lib.rs
+//! `brain`: a shadow assistant that captures what you type and makes it searchable.
+//!
+//! Pipeline: [`capture`] (keystrokes + focus → append-only [`eventlog`]) →
+//! [`ingest`] (log → [`sessions`] with [`reconstruct`]ed text → SQLite
+//! [`store`] with full-text index) → query.
+=== src/main.rs
+=== src/capture/mod.rs
+//! `brain run`: capture → log → ingest, until SIGINT/SIGTERM.
+//!
+//! Threads:
+//! * **input**: one `poll` loop over all input devices (the hot path, see [`input`]).
+//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.
+//! * **D-Bus**: zbus's connection executors plus one small thread per watched
+//!   signal (focus calls from KWin, lock, sleep, layout).
+//! * **main**: waits for a termination signal, then shuts down in order.
+=== src/capture/recorder.rs
+//! The recorder: the one place where events are stamped with focus and appended to the log.
+//!
+//! Shared between the input thread (keys, pastes) and the D-Bus
+//! threads (focus changes, lock/sleep markers). A mutex around the log writer
+//! serializes appends, so lines never interleave.
+=== src/capture/desktop.rs
+//! Desktop integration over D-Bus (KDE Plasma): focus, clipboard, lock, sleep, layouts.
+//!
+//! | What                  | Source                                                     |
+//! |-----------------------|------------------------------------------------------------|
+//! | active app + window   | KWin script → our `Activated` method (session bus)         |
+//! | clipboard at paste    | `org.kde.klipper` `getClipboardContents` (session bus)     |
+//! | screen lock           | `org.freedesktop.ScreenSaver` `ActiveChanged` (session bus)|
+//! | layout switch/list    | `org.kde.KeyboardLayouts` signals (session bus)            |
+//! | sleep / wake          | logind `PrepareForSleep` (system bus)                      |
+//! | layout spec           | kxkbrc → `XKB_DEFAULT_*` env → systemd-localed             |
+//!
+//! Everything here is best effort. Without a session bus or KWin, capture still
+//! runs and attributes keys to the `unknown` app (with a warning on stderr).
+=== src/capture/keys.rs
+//! Turns raw evdev key transitions into the key events apps actually received.
+//!
+//! This is pure logic with no I/O, so it is driven directly by unit tests:
+//! * characters and modifiers are resolved with xkbcommon ([`super::xkb`]),
+//! * auto-repeat is synthesized on the compositor's schedule ([`Repeater`]).
+//!   The kernel's own repeat events (value 2) run on a different timer than
+//!   the one Wayland clients use, so they are ignored,
+//! * per-device held-key tracking releases keys when a device disappears, so
+//!   a modifier can never get stuck "down".
+=== src/eventlog.rs
+//! The capture log: an append-only JSONL file and the ground truth for everything.
+//!
+//! Crash safety rests on three rules:
+//!
+//! 1. **One writer.** `brain run` holds an exclusive lock on the data directory
+//!    (see [`crate::datadir`]), so only o
+… [5257 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Four module docs are stale (capture, datadir, timefmt, and lib), so I'm updating them now.
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/capture/mod.rs',[(\"\"\"//! * **input**: one `poll` loop over all input devices (the hot path, see [`input`]).\n//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.\n//! * **D-Bus**: zbus's connection executors plus one small thread per watched\n//!   signal (focus calls from KWin, lock, sleep, layout).\n//! * **main**: waits for a termination signal, then shuts down in order.\"\"\",\"\"\"//! * **input**: one `poll` loop over all keyboards (the hot path, see [`input`]).\n//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.\n//! * **D-Bus**: zbus's connection executors plus one small thread per watched\n//!   signal (focus calls from KWin, lock, sleep, layout).\n//! * **tier2** (only with `--vscode-replay`): VS Code replays, one at a time.\n//! * **main**: waits for a termination signal, then shuts down in order.\"\"\")])\nedit('src/datadir.rs',[(\"\"\"//!   kwin/                generated KWin focus-tracking script\n//! ```\"\"\",\"\"\"//!   kwin/                generated KWin focus-tracking script\n//!   vscode/              VS Code replay sandbox and snapshots (--vscode-replay)\n//! ```\"\"\")])\nedit('src/timefmt.rs',[(\"\"\"//! On disk and in JSON output, timestamps are RFC 3339 in UTC with millisecond\n//! precision (`2026-11-08T14:03:22.118Z`). Fixed width and UTC means the\n//! strings sort lexicographically in time order, which the SQLite schema\n//! relies on.\"\"\",\"\"\"//! On disk (log and database), timestamps are RFC 3339 in UTC with millisecond\n//! precision (`2026-11-08T14:03:22.118Z`). Fixed width and UTC means the\n//! strings sort lexicographically in time order, which the SQLite schema\n//! relies on. Query output is for people and uses local time with its offset\n//! ([`format_local`]). User input is parsed by [`parse_user_time_at`].\"\"\")])\nedit('src/lib.rs',[(\"\"\"//! [`store`] with full-text index) → query.\"\"\",\"\"\"//! [`store`] with full-text index) → [`query`] (`search` over sessions, `text`\n//! over the log).\"\"\")])\nEOF\nsed -n '/^## Supported OS/,/^## Query/p' README.md",
+  "description": "Fix stale module docs; read README setup sections"
+}
+````
+
+<details><summary>Tool result</summary>
+
+````
+## Supported OS
+
+Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
+works on any Linux. Focus tracking needs KWin (Wayland or X11). On other
+desktops, keys are recorded under the app `unknown`.
+
+## Build
+
+```sh
+# Rust toolchain (https://rustup.rs), then:
+cargo build --release
+# binary: target/release/brain
+
+# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+make
+```
+
+SQLite is bundled. libxkbcommon is loaded from the runtime library
+`libxkbcommon.so.0` that every Wayland desktop ships, so no `-dev`
+packages are needed.
+
+## Permissions
+
+`brain` reads keyboards directly from `/dev/input/event*` (read-only,
+never grabbed, so it cannot add input lag). Your user must be in the `input`
+group:
+
+```sh
+sudo usermod -aG input "$USER"   # then log out and back in
+```
+
+Note that the `input` group can read every input device. That is the price of
+display-server-independent capture (see PLAN.md for the alternatives).
+
+## Run
+
+```sh
+target/release/brain run --data-dir ~/brain-data
+```
+
+`run` stops cleanly on Ctrl+C or SIGTERM. A `kill -9` is also safe. The next
+start repairs a torn last line, if there is one, and resumes ingest exactly
+where it stopped.
+
+### As a service
+
+`brain` can run as a **systemd user service**: it starts with your Plasma
+session, restarts if it crashes, stops at logout, and runs as you (no
+root; it needs your desktop session for focus tracking):
+
+```sh
+make install-service          # installs /usr/bin/brain + the unit, enables it
+journalctl --user -u brain -f # its messages
+systemctl --user stop brain   # pause capture
+make uninstall-service        # remove it
+```
+
+The service uses `~/brain-data`. Stop it before running `brain run` by hand
+on the same directory (only one `brain run` per data directory).
+
+Add `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,
+invisible copy of VS Code (tier 2, below). It is off by default.
+
+Data directory (mode 0700):
+
+| File           | What                                                   |
+|----------------|--------------------------------------------------------|
+| `events.jsonl` | append-only capture log, the ground truth              |
+| `brain.db`     | SQLite (WAL) index derived from the log                |
+| `run.lock`     | held by the running `brain run` (one per data dir)     |
+| `kwin/`        | generated KWin focus-tracking script                   |
+| `vscode/`      | VS Code replay sandbox and file snapshots (tier 2 only) |
+
+Example log lines:
+
+```json
+{"ts":"2026-11-15T17:20:01.112Z","app":"org.kde.konsole","type":"focus","window":"~ : bash — Konsole"}
+{"ts":"2026-11-15T17:20:02.348Z","app":"org.kde.konsole","type":"key","key":"H","mods":["shift"],"window":"~ : bash — Konsole"}
+```
+
+## Query
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The README's setup sections need three fixes: the `--vscode-replay` paragraph should move under "Run", the untested X11 claim comes out of the focus-tracking note, and the example log lines need the new `"renamed"` flag, a key repeat and a paste. I'll make those edits next.
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"works on any Linux. Focus tracking needs KWin (Wayland or X11). On other\ndesktops, keys are recorded under the app `unknown`.\"\"\",\"\"\"works on any Linux. Focus tracking needs KWin (tested on Wayland). On other\ndesktops, keys are recorded under the app `unknown`. The optional VS Code\nreplay (`--vscode-replay`) needs VS Code installed (`/usr/bin/code`).\"\"\")\nrep(\"\"\"\nAdd `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,\ninvisible copy of VS Code (tier 2, below). It is off by default.\n\"\"\",\"\")\nrep(\"\"\"where it stopped.\n\n### As a service\"\"\",\"\"\"where it stopped.\n\nAdd `--vscode-replay` to reconstruct VS Code sessions in a sandboxed,\ninvisible copy of VS Code (tier 2, below). It is off by default.\n\n### As a service\"\"\")\nrep(\"\"\"on the same directory (only one `brain run` per data directory).\"\"\",\"\"\"on the same directory (only one `brain run` per data directory). The\nservice runs without `--vscode-replay`; add it to `ExecStart` in\n`~/.config/systemd/user/brain.service` to turn it on.\"\"\")\nrep(\"\"\"```json\n{\"ts\":\"2026-11-15T17:20:01.112Z\",\"app\":\"org.kde.konsole\",\"type\":\"focus\",\"window\":\"~ : bash — Konsole\"}\n{\"ts\":\"2026-11-15T17:20:02.348Z\",\"app\":\"org.kde.konsole\",\"type\":\"key\",\"key\":\"H\",\"mods\":[\"shift\"],\"window\":\"~ : bash — Konsole\"}\n```\"\"\",\"\"\"```json\n{\"ts\":\"2026-11-15T17:20:01.112Z\",\"app\":\"org.kde.konsole\",\"type\":\"focus\",\"window\":\"~ : bash — Konsole\"}\n{\"ts\":\"2026-11-15T17:20:02.348Z\",\"app\":\"org.kde.konsole\",\"type\":\"key\",\"key\":\"H\",\"mods\":[\"shift\"],\"window\":\"~ : bash — Konsole\"}\n{\"ts\":\"2026-11-15T17:20:03.020Z\",\"app\":\"org.kde.konsole\",\"type\":\"key\",\"key\":\"Backspace\",\"mods\":[],\"repeat\":true,\"window\":\"~ : bash — Konsole\"}\n{\"ts\":\"2026-11-15T17:20:05.400Z\",\"app\":\"google-chrome\",\"type\":\"paste\",\"text\":\"pasted words\",\"window\":\"New tab - Google Chrome\"}\n{\"ts\":\"2026-11-15T17:20:07.801Z\",\"app\":\"com.microsoft.VSCode\",\"type\":\"focus\",\"window\":\"● notes • Untitled-1 - proj - Visual Studio Code\",\"renamed\":true}\n{\"ts\":\"2026-11-15T17:21:00.000Z\",\"app\":\"unknown\",\"type\":\"system\",\"state\":\"lock\"}\n```\n\nEvery line has a time (UTC), the app and a type: `key` (`repeat: true` for\nkey repeats), `focus` (a window activated, or with `renamed: true` the\nactive window's title changed), `paste` (the clipboard text at a paste\nshortcut) and `system` (`start`, `stop`, `sleep`, `wake`, `lock`,\n`unlock`).\"\"\")\nopen(p,'w').write(s)\nEOF\necho ok",
+  "description": "Fix README setup section issues"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+ok
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:57:59.646Z</sub>
+
+I'll check that those example lines match what the code really writes, by serializing the same events through `Event::to_line`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p /tmp/claude-1000/ser && cat > tests/zz_serialize_check.rs <<'EOF'\nuse brain::event::{Event, EventKind, Mod, SystemState};\n#[test]\nfn print_lines() {\n    let evs = vec![\n        Event { ts: 0, app: \"org.kde.konsole\".into(), kind: EventKind::Key { key: \"Backspace\".into(), mods: vec![], repeat: true, window: \"~\".into() } },\n        Event { ts: 0, app: \"org.kde.konsole\".into(), kind: EventKind::Key { key: \"H\".into(), mods: vec![Mod::Shift], repeat: false, window: \"~\".into() } },\n        Event { ts: 0, app: \"google-chrome\".into(), kind: EventKind::Paste { text: Some(\"x\".into()), window: \"w\".into() } },\n        Event { ts: 0, app: \"code\".into(), kind: EventKind::Focus { window: \"w\".into(), renamed: true } },\n        Event { ts: 0, app: \"code\".into(), kind: EventKind::Focus { window: \"w\".into(), renamed: false } },\n        Event { ts: 0, app: \"x\".into(), kind: EventKind::System { state: SystemState::Lock } },\n    ];\n    let mut buf = Vec::new();\n    for e in evs { e.to_line(&mut buf); print!(\"{}\", String::from_utf8_lossy(&buf)); }\n}\nEOF\ncargo test --test zz_serialize_check -- --nocapture 2>&1 | grep '^{'; rm tests/zz_serialize_check.rs; grep -n 'SystemState::Lock' -B3 -A6 src/capture/recorder.rs | grep -n 'app' | head -3",
+  "description": "Verify real serialization of example log lines"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+{"ts":"1970-01-01T00:00:00.000Z","app":"org.kde.konsole","type":"key","key":"Backspace","mods":[],"repeat":true,"window":"~"}
+{"ts":"1970-01-01T00:00:00.000Z","app":"org.kde.konsole","type":"key","key":"H","mods":["shift"],"window":"~"}
+{"ts":"1970-01-01T00:00:00.000Z","app":"google-chrome","type":"paste","text":"x","window":"w"}
+{"ts":"1970-01-01T00:00:00.000Z","app":"code","type":"focus","window":"w","renamed":true}
+{"ts":"1970-01-01T00:00:00.000Z","app":"code","type":"focus","window":"w"}
+{"ts":"1970-01-01T00:00:00.000Z","app":"x","type":"system","state":"lock"}
+2:129-        let app = g.focus.app.clone();
+8:135-        self.append(
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:58:12.990Z</sub>
+
+The formats match, with one exception: a `lock` event carries the focused app, not `unknown`. Fixing that example, then the CLI help text:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[(\"\"\"{\"ts\":\"2026-11-15T17:21:00.000Z\",\"app\":\"unknown\",\"type\":\"system\",\"state\":\"lock\"}\"\"\",\"\"\"{\"ts\":\"2026-11-15T17:21:00.000Z\",\"app\":\"com.microsoft.VSCode\",\"type\":\"system\",\"state\":\"lock\"}\"\"\")])\nedit('src/main.rs',[\n(\"\"\"    /// Query what has been captured. Safe to run while `brain run` is running.\"\"\",\"\"\"    /// Query what has been captured; prints JSON, with times in local time.\n    /// Safe to run while `brain run` is running.\"\"\"),\n(\"\"\"        /// Apps whose id contains A (case-insensitive), e.g. chrome.\n        #[arg(long, value_name = \"A\")]\n        app: String,\"\"\",\"\"\"        /// The app: its full id or a part of it, case-insensitive (e.g. kate\n        /// for org.kde.kate). It must match exactly one app; the output names\n        /// it in full.\n        #[arg(long, value_name = \"A\")]\n        app: String,\"\"\"),\n])\nEOF\ngrep -n 'Capture keystrokes and focus changes until stopped' -A8 src/main.rs",
+  "description": "Fix lock example and CLI help texts"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+26:    /// Capture keystrokes and focus changes until stopped (Ctrl+C / SIGTERM).
+27-    Run {
+28-        /// Test hook: type a built-in corpus at RATE keys/s instead of reading
+29-        /// input devices (no root or desktop needed).
+30-        #[arg(long, value_name = "RATE", hide = true)]
+31-        synthetic: Option<f64>,
+32-        /// Reconstruct VS Code sessions by replaying their keystrokes into a
+33-        /// sandboxed, invisible VS Code (no network, capped CPU/memory).
+34-        /// Falls back to generic reconstruction when it cannot.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/main.rs'; s=open(p).read()\nold=\"\"\"    /// Capture keystrokes and focus changes until stopped (Ctrl+C / SIGTERM).\"\"\"\nnew=\"\"\"    /// Capture keystrokes and focus changes, group them into writing sessions\n    /// with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM).\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo build --release 2>&1 | grep -E '^(error|warning)' -A5; B=./target/release/brain; $B --help | sed -n 5,9p; $B query text --help | sed -n 5,12p",
+  "description": "Update run help; rebuild and show help"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Commands:
+  run    Capture keystrokes and focus changes, group them into writing sessions with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM)
+  query  Query what has been captured; prints JSON, with times in local time. Safe to run while `brain run` is running
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --app <A>         The app: its full id or a part of it, case-insensitive (e.g. kate for org.kde.kate). It must match exactly one app; the output names it in full
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --at <T>          The 10 minutes ending at T
+      --from <T>        Start of the window (with no --to: up to now)
+      --to <T>          End of the window
+  -h, --help            Print help
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:58:47.111Z</sub>
+
+The help text now matches what the program does. Next, CLAUDE.md:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat CLAUDE.md",
+  "description": "Read CLAUDE.md for stale content"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+# CLAUDE.md — instructions for coding agents working on `brain`
+
+`brain` is a Rust CLI for the Endpoint "Shadow Assistant" home assignment
+(`Endpoint Home Assignment.pdf`, not committed). One binary, two commands:
+`brain run` captures keystrokes + focus and stores them; `brain query`
+(`search`, `text`) answers questions while `run` keeps going.
+
+Design doc (source of truth for architecture):
+https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9 — `PLAN.md` is the in-repo
+research/architecture write-up and must stay consistent with the code.
+
+## Target platform
+
+Ubuntu, **KDE Plasma 6 on Wayland** (KWin). Not GNOME. Keys come from evdev
+(`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon
+(`libxkbcommon.so.0`, linked by file name, so no `-dev` package is needed).
+Focus comes from a KWin script calling back over D-Bus. `/dev/uinput` is
+root-only on the dev machine: tests must not depend on it. Use
+`brain run --synthetic RATE` (hidden flag) to drive the real pipeline without
+hardware.
+
+## Hard requirements (from the assignment) — never regress these
+
+- Capture is invisible: no input lag (we never grab devices), **≤ 1 % average
+  CPU while typing, ≤ 32 MB RSS**, keeps working after sleep/wake.
+- `kill -9` of `run` at any moment + restart ⇒ no corruption
+  (`tests/crash_safety.rs` must stay green).
+- `query` works while `run` writes and always sees a consistent state.
+- Both commands take `--data-dir` (default `./brain-data`) and exit non-zero
+  with a message on stderr on error. Query output is JSON on stdout.
+
+## Decisions already made by the owner — do not re-litigate
+
+- `brain query text` returns the **raw decoded keystroke stream** (no
+  backspace/cursor editing applied) over a window: default last 10 min,
+  `--at T` = 10-min window ending at T, or `--from/--to`.
+- Sessions: keyed by (app, window); close after 30 s idle in that context or
+  on Enter in single-line contexts; focus loss alone never closes a session.
+- Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
+  2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
+  falling back to tier 0. Sessions, reconstruction and indexing are built
+  before `brain query` (owner's call, changing the original stage order).
+- Search is substring matching (FTS5 trigram, case- and accent-insensitive),
+  not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
+- Sessions and their text must stay a pure function of the log: the crash
+  test compares the live index with a fresh rebuild.
+- Work proceeds in 4 stages (capture, query, reconstruction, E2E tests).
+  After each stage: build, run, test it yourself, report, then **stop and
+  wait for explicit approval** before the next stage.
+
+## Code map
+
+```
+src/main.rs              CLI (clap), error → stderr + exit 1
+src/capture/mod.rs       `run` orchestration: sources, ingest thread, signals
+src/capture/input.rs     poll loop over evdev devices, hotplug, EVIOCSMASK
+src/capture/keys.rs      pu
+… [2634 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+CLAUDE.md has five outdated spots: it calls /dev/uinput root-only even though the opt-in Kate tests now use it after setup, it describes the four-stage workflow as ongoing, it omits the local-time and full-app-id query output and the window-rename rule, its code map says "evdev devices" instead of keyboards, and it lists only one of the two Kate tests. I'm correcting those next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='CLAUDE.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"Focus comes from a KWin script calling back over D-Bus. `/dev/uinput` is\nroot-only on the dev machine: tests must not depend on it. Use\n`brain run --synthetic RATE` (hidden flag) to drive the real pipeline without\nhardware.\"\"\",\"\"\"Focus comes from a KWin script calling back over D-Bus. Tests that run by\ndefault must not need hardware, a desktop or privileges: use\n`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only\nthe opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.\"\"\")\nrep(\"\"\"- Both commands take `--data-dir` (default `./brain-data`) and exit non-zero\n  with a message on stderr on error. Query output is JSON on stdout.\"\"\",\"\"\"- Both commands take `--data-dir` (default `./brain-data`) and exit non-zero\n  with a message on stderr on error. Query output is JSON on stdout, with\n  times in local time (the log and database store UTC).\"\"\")\nrep(\"\"\"  `--at T` = 10-min window ending at T, or `--from/--to`.\"\"\",\"\"\"  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept\n  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;\n  `text` resolves it to exactly one app and reports the full id.\"\"\")\nrep(\"\"\"- Sessions: keyed by (app, window); close after 30 s idle in that context or\n  on Enter in single-line contexts; focus loss alone never closes a session.\"\"\",\"\"\"- Sessions: keyed by (app, normalized window title); close after 30 s idle\n  in that context or on Enter in single-line contexts; focus loss alone\n  never closes a session; a title change of the typed window (a `renamed`\n  focus event) shortly after a keystroke keeps the session.\n- The mouse is not captured (owner's call): cursor moves made with the mouse\n  are a documented limitation, not something to work around.\"\"\")\nrep(\"\"\"- Work proceeds in 4 stages (capture, query, reconstruction, E2E tests).\n  After each stage: build, run, test it yourself, report, then **stop and\n  wait for explicit approval** before the next stage.\"\"\",\"\"\"- Work went through stages (capture with sessions and indexing, query,\n  end-to-end verification), each approved by the owner. Keep the habit for\n  new work: build, run, test it yourself, report, then **stop and wait for\n  explicit approval** before starting the next piece.\"\"\")\nrep(\"\"\"src/capture/input.rs     poll loop over evdev devices, hotplug, EVIOCSMASK\"\"\",\"\"\"src/capture/input.rs     poll loop over keyboards (evdev), hotplug, EVIOCSMASK\"\"\")\nrep(\"\"\"tests/                   integration tests that drive the real binary\"\"\",\"\"\"tests/                   integration tests that drive the real binary;\n                         tests/common: uinput keyboard and KDE helpers\"\"\")\nrep(\"\"\"  migration, compatibility shims or legacy-format handling. Test data\n  directories can be deleted and recreated.\n\n- `cargo fmt`\"\"\",\"\"\"  migration, compatibility shims or legacy-format handling. Test data\n  directories can be deleted and recreated.\n- `cargo fmt`\"\"\")\nrep(\"\"\"- `tests/repeat_e2e.rs` (`#[ignore]`) types into a real Kate window through\n  /dev/uinput: it needs the KDE session, `scripts/setup-test-permissions.sh`,\n  and nobody touching the keyboard or mouse while it runs.\"\"\",\"\"\"- `tests/repeat_e2e.rs` and `tests/real_keyboard_e2e.rs` (`#[ignore]`) type\n  into real Kate windows through /dev/uinput: they need an unlocked KDE\n  session, `scripts/setup-test-permissions.sh`, and nobody touching the\n  keyboard or mouse while they run. They only type while brain's log shows\n  the intended window focused.\"\"\")\nopen(p,'w').write(s)\nEOF\necho ok",
+  "description": "Bring CLAUDE.md up to date"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ok
+[This command modified 1 file you've previously read: CLAUDE.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:59:16.138Z</sub>
+
+Next, the README's sessions section and the "Where the agent failed" list:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/^## Sessions and reconstruction/,/^## Decisions/p' README.md; sed -n '/^## Where the agent failed/,$p' README.md | head -30",
+  "description": "Read README sessions and failures sections"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+## Sessions and reconstruction
+
+Ingest (inside `brain run`, about once a second) turns the log into
+**writing sessions**, stored in the `sessions` table with an FTS5 index.
+
+* A session is one `(app, window title)`. Markers that change while you
+  type are removed from the title first: an editor's unsaved-file dot or
+  `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`).
+  When the title changes *because of the typing* (VS Code names a new file
+  after its first line, a mail window after its subject), the session
+  continues: a change of the *same* window's title (KWin tells a title
+  change from a window activation) within 1 s of a keystroke in it, with no
+  shortcut in between, is treated as a rename. It closes after **30 s without
+  typing in that window**, or right away when a single-line field is
+  submitted (Enter at a shell prompt, in a chat box or a browser's address
+  bar), cancelled (Ctrl+C at a prompt), or left for another field of the
+  same window (Tab, Ctrl+L in a browser). Switching to another app and back
+  within 30 s continues the same session. Stopping or restarting `brain run`
+  closes all sessions.
+* While a session is open, its text so far is already in the index, so a
+  search finds what you are typing right now.
+* **Tier 0**: keys are replayed into a virtual text field with a cursor,
+  selection, word-wise movement and deletion, and undo/redo. Only keyboard
+  cursor movement is followed (see "Decisions and edge cases").
+* **Tier 1**: a small table of app classes decides what keys mean. In
+  terminals: readline shortcuts (Ctrl+A/E/U/K/W) and Up/Down history recall
+  from the commands `brain` saw you run. In browsers: Tab and Ctrl+L/K/T/W
+  move to another field. Enter submits single-line fields and inserts a
+  newline elsewhere. Editors and unknown apps keep their document across
+  sessions. Single-line fields start empty each time.
+* **Tier 2** (`--vscode-replay`): when a VS Code session closes, its
+  keystrokes are replayed into a headless VS Code with your settings, in a
+  network-less sandbox with capped CPU and memory. The session text then
+  comes from VS Code itself (auto-indent, bracket pairs, your keybindings).
+  The session stores the changed lines. If replay is impossible or fails,
+  the tier 0/1 text stays.
+
+Inspect the result:
+
+```sh
+sqlite3 ~/brain-data/brain.db \
+  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, reconstructed_text FROM sessions"
+```
+
+## Decisions and edge cases
+## Where the agent failed
+
+This project was built by Claude Code (Opus 5.5) with the owner reviewing
+every stage. These are the mistakes it made, in order, and how they were
+caught. Transcripts are in `ai-logs/`.
+
+1. **Wrong library assumption.** It wrote D-Bus code for zbus 6 with a
+   feature that does not exist there; the build failed and it moved to
+   zbus 5.
+2. **A commit that did not build.** The first commit declared a module
+   that was only added in the next one. Caught by building each com
+… [1223 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two more fixes are in: I'm splitting the sessions bullet, which mixes title handling with closing rules and leaves out launchers, and correcting failure item 3, which still says PLAN.md is kept out of the repo even though it has been rewritten.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"  shortcut in between, is treated as a rename. It closes after **30 s without\n  typing in that window**, or right away when a single-line field is\n  submitted (Enter at a shell prompt, in a chat box or a browser's address\n  bar), cancelled (Ctrl+C at a prompt), or left for another field of the\n  same window (Tab, Ctrl+L in a browser). Switching to another app and back\n  within 30 s continues the same session. Stopping or restarting `brain run`\n  closes all sessions.\"\"\",\"\"\"  shortcut in between, is treated as a rename.\n* A session closes after **30 s without typing in that window**, or right\n  away when a single-line field is submitted (Enter at a shell prompt, in a\n  chat box, a browser's address bar or a launcher such as KRunner),\n  cancelled (Ctrl+C at a prompt), or left for another field of the same\n  window (Tab, Ctrl+L in a browser). Switching to another app and back\n  within 30 s continues the same session. Stopping or restarting\n  `brain run` closes all sessions.\"\"\")\nrep(\"\"\"   index for open sessions). It was kept out of the repo until it can be\n   rewritten against the code.\"\"\",\"\"\"   index for open sessions). It was kept out of the repo and, once the code\n   was done, rewritten against it.\"\"\")\nopen(p,'w').write(s)\nEOF\nsed -n '/^## Decisions and edge cases/,/^## Tests/p' README.md | grep -n '' | sed -n 1,200p | cut -c1-120 | head -120",
+  "description": "Fix sessions bullet and failure item; read decisions section"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+1:## Decisions and edge cases
+2:
+3:**Platform and capture**
+4:* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way
+5:  to observe other apps' keystrokes, so `brain` reads the kernel's input
+6:  devices (evdev) passively: read-only, never grabbed, so it cannot add
+7:  input lag. Focus (app + window title) comes from a small KWin script
+8:  that calls `brain` over D-Bus. PLAN.md compares the alternatives.
+9:* **Keys are resolved at capture time** with libxkbcommon and your real
+10:  layouts (us/il, Alt+Shift switching, layout changes from the tray), so
+11:  the log holds the characters the app received (`"ש"`, `"H"`), as in the
+12:  assignment's example event. Key repeat is regenerated on KDE's schedule.
+13:* **Held keys** are logged with the repeats KDE's schedule produces
+14:  (600 ms delay, then 25 Hz), exactly. The app may still have received one
+15:  more or one fewer character per hold: on Wayland each app runs its own
+16:  repeat timer, and Qt apps use timers that may fire up to 5% early or late
+17:  (a 600 ms delay fires anywhere in ~570–630 ms). Measured against Kate, the
+18:  same 620 ms hold gave 1, 2 or 3 characters across runs; brain's
+19:  reconstruction stays within one character per hold (two for holds over
+20:  2 s). `tests/repeat_e2e.rs` measures this against a real Kate window.
+21:* **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
+22:  way applications match them; this also makes paste detection work in
+23:  Hebrew.
+24:* **Paste** (Ctrl+V, Ctrl+Shift+V, Shift+Insert): the clipboard text is
+25:  read from Klipper at that moment and logged, up to 64 KiB.
+26:* **Screen lock pauses capture**, so the unlock password is never logged.
+27:* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
+28:  keyboards are reopened. Tested with a real suspend.
+29:* **The mouse is not captured.** `brain` reads keyboards only. A mouse
+30:  click can move the text cursor, but its position on screen tells `brain`
+31:  nothing about where in the text the cursor went, so reconstruction cannot
+32:  use it. Tiers 0/1 (and tier 2) therefore **do not support text edited
+33:  after the cursor was moved with the mouse** (clicking into the middle of a
+34:  line to fix a typo, selecting with the mouse, drag and drop): typing
+35:  continues from where the *keyboard* last left the cursor. Cursor moves
+36:  with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
+37:  Ctrl+A) are followed.
+38:
+39:**Storage**
+40:* **The JSONL log is the ground truth; SQLite is derived.** Capture only
+41:  appends one line per event (never blocks on SQLite). Ingest builds the
+42:  index from the log once a second, in one transaction together with the
+43:  log offset, so a crash never duplicates or skips anything. Deleting
+44:  `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
+45:  SQLite.
+46:* **`query text` assumes the log is in time order.** It starts reading at
+47:  the last checkpoint before its wi
+… [3592 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The decisions section has a dangling line in its browser note, and query behavior is spread across "Storage" and "Sessions". I'm moving queries into their own group and adding the local-time and app-name decisions.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\ndef cut(start, end_marker):\n    global s\n    i=s.index(start); j=s.index(end_marker,i)\n    block=s[i:j]; s=s[:i]+s[j:]; return block\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nclock=cut(\"* **`query text` assumes the log is in time order.**\",\"* **No backward compatibility yet.**\")\nrawvs=cut(\"* **`query text` is the raw stream, `search` the edited text.**\",\"* **Search matches substrings.**\")\nsubstr=cut(\"* **Search matches substrings.**\",\"* **VS Code tier 2 is opt-in**\")\nrep(\"\"\"  elsewhere it is a newline.\n  In browsers, Shift+Enter is a newline.\"\"\",\"\"\"  elsewhere it is a newline. In browsers and chat apps, Shift+Enter is a\n  newline.\"\"\")\nsubstr=substr.replace(\"\"\"  which cannot find Hebrew words with attached prefixes. Query words\n  shorter than 3 characters cannot use the trigram index.\"\"\",\"\"\"  which cannot find Hebrew words with attached prefixes. Query words\n  shorter than 3 characters cannot use the trigram index and are matched\n  with a slower scan.\"\"\")\nqueries=\"\"\"**Queries**\n\"\"\"+rawvs+substr+\"\"\"* **Times in, times out are local.** `--from`, `--to` and `--at` accept\n  relative times (`-2h`), local dates and times, and RFC 3339; output times\n  are local with their offset. The log and the database store UTC.\n* **`--app` takes part of the id.** `search` keeps every matching app;\n  `text` must resolve to exactly one app and reports its full id, so two\n  apps' keystrokes are never mixed into one stream.\n\"\"\"+clock+\"\"\"\n\"\"\"\nrep(\"\"\"**Running**\"\"\",queries+\"\"\"**Running**\"\"\")\nopen(p,'w').write(s)\nEOF\nsed -n '/^\\*\\*Queries\\*\\*/,/^\\*\\*Running\\*\\*/p' README.md | head -50",
+  "description": "Group query decisions; fix dangling line"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+**Queries**
+* **`query text` is the raw stream, `search` the edited text.** As the
+  owner decided, `text` returns exactly what was typed (with `<Backspace>`
+  and other keys visible) rather than reconstructed text; reconstructed,
+  edit-aware text is what `search` matches and returns.
+* **Search matches substrings.** The index uses SQLite FTS5's trigram
+  tokenizer: a query word matches anywhere inside a word, ignoring case and
+  accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
+  finds "Café"). This replaces the design's English-only porter stemmer,
+  which cannot find Hebrew words with attached prefixes. Query words
+  shorter than 3 characters cannot use the trigram index and are matched
+  with a slower scan.
+* **Times in, times out are local.** `--from`, `--to` and `--at` accept
+  relative times (`-2h`), local dates and times, and RFC 3339; output times
+  are local with their offset. The log and the database store UTC.
+* **`--app` takes part of the id.** `search` keeps every matching app;
+  `text` must resolve to exactly one app and reports its full id, so two
+  apps' keystrokes are never mixed into one stream.
+* **`query text` assumes the log is in time order.** It starts reading at
+  the last checkpoint before its window and stops 60 s of log after it. If
+  the system clock is stepped backwards while capturing (an NTP correction,
+  a manual change), keys typed after the step whose times fall in a queried
+  window can be missed. PLAN.md (section 10) describes an exact bound.
+
+**Running**
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T08:59:57.219Z</sub>
+
+Now PLAN.md's event format section, which needs the `renamed` flag:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\nold=\"\"\"Types: `key` (with `repeat: true` for synthesized repeats), `focus` (window\nactivated or its title changed), `paste`, and `system` (`start`, `stop`,\"\"\"\nnew=\"\"\"Types: `key` (with `repeat: true` for synthesized repeats), `focus` (a\nwindow activated, or with `renamed: true` the active window's title\nchanged), `paste`, and `system` (`start`, `stop`,\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nold='''{\"ts\":\"2026-11-16T11:38:00.003Z\",\"app\":\"google-chrome\",\"type\":\"focus\",\"window\":\"New tab - Google Chrome\"}'''\nnew='''{\"ts\":\"2026-11-16T11:38:00.003Z\",\"app\":\"google-chrome\",\"type\":\"focus\",\"window\":\"New tab - Google Chrome\"}\n{\"ts\":\"2026-11-16T11:38:01.120Z\",\"app\":\"google-chrome\",\"type\":\"focus\",\"window\":\"brain - Google Search - Google Chrome\",\"renamed\":true}'''\nassert s.count(old)==1; s=s.replace(old,new)\nopen(p,'w').write(s)\nEOF\ngrep -n 'renamed' PLAN.md | head",
+  "description": "Update PLAN.md event format for renamed focus"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+153:  renamed)`.
+156:  `workspace.windowActivated` (`renamed = false`) and the active window's
+157:  `captionChanged` (`renamed = true`), and the current window right away.
+158:  Focus events in the log carry `"renamed": true` for title changes. Calls from anyone but KWin's bus name are
+193:{"ts":"2026-11-16T11:38:01.120Z","app":"google-chrome","type":"focus","window":"brain - Google Search - Google Chrome","renamed":true}
+199:window activated, or with `renamed: true` the active window's title
+266:- **Titles renamed by the typing itself** keep the session: VS Code names a
+268:  change *of the same window* (a `renamed` focus event) within 1 s of a
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 150,162p PLAN.md",
+  "description": "Inspect a long line in PLAN.md"
+}
+```
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\nold=\"\"\"  Focus events in the log carry `\"renamed\": true` for title changes. Calls from anyone but KWin's bus name are\n  ignored.\"\"\"\nnew=\"\"\"  Focus events in the log carry `\"renamed\": true` for title changes. Calls\n  from anyone but KWin's bus name are ignored.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\nawk 'length > 100 && !/^\\|/ && !/^{/ && !/^ *\"/ && !/```/' PLAN.md README.md | head",
+  "description": "Rewrap the long line; check for other overlong prose lines"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+- `brain run` claims `org.shadowassistant.Brain.p<pid>` on the session bus
+  and exports one method, `Activated(desktopFile, resourceClass, caption,
+  renamed)`.
+  It writes a small script and loads it through KWin's own
+  `org.kde.KWin /Scripting` interface. The script reports
+  `workspace.windowActivated` (`renamed = false`) and the active window's
+  `captionChanged` (`renamed = true`), and the current window right away.
+  Focus events in the log carry `"renamed": true` for title changes. Calls from anyone but KWin's bus name are
+  ignored.
+- The app id is the window's desktop file name (`org.kde.kate`,
+  `google-chrome`, `com.microsoft.VSCode`), falling back to the X11
+  resource class. Every key is stamped with the current app and window
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+ keyboards ──► input thread ──► Recorder ──► events.jsonl  (append-only, ground truth)
+                 ▼                │                       ingest thread ──► brain.db (SQLite WAL)
+ KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
+ Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:00:22.257Z</sub>
+
+Next, the scripts. `scripts/export-ai-logs.py` hardcodes this machine's project path, including your username, as its default transcript folder. I'll derive it from the current directory instead.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='scripts/export-ai-logs.py'; s=open(p).read()\nold='''    ap.add_argument(\"--src\", default=str(Path.home() / \".claude/projects/-home-juan-Documents-shadow-assistant\"))'''\nnew='''    # Claude Code keeps a project's transcripts under a folder named after\n    # the project's path, with \"/\" replaced by \"-\".\n    default_src = Path.home() / \".claude/projects\" / str(Path.cwd()).replace(\"/\", \"-\")\n    ap.add_argument(\"--src\", default=str(default_src))'''\nassert s.count(old)==1; s=s.replace(old,new)\ns=s.replace(\"\"\"Usage:\n  python3 -I scripts/export-ai-logs.py --redact you@example.com \\\\\n      [--src ~/.claude/projects/<project>] [--out ai-logs]\"\"\",\"\"\"Usage (from the repository root):\n  python3 -I scripts/export-ai-logs.py --redact you@example.com \\\\\n      [--src ~/.claude/projects/<project>] [--out ai-logs]\"\"\")\nopen(p,'w').write(s)\nEOF\npython3 -I -c \"\nfrom pathlib import Path; print(Path.home() / '.claude/projects' / str(Path.cwd()).replace('/', '-'))\"; ls -d ~/.claude/projects/-home-juan-Documents-shadow-assistant >/dev/null && echo exists; grep -rn 'juan' scripts packaging Makefile src tests CLAUDE.md README.md PLAN.md | grep -v '^ai-logs' | head",
+  "description": "Derive transcript folder from cwd; scan for hardcoded user paths"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+/home/juan/.claude/projects/-home-juan-Documents-shadow-assistant
+exists
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:00:49.370Z</sub>
+
+No other hardcoded user paths remain. Now formatting, clippy and the full test suite:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED'",
+  "description": "Lint and run the full default test suite",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.88s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:03:10.930Z</sub>
+
+Everything passes. Last, a smoke run of the real binary on your desktop. It only reads; nothing gets typed.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "D=$(mktemp -d); B=./target/release/brain; $B run --data-dir $D/d > $D/err 2>&1 & P=$!; sleep 3; $B run --data-dir $D/d; echo \"second run exit: $?\"; $B query search hello --data-dir $D/d; $B query text --app ghostty --data-dir $D/d; echo \"exit $?\"; kill -INT $P; wait $P; echo \"run exit: $?\"; cat $D/err; head -3 $D/d/events.jsonl; tail -1 $D/d/events.jsonl; rm -rf $D",
+  "description": "Smoke-test real capture start, queries and clean stop"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+brain: error: another `brain run` is already using /tmp/tmp.mJpWUyXoNp/d (lock: /tmp/tmp.mJpWUyXoNp/d/run.lock)
+second run exit: 1
+{
+  "query": "hello",
+  "from": null,
+  "to": null,
+  "results": []
+}
+brain: error: no app matches "ghostty" (known apps: )
+exit 1
+run exit: 0
+brain: capturing from 1 keyboard(s), focus tracking via KWin, layout us,il; data in /tmp/tmp.mJpWUyXoNp/d
+brain: received signal 2, stopping
+{"ts":"2026-11-17T09:03:13.242Z","app":"unknown","type":"system","state":"start"}
+{"ts":"2026-11-17T09:03:13.360Z","app":"com.mitchellh.ghostty","type":"focus","window":"◑ Home assignment PDF brief"}
+{"ts":"2026-11-17T09:03:13.777Z","app":"com.mitchellh.ghostty","type":"focus","window":"◐ Home assignment PDF brief","renamed":true}
+{"ts":"2026-11-17T09:03:16.258Z","app":"com.mitchellh.ghostty","type":"system","state":"stop"}
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The smoke run found one rough edge: with nothing typed, the "ghostty" error lists no known apps, so I'll make it say no typing has been captured yet. The run also confirms KWin's live `renamed` flag on the spinner's title change.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\nold=\"\"\"        [] => {\n            let mut all: Vec<&String> = known.iter().collect();\"\"\"\nnew=\"\"\"        [] if known.is_empty() => {\n            bail!(\"no app matches {given:?}: no typing has been captured in any app yet\")\n        }\n        [] => {\n            let mut all: Vec<&String> = known.iter().collect();\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nold=\"\"\"        let e = resolve_app(\"firefox\", &known).unwrap_err().to_string();\n        assert!(e.contains(\"no app matches\") && e.contains(\"org.kde.kate\"), \"{e}\");\"\"\"\nnew=\"\"\"        let e = resolve_app(\"firefox\", &known).unwrap_err().to_string();\n        assert!(e.contains(\"no app matches\") && e.contains(\"org.kde.kate\"), \"{e}\");\n        let e = resolve_app(\"kate\", &[]).unwrap_err().to_string();\n        assert!(e.contains(\"no typing has been captured\"), \"{e}\");\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release --lib query 2>&1 | grep 'test result'",
+  "description": "Clear error when nothing has been captured; test"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 16, in <module>
+AssertionError
+0
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 114 filtered out; finished in 0.00s
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'resolve_app(\"firefox\"' -A3 src/query.rs",
+  "description": "Show the test lines as currently formatted"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+523:        let e = resolve_app("firefox", &known).unwrap_err().to_string();
+524-        assert!(
+525-            e.contains("no app matches") && e.contains("org.kde.kate"),
+526-            "{e}"
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\nold=\"\"\"        [] => {\n            let mut all: Vec<&String> = known.iter().collect();\"\"\"\nnew=\"\"\"        [] if known.is_empty() => {\n            bail!(\"no app matches {given:?}: no typing has been captured in any app yet\")\n        }\n        [] => {\n            let mut all: Vec<&String> = known.iter().collect();\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nold=\"\"\"            e.contains(\"no app matches\") && e.contains(\"org.kde.kate\"),\n            \"{e}\"\n        );\"\"\"\nnew=\"\"\"            e.contains(\"no app matches\") && e.contains(\"org.kde.kate\"),\n            \"{e}\"\n        );\n        let e = resolve_app(\"kate\", &[]).unwrap_err().to_string();\n        assert!(e.contains(\"no typing has been captured\"), \"{e}\");\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | head -5",
+  "description": "Apply the fix against the formatted test; run tests",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+[This command modified 1 file you've previously read: src/query.rs. Call Read before editing.]
+```
+
+</details>
+
