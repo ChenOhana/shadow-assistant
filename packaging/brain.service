@@ -1,7 +1,8 @@
 # systemd *user* service: runs `brain run` as you, inside your desktop
 # session (it needs your session D-Bus for KWin focus, Klipper, screen lock
 # and keyboard layouts). No root: keyboards are read through the `input`
-# group. Install with `make install-service`.
+# group. Install with `make install-service`; `make uninstall-service`
+# removes it together with its data (KEEP_DATA=1 keeps the data).
 [Unit]
 Description=brain: capture what you type and make it searchable
 Documentation=https://github.com/ChenOhana/shadow-assistant
@@ -13,7 +14,12 @@ StartLimitBurst=5
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/brain run --data-dir %h/brain-data
+# The data directory is the service's state directory, created by systemd
+# before start, private to the user: ~/.local/state/brain (%S/brain).
+# `systemctl --user clean --what=state brain` deletes it.
+StateDirectory=brain
+StateDirectoryMode=0700
+ExecStart=/usr/bin/brain run --data-dir %S/brain
 # SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
 KillSignal=SIGTERM
 TimeoutStopSec=20

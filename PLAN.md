@@ -479,7 +479,9 @@ window has to be read anyway. Clock steps backwards are discussed in section
   in a network namespace with only loopback.
 - **Data at rest**: directory 0700, files 0600.
 - **Privilege**: brain runs as the user, as a systemd *user* service if
-  wanted (`make install-service`), never as root. Reading keyboards needs
+  wanted (`make install-service`), never as root. The service's data is its
+  systemd state directory (`~/.local/state/brain`, mode 0700), deleted by
+  `make uninstall-service` unless `KEEP_DATA=1`. Reading keyboards needs
   the `input` group, which lets any process of the user read all keyboards;
   the README states this trade-off.
 - **Passwords**: capture pauses while the screen is locked. Other password

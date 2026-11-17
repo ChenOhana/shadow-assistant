@@ -67,15 +67,21 @@ session, restarts if it crashes, stops at logout, and runs as you (no
 root; it needs your desktop session for focus tracking):
 
 ```sh
-make install-service          # installs /usr/bin/brain + the unit, enables it
-journalctl --user -u brain -f # its messages
-systemctl --user stop brain   # pause capture
-make uninstall-service        # remove it
+make install-service                 # installs /usr/bin/brain + the unit, enables it
+journalctl --user -u brain -f        # its messages
+systemctl --user stop brain          # pause capture
+brain query search "words" --data-dir ~/.local/state/brain
+make uninstall-service               # remove the service AND its captured data
+make uninstall-service KEEP_DATA=1   # remove the service, keep the data
 ```
 
-The service uses `~/brain-data`. Stop it before running `brain run` by hand
-on the same directory (only one `brain run` per data directory). The
-service runs without `--vscode-replay`; add it to `ExecStart` in
+The service keeps its data in its systemd **state directory**,
+`~/.local/state/brain` (`$XDG_STATE_HOME/brain`), which systemd creates
+private to you (mode 0700) before starting it. Pass that directory to
+`brain query`. `make uninstall-service` deletes it with
+`systemctl --user clean --what=state brain`, unless `KEEP_DATA=1` is given.
+Only one `brain run` can use a data directory at a time. The service runs
+without `--vscode-replay`; add it to `ExecStart` in
 `~/.config/systemd/user/brain.service` to turn it on.
 
 Data directory (mode 0700):
