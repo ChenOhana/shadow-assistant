@@ -14934,3 +14934,782 @@ Usage: brain query text [OPTIONS] --app <A>
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; git add -A src tests README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nReconstruct the output of query text\n\n`query text` keeps its design (time window, checkpoint seek, reading\nthe log, resolving the app) and changes only its output step: instead\nof rendering keys as `<Backspace>` and the like, the window's key and\npaste events are split per window title and each window's events run,\nfrom an empty text, through the app's tier 0/1 adapter, the same\n`editor::action`, `FieldEditor` and paste rule the session engine uses.\nSessions play no part: a document edited in several sessions is one\ntext. A submit in a single-line field keeps the line and continues on\na fresh one, and Up recalls lines submitted earlier in the window.\n\nThe output adds `windows` (each window's text, ordered by its first\nkeystroke); `text` joins them one per line.\n\nTests replay the README's detailed example (two Kate windows, one\nedited in two sessions, Hebrew, an emoji paste that is undone, quotes,\na backslash and a Tab; a Konsole prompt with history recall and Ctrl+C)\nboth as unit tests and through the binary, checking the exact JSON.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2",
+  "description": "Commit, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+email hits: 0
+1a09bad Refresh AI logs
+4b3b5de Reconstruct the output of query text
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:46:47.619Z</sub>
+
+`query text` now returns reconstructed text, implemented as we agreed. Only the output step changed; the time window, bookmark seek, log reading and app resolution are as before. Pushed as `4b3b5de`, plus an `ai-logs/` refresh (`1a09bad`).
+
+**The change** (`src/query.rs`):
+- `render_key` is gone. A new `reconstruct_windows` splits the selected events by window title (normalized, so `notes.md * — Kate` counts as `notes.md — Kate`).
+- It runs each window's events, from an empty text, through the existing tier 0/1 pieces: `classify`, `editor::action`, `FieldEditor::apply` and `paste`, and `key_suppresses_paste`. It only calls them; no reconstruction logic was copied.
+- Sessions play no part, so a document edited across several sessions comes out as one text.
+- In terminals and other single-line fields, a submit keeps the line and continues on a fresh one, and Up recalls lines submitted earlier in the window.
+- The output now has `windows`: each window's text, in order of its first keystroke. `text` joins them one per line.
+
+**Tests:**
+- **Three unit tests** run the exact example from my last message through the function, and match it character for character:
+  - Kate's two windows, with `notes.md` edited across two sessions: `"Shopping list:\n- oat milk\n- bread\n- קפה x2"` and `"TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp"`. The undone ☕ paste doesn't appear.
+  - The same keys from 10:02 on, where `notes.md` starts empty and gives `"oat milk\n- קפה x2"`.
+  - Konsole with typo fixing, Up recall and Ctrl+C. It also checks that a plain Ctrl+V doesn't paste in a terminal and an empty Enter adds nothing.
+- **A new CLI test** writes the same example to a log and ingests it, confirming the database really holds two `notes.md` sessions. It then runs the three queries through the binary and compares the exact JSON, including how quotes, backslashes, newlines and tabs are escaped and that Hebrew stays readable.
+- The existing `text` test expects reconstructed text now (`"the cat sat"`, `"git status"`, `"pasted words"`).
+- 123 unit tests, crash safety, the six `query_cli` tests and `perf_budget` all pass, and clippy is clean.
+
+**Docs:**
+- The README's query section has the Kate output as its example, with the keystroke table behind it, plus the "from 10:02" and Konsole results.
+- PLAN.md, CLAUDE.md and the `text` help describe the reconstruction, and the decisions section notes that the raw output was replaced at your request.
+
+There's no database change this time, so `! make` is enough to use it.
+
+## User  <sub>2026-11-17T10:59:37.823Z</sub>
+
+awesome let's now run again our checklist and run the final review to detail as you did earlier
+
+## Assistant  <sub>2026-11-17T10:59:45.221Z</sub>
+
+I'll run the same review as last time: CLI help, stale wording, dead code, module docs, the docs checked against behavior and real output, and then the full test suite including the opt-in tests. First, the CLI help:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=./target/release/brain; $B --help; for a in \"run\" \"query\" \"query search\" \"query text\"; do echo \"--- brain $a --help\"; $B $a --help; done",
+  "description": "Show all CLI help texts"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Exit code 2
+Shadow assistant: captures what you type and makes it searchable
+
+Usage: brain [OPTIONS] <COMMAND>
+
+Commands:
+  run    Capture keystrokes and focus changes, group them into writing sessions with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM)
+  query  Query what has been captured; prints JSON, with times in local time. Safe to run while `brain run` is running
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+  -h, --help            Print help
+  -V, --version         Print version
+--- brain run --help
+Capture keystrokes and focus changes, group them into writing sessions with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM)
+
+Usage: brain run [OPTIONS]
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --vscode-replay   Reconstruct VS Code sessions by replaying their keystrokes into a sandboxed, invisible VS Code (no network, capped CPU/memory). Falls back to generic reconstruction when it cannot
+  -h, --help            Print help
+--- brain query --help
+Query what has been captured; prints JSON, with times in local time. Safe to run while `brain run` is running
+
+Usage: brain query [OPTIONS] <COMMAND>
+
+Commands:
+  search  Full-text search over writing sessions, newest first. Every word must appear in the same session, anywhere inside a word, in any case. Without time flags it searches all sessions; --to alone means up to T
+  text    What was typed into an app in the time window, reconstructed (edits applied) per window title with the app's rules; each window's text starts empty at the window's start. Without time flags it covers the last 10 minutes; --to alone means the 10 minutes ending at T
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+  -h, --help            Print help
+--- brain query search --help
+error: unrecognized subcommand 'query search'
+
+  tip: a similar subcommand exists: 'query'
+
+Usage: brain [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+--- brain query text --help
+error: unrecognized subcommand 'query text'
+
+  tip: a similar subcommand exists: 'query'
+
+Usage: brain [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=./target/release/brain; $B query search --help; echo; $B query text --help",
+  "description": "Show search and text help"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Full-text search over writing sessions, newest first. Every word must appear in the same session, anywhere inside a word, in any case. Without time flags it searches all sessions; --to alone means up to T
+
+Usage: brain query search [OPTIONS] <QUERY>
+
+Arguments:
+  <QUERY>  One or more words
+
+Options:
+      --app <A>         Only apps whose id contains A (case-insensitive), e.g. chrome
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --at <T>          The 10 minutes ending at T
+      --from <T>        Start of the window (with no --to: up to now)
+      --to <T>          End of the window
+      --limit <N>       At most N results [default: 20]
+  -h, --help            Print help
+
+T is relative (-30s, -15m, -2h, -1d, -1h30m, now), RFC 3339 (2026-11-16T14:00:00Z, 2026-11-16T16:00:00+02:00), or local time (2026-11-16 14:00[:SS], 2026-11-16 for midnight, 14:00 for today).
+
+What was typed into an app in the time window, reconstructed (edits applied) per window title with the app's rules; each window's text starts empty at the window's start. Without time flags it covers the last 10 minutes; --to alone means the 10 minutes ending at T
+
+Usage: brain query text [OPTIONS] --app <A>
+
+Options:
+      --app <A>         The app: its full id or a part of it, case-insensitive (e.g. kate for org.kde.kate). It must match exactly one app; the output names it in full
+      --data-dir <DIR>  Directory holding the capture log and the index [default: ./brain-data]
+      --at <T>          The 10 minutes ending at T
+      --from <T>        Start of the window (with no --to: up to now)
+      --to <T>          End of the window
+  -h, --help            Print help
+
+T is relative (-30s, -15m, -2h, -1d, -1h30m, now), RFC 3339 (2026-11-16T14:00:00Z, 2026-11-16T16:00:00+02:00), or local time (2026-11-16 14:00[:SS], 2026-11-16 for midnight, 14:00 for today).
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:59:59.557Z</sub>
+
+The help text matches the current behavior. Next, stale wording across code and docs:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rniE 'render|raw stream|raw typed|raw decoded|<Backspace>|<Ctrl|no editing|stage [1-4]|\\(stage|porter|click|touchpad|migrat|TODO|FIXME|XXX|unimplemented|todo!|known apps: \\)' src tests scripts packaging Makefile Cargo.toml CLAUDE.md README.md PLAN.md ai-logs/README.md | grep -v 'ai-logs/raw' | grep -viE 'the migration|\"migration|todo\"|todo\\.md|TODO: call|tap\\b' | cut -c1-160",
+  "description": "Grep for stale terms after the text change"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/ingest.rs:148:                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
+src/reconstruct/vscode/mod.rs:435:            "--disable-crash-reporter",
+src/reconstruct/vscode/mod.rs:439:            "--disable-renderer-backgrounding",
+tests/query_cli.rs:370:    assert_eq!(v["text"], format!("{notes_text}\n{todo_text}"));
+src/store.rs:135:/// Creates the schema in a new database. There is no migration (see
+scripts/export-ai-logs.py:6:  ai-logs/<name>.md          a readable rendering: user and assistant
+scripts/export-ai-logs.py:62:def render(path, title):
+scripts/export-ai-logs.py:63:    out = [f"# {title}", "", f"Rendered from `raw/{path.stem}.jsonl`. Tool inputs and results are "
+scripts/export-ai-logs.py:135:        md = redact(render(raw_out, title))
+ai-logs/README.md:11:| `raw/*.jsonl` | The complete raw transcripts the Markdown files are rendered from. |
+README.md:282:  click can move the text cursor, but its position on screen tells `brain`
+README.md:285:  after the cursor was moved with the mouse** (clicking into the middle of a
+README.md:340:  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
+README.md:344:  finds "Café"). This replaces the design's English-only porter stemmer,
+README.md:427:   click logging, then the owner pointed out that clicks without a cursor
+README.md:429:   removed. It also added backward-compatibility code (a schema migration,
+README.md:431:8. **Imprecise explanation.** It told the owner the porter stemmer makes
+src/capture/input.rs:3://! Mice and touchpads are not read: the mouse position is invisible to
+src/capture/input.rs:4://! `brain`, so a click could only say "the cursor moved somewhere", which
+src/capture/input.rs:293:                // A keyboard with a built-in touchpad also reports mouse
+CLAUDE.md:54:  not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
+CLAUDE.md:89:  migration, compatibility shims or legacy-format handling. Test data
+PLAN.md:60:| B | **libinput as a library** (path/udev backend over the same nodes) | Yes | Same keycodes, normalized; adds touchpad/gesture processing | Same as
+PLAN.md:64:| F | **AT-SPI accessibility bus** (`text-changed`, `text-caret-moved`, focus events) | Yes, where apps cooperate | **Actual widget text**, insertion
+PLAN.md:74:  value is pointer acceleration, touchpad gestures and tablet handling, none
+PLAN.md:99:  or anything else. Mice and touchpads are not opened at all (section 10:
+PLAN.md:100:  a click says the cursor moved, not where to).
+PLAN.md:387:There are no migrations (first version): a database from another schema
+PLAN.md:405:"Café"). *Differs from the design* (porter stemming), on the owner's call:
+PLAN.md:406:search should behave as "contains", and porter is English-only, while
+PLAN.md:524:- **The mouse is not captured.** A click tells brain the cursor moved but not
+PLAN.md:526:  (clicking into a line, mouse selection, drag and drop) is not supported:
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:00:06.348Z</sub>
+
+All of these are deliberate: they describe decisions or history. Next, dead code, again checking every `pub fn` and `pub const` for callers:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re,glob\nfiles=glob.glob('src/**/*.rs',recursive=True)+glob.glob('tests/**/*.rs',recursive=True)\ntext={f:open(f).read() for f in files}\nalltext=\"\\n\".join(text.values())\nfor f in sorted(files):\n    if f.startswith('tests'): continue\n    for m in re.finditer(r'pub(?:\\(crate\\))?\\s+(?:const\\s+)?fn\\s+(\\w+)|pub(?:\\(crate\\))?\\s+const\\s+(\\w+)|pub(?:\\(crate\\))?\\s+struct\\s+(\\w+)|pub(?:\\(crate\\))?\\s+enum\\s+(\\w+)',text[f]):\n        name=next(g for g in m.groups() if g)\n        n=len(re.findall(r'\\b'+re.escape(name)+r'\\b',alltext))\n        if n<=1: print(f, name, n)\nprint(\"done\")\nEOF\ngrep -n '^use\\|^    use' src/query.rs | head",
+  "description": "Find unreferenced pub items"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+done
+9:use crate::datadir::DataDir;
+10:use crate::event::EventKind;
+11:use crate::eventlog::LogReader;
+12:use crate::reconstruct::apps::{AppClass, classify, normalize_window};
+13:use crate::reconstruct::buffer::TextBuffer;
+14:use crate::reconstruct::editor::{Action, FieldEditor, Outcome, action, key_suppresses_paste};
+15:use crate::store;
+16:use crate::timefmt::{self, Millis};
+17:use anyhow::{Result, bail};
+18:use serde::Serialize;
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:00:19.498Z</sub>
+
+No unused public items. Next, the README's query section, read in full against what the code does:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/^## Query/,/^## Sessions and reconstruction/p' README.md",
+  "description": "Read the README query section"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+## Query
+
+Both commands run while `brain run` is capturing and print JSON. Errors go
+to stderr with a non-zero exit code.
+
+```sh
+brain query search "migration blocked" [--app A] [--from T] [--to T] [--at T] [--limit N]
+brain query text --app A [--from T] [--to T] [--at T]
+```
+
+* **`search`**: sessions whose text contains *every* word, anywhere inside
+  a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
+  first (default limit 20). Open sessions are included with what has been
+  typed so far (`ended_at: null`).
+* **`text`**: what was typed into the app during the window,
+  **reconstructed**: the window's keys and pastes, per window title, run
+  through the app's tier 0/1 rules (Backspace, selections, undo, Enter
+  submitting a shell line, …), each window starting empty at the window's
+  start. Sessions play no part: a document edited in several sessions is one
+  text. `windows` lists each window's text, ordered by its first keystroke;
+  `text` joins them one per line. Edits reaching into text typed before the
+  window (Backspace past its start, Ctrl+A) only affect what was typed
+  inside it.
+* **`--app A`** can be part of the app id, ignoring case (`--app chrome`
+  finds `google-chrome`). `search` keeps every app that matches. `text`
+  resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
+  an exact match wins, otherwise the one id that contains `A`; if several do,
+  or none, it is an error that lists them, so text of different apps is
+  never mixed.
+
+**Time flags** (both commands): `--at T` is the 10 minutes ending at T;
+`--from T` alone runs to now; `--from` and `--to` together are an explicit
+window. `--to T` alone means the 10 minutes ending at T for `text`, and
+everything up to T for `search`. With no flags, `text` covers the last 10
+minutes and `search` all time. T can be:
+
+| Form | Example |
+|---|---|
+| relative to now | `-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now` |
+| local date and time | `"2026-11-16 14:00"`, `2026-11-16T14:00:30` |
+| local date (midnight) | `2026-11-16` |
+| local time of day (today) | `14:00`, `14:00:30` |
+| RFC 3339 with a zone | `2026-11-16T12:00:00Z`, `2026-11-16T14:00:00+02:00` |
+
+Times without a zone are in the local time zone. Output times are local
+too, with their offset (`2026-11-17T00:04:38.044+02:00`, still RFC 3339),
+and the resolved window is echoed (`from`, `to`, `at`). The log and the
+database store UTC.
+
+```json
+{
+  "query": "migration blocked",
+  "from": null,
+  "to": null,
+  "results": [
+    {
+      "session_id": "1",
+      "app": "synthetic",
+      "window": "corpus.txt",
+      "started_at": "2026-11-16T16:51:14.684+02:00",
+      "ended_at": null,
+      "snippet": "the migration is blocked on the schema change. Dana a…"
+    }
+  ]
+}
+```
+
+```json
+{
+  "app": "org.kde.kate",
+  "at": null,
+  "from": "2026-11-17T10:00:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "Shopping list:\n- oat milk\n- bread\n- קפה x2\nTODO: call Dana\n\tsend the \"Q3\" rep
+… [969 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two readability issues here: "window" is used both for the time range and for an app window, which makes the `text` bullet ambiguous, and the two JSON examples aren't labeled with the command they come from.
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\np='README.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"* **`text`**: what was typed into the app during the window,\n  **reconstructed**: the window's keys and pastes, per window title, run\n  through the app's tier 0/1 rules (Backspace, selections, undo, Enter\n  submitting a shell line, …), each window starting empty at the window's\n  start. Sessions play no part: a document edited in several sessions is one\n  text. `windows` lists each window's text, ordered by its first keystroke;\n  `text` joins them one per line. Edits reaching into text typed before the\n  window (Backspace past its start, Ctrl+A) only affect what was typed\n  inside it.\"\"\",\"\"\"* **`text`**: what was typed into the app during the time range,\n  **reconstructed**: the keys and pastes of the range, split per app window\n  (window title), run through the app's tier 0/1 rules (Backspace,\n  selections, undo, Enter submitting a shell line, …), each app window\n  starting empty at the start of the range. Sessions play no part: a\n  document edited in several sessions is one text. `windows` lists each app\n  window's text, ordered by its first keystroke; `text` joins them one per\n  line. Edits reaching into text typed before the range (Backspace past its\n  start, Ctrl+A) only affect what was typed inside it.\"\"\")\nrep(\"\"\"database store UTC.\n\n```json\n{\n  \"query\": \"migration blocked\",\"\"\",\"\"\"database store UTC.\n\n`search` output:\n\n```json\n{\n  \"query\": \"migration blocked\",\"\"\")\nrep(\"\"\"```\n\n```json\n{\n  \"app\": \"org.kde.kate\",\"\"\",\"\"\"```\n\n`text` output:\n\n```json\n{\n  \"app\": \"org.kde.kate\",\"\"\")\nopen(p,'w').write(s)\nEOF\ngrep -n 'query text\\|`text`' PLAN.md | head; sed -n '/^## 6. Query semantics/,/^## 7/p' PLAN.md | head -40",
+  "description": "Clarify README text bullet and label examples; read PLAN section 6"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+22: brain query text   ──► log_checkpoints → events.jsonl
+35:* **Query** reads the database (`search`) or the log (`text`) while `run`
+413:`query text` must read the keys of a time window from the log without
+431:- **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed
+439:  by first keystroke) and `text` (them joined, one per line). *Differs from
+440:  the design*, where `text` was the raw keystroke stream; the owner changed
+443:  every matching app; `text` resolves it to one full id (exact match first,
+448:  minutes ending at T for `text` and everything up to T for `search`; no
+449:  flags means the last 10 minutes for `text` and all time for `search`.
+536:  "log in time order" assumption `query text` relies on: events in its window
+## 6. Query semantics
+
+(`src/query.rs`)
+
+- **`brain query search "<words>" [--app A] [--from T] [--to T] [--at T]
+  [--limit N]`**: sessions whose text contains every word (substrings, any
+  case), newest first, default limit 20, with a snippet around the first
+  match. Open sessions are included with their live text and
+  `ended_at: null`. A session is in a time window if it overlaps it.
+- **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed
+  into the app during the window, reconstructed. The window's key and paste
+  events (read from the log, section 5.5) are split per window title and
+  each window's events run, from an empty text, through the app's tier 0/1
+  adapter: the same `editor::action` and `FieldEditor` the session engine
+  uses, without sessions. A submit in a single-line field (Enter at a shell
+  prompt) keeps the line and continues on a fresh one; Up recalls lines
+  submitted earlier in the window. Output: `windows` (each window's text,
+  by first keystroke) and `text` (them joined, one per line). *Differs from
+  the design*, where `text` was the raw keystroke stream; the owner changed
+  it.
+- **`--app A`** can be part of an app id, ignoring case. `search` keeps
+  every matching app; `text` resolves it to one full id (exact match first,
+  else the single id containing it; ambiguous or unknown is an error) and
+  reports that id.
+- **Windows**: `--at T` is the 10 minutes ending at T; `--from` alone runs to
+  now; `--from` and `--to` together are explicit; `--to` alone is the 10
+  minutes ending at T for `text` and everything up to T for `search`; no
+  flags means the last 10 minutes for `text` and all time for `search`.
+- **Times**: relative (`-30s`, `-15m`, `-2h`, `-1d`, `-1h30m`, `now`), local
+  (`2026-11-16 14:00`, a date, or a time of day meaning today; DST folds
+  take the earlier instant, DST gaps are an error), or RFC 3339 with a zone.
+  Output times are local with their offset (RFC 3339), and the resolved
+  window is echoed; the log and the database store UTC.
+- Errors (empty query, bad time, empty window, `--at` with `--from`/`--to`,
+  missing data directory) go to stderr with a non-zero exit code.
+
+## 7. Resource budget
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:00:37.018Z</sub>
+
+PLAN.md has the same "window" ambiguity in its `text` description. Clarifying it the same way:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\nold=\"\"\"- **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed\n  into the app during the window, reconstructed. The window's key and paste\n  events (read from the log, section 5.5) are split per window title and\n  each window's events run, from an empty text, through the app's tier 0/1\n  adapter: the same `editor::action` and `FieldEditor` the session engine\n  uses, without sessions. A submit in a single-line field (Enter at a shell\n  prompt) keeps the line and continues on a fresh one; Up recalls lines\n  submitted earlier in the window. Output: `windows` (each window's text,\n  by first keystroke) and `text` (them joined, one per line). *Differs from\n  the design*, where `text` was the raw keystroke stream; the owner changed\n  it.\"\"\"\nnew=\"\"\"- **`brain query text --app A [--from T] [--to T] [--at T]`**: what was typed\n  into the app during the time range, reconstructed. The range's key and\n  paste events (read from the log, section 5.5) are split per app window\n  (window title) and each app window's events run, from an empty text,\n  through the app's tier 0/1 adapter: the same `editor::action` and\n  `FieldEditor` the session engine uses, without sessions. A submit in a\n  single-line field (Enter at a shell prompt) keeps the line and continues\n  on a fresh one; Up recalls lines submitted earlier in the same app window.\n  Output: `windows` (each app window's text, by first keystroke) and `text`\n  (them joined, one per line). *Differs from the design*, where `text` was\n  the raw keystroke stream; the owner changed it.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\nsed -n '/^### 5.5/,/^## 6/p' PLAN.md; sed -n '/^## 9. Testing/,/^## 10/p' PLAN.md",
+  "description": "Clarify PLAN text bullet; read PLAN 5.5 and testing sections"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+### 5.5 Log checkpoints
+
+`query text` must read the keys of a time window from the log without
+scanning it from the start. Each checkpoint says "the event at this byte has
+this timestamp". Because the log is written in time order, starting at the
+latest checkpoint at or before the window misses nothing, and reads at most
+5 s of log before the window; reading stops 60 s of log after it. Per-app
+checkpoints would not save work, since the log interleaves apps and the
+window has to be read anyway. Clock steps backwards are discussed in section
+10.
+
+## 6. Query semantics
+## 9. Testing strategy
+
+- **Unit tests** (about 120, `cargo test`): key resolution and layouts,
+  repeat synthesis (including a 300-scenario stress test against an
+  independent model, with random early and late wakeups), the recorder, the
+  log's torn-tail repair, schema and search, ingest, the tier 0 buffer and
+  tier 1 rules, title normalization and renames, every session rule, crash
+  recovery after every line, time parsing and query windows.
+- **Integration tests run by default**: `crash_safety` (25 `kill -9`s under
+  load, compared with a clean rebuild), `query_cli` (the binary's JSON
+  output, search semantics through the CLI, time windows, raw text, errors,
+  and thousands of queries while `run` writes), `perf_budget` (CPU and
+  memory budget).
+- **Opt-in tests against real software**: `repeat_e2e` and
+  `real_keyboard_e2e` type through a uinput keyboard into real Kate windows
+  and compare Kate's saved files with brain (held-key repeats, Hebrew via
+  Alt+Shift, focus moving between windows, keyboard unplug/replug);
+  `vscode_replay` and `tier2_e2e` drive real VS Code.
+- **Manual, once**: sleep/wake through a real suspend, screen lock and
+  unlock, the systemd service (start, restart after `kill -9`, clean stop).
+
+## 10. Limitations and future work
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:00:46.519Z</sub>
+
+PLAN.md's testing section still says `query_cli` checks "raw text". Fixing:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"  tier 1 rules, title normalization and renames, every session rule, crash\n  recovery after every line, time parsing and query windows.\"\"\",\"\"\"  tier 1 rules, title normalization and renames, every session rule, crash\n  recovery after every line, time parsing, query windows, and `query text`'s\n  per-window reconstruction (the README's example, event for event).\"\"\")\nrep(\"\"\"  output, search semantics through the CLI, time windows, raw text, errors,\n  and thousands of queries while `run` writes)\"\"\",\"\"\"  output, search semantics through the CLI, time windows, reconstructed\n  text including the README's example, errors, and thousands of queries\n  while `run` writes)\"\"\")\nopen(p,'w').write(s)\nEOF\nfor f in src/query.rs src/reconstruct/mod.rs src/reconstruct/editor.rs; do echo \"=== $f\"; awk '/^\\/\\/!/{print; next} NR>1 && !/^\\/\\/!/{exit}' $f; done",
+  "description": "Fix PLAN test descriptions; review module docs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+=== src/query.rs
+//! `brain query`: `search` over sessions and `text` over the raw log.
+//!
+//! Both run while `brain run` writes. `search` is a single SELECT on a
+//! read-only connection, so it sees one consistent snapshot of the index
+//! (WAL). `text` reads the capture log, whose reader only returns complete
+//! lines, starting at the checkpoint just before its window, and runs the
+//! window's keys through the tier 0/1 reconstruction, one text per window.
+=== src/reconstruct/mod.rs
+//! Reconstruction: what was actually written, from the keystrokes.
+//!
+//! * [`buffer`] — tier 0, a generic text buffer replaying editing keys.
+//! * [`apps`] and [`editor`] — tier 1, per-app-class rules (single-line
+//!   fields, readline shortcuts, shell history, browser field changes) that
+//!   decide what each key does to the buffer.
+//! * [`vscode`] and [`tier2`] — tier 2, VS Code sessions replayed into the
+//!   real editor, sandboxed (opt-in: `brain run --vscode-replay`).
+=== src/reconstruct/editor.rs
+//! Turns logged events into edits of one text field: key → [`Action`] (per app
+//! class, tier 1) → [`TextBuffer`] operation (tier 0).
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70]); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/query.rs',[(\"\"\"//! `brain query`: `search` over sessions and `text` over the raw log.\n//!\n//! Both run while `brain run` writes. `search` is a single SELECT on a\n//! read-only connection, so it sees one consistent snapshot of the index\n//! (WAL). `text` reads the capture log, whose reader only returns complete\n//! lines, starting at the checkpoint just before its window, and runs the\n//! window's keys through the tier 0/1 reconstruction, one text per window.\"\"\",\"\"\"//! `brain query`: `search` over sessions and `text` over the log.\n//!\n//! Both run while `brain run` writes. `search` is a single SELECT on a\n//! read-only connection, so it sees one consistent snapshot of the index\n//! (WAL). `text` reads the capture log, whose reader only returns complete\n//! lines, starting at the checkpoint just before its time range, and runs\n//! the range's keys through the tier 0/1 reconstruction, one text per app\n//! window.\"\"\")])\nedit('src/reconstruct/mod.rs',[(\"\"\"//! * [`apps`] and [`editor`] — tier 1, per-app-class rules (single-line\n//!   fields, readline shortcuts, shell history, browser field changes) that\n//!   decide what each key does to the buffer.\"\"\",\"\"\"//! * [`apps`] and [`editor`] — tier 1, per-app-class rules (single-line\n//!   fields, readline shortcuts, shell history, browser field changes) that\n//!   decide what each key does to the buffer.\n//!\n//! Tiers 0 and 1 are used by the session engine ([`crate::sessions`]) and,\n//! without sessions, by `brain query text` ([`crate::query::reconstruct_windows`]).\"\"\")])\nEOF\ncargo doc --no-deps 2>&1 | grep -E 'warning|error' | head -5; echo \"doc ok\"",
+  "description": "Fix module docs; check doc links build"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+warning: public documentation for `text` links to private item `resolve_app`
+warning: public documentation for `SCHEMA_VERSION` links to private item `init_schema`
+warning: `brain` (lib doc) generated 2 warnings
+doc ok
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:01:05.176Z</sub>
+
+Two doc comments link to private functions, which produces broken links in the generated docs. Fixing them:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n '\\[`resolve_app`\\]' src/query.rs; grep -n '\\[`init_schema`\\]' src/store.rs; sed -i 's/\\[`resolve_app`\\]/`resolve_app`/g' src/query.rs && sed -i 's/\\[`init_schema`\\]/`init_schema`/' src/store.rs && cargo doc --no-deps 2>&1 | grep -cE '^warning'",
+  "description": "Fix private doc links"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+306:/// [`resolve_app`].
+19:/// Bumped whenever the schema changes; see [`init_schema`].
+0
+[This command modified 2 files you've previously read: src/query.rs, src/store.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:01:14.498Z</sub>
+
+The docs now build without warnings. Next, CLAUDE.md's decisions and the README's query decisions:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/^## Decisions already made/,/^## Code map/p' CLAUDE.md; sed -n '/^\\*\\*Queries\\*\\*/,/^\\*\\*Running\\*\\*/p' README.md",
+  "description": "Read CLAUDE decisions and README query decisions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+## Decisions already made by the owner — do not re-litigate
+
+- `brain query text` reconstructs "stupidly": the keys typed in the time
+  window, per app and window title, run through the tier 0/1 adapters from
+  an empty text (no sessions involved); output `windows` + joined `text`.
+  It replaced the earlier raw-keystroke output at the owner's request.
+  Window: default last 10 min,
+  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
+  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
+  `text` resolves it to exactly one app and reports the full id.
+- Sessions: keyed by (app, normalized window title); close after 30 s idle
+  in that context or on Enter in single-line contexts; focus loss alone
+  never closes a session; a title change of the typed window (a `renamed`
+  focus event) shortly after a keystroke keeps the session.
+- The mouse is not captured (owner's call): cursor moves made with the mouse
+  are a documented limitation, not something to work around.
+- Reconstruction tiers: 0 = generic buffer replay, 1 = per-app rules,
+  2 = VS Code real-app replay, **opt-in** via `brain run --vscode-replay`,
+  falling back to tier 0. Sessions, reconstruction and indexing are built
+  before `brain query` (owner's call, changing the original stage order).
+- Search is substring matching (FTS5 trigram, case- and accent-insensitive),
+  not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
+- Sessions and their text must stay a pure function of the log: the crash
+  test compares the live index with a fresh rebuild.
+- Work went through stages (capture with sessions and indexing, query,
+  end-to-end verification), each approved by the owner. Keep the habit for
+  new work: build, run, test it yourself, report, then **stop and wait for
+  explicit approval** before starting the next piece.
+
+## Code map
+**Queries**
+* **`query text` reconstructs "stupidly", by window.** It takes the keys
+  typed in the time window and runs them through the same tier 0/1 adapters
+  the sessions use, per app and window title, from an empty text: no session
+  boundaries, no text from before the window. (An earlier version returned
+  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
+* **Search matches substrings.** The index uses SQLite FTS5's trigram
+  tokenizer: a query word matches anywhere inside a word, ignoring case and
+  accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
+  finds "Café"). This replaces the design's English-only porter stemmer,
+  which cannot find Hebrew words with attached prefixes. Query words
+  shorter than 3 characters cannot use the trigram index and are matched
+  with a slower scan.
+* **Times in, times out are local.** `--from`, `--to` and `--at` accept
+  relative times (`-2h`), local dates and times, and RFC 3339; output times
+  are local with their offset. The log and the database store UTC.
+* **`--app` takes part of the id.** `search` keeps every match
+… [518 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:01:20.519Z</sub>
+
+Small wording fixes in both: CLAUDE.md has an awkward line break, and the README bullet's "by window" has the same ambiguity as before.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70]); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('CLAUDE.md',[(\"\"\"- `brain query text` reconstructs \"stupidly\": the keys typed in the time\n  window, per app and window title, run through the tier 0/1 adapters from\n  an empty text (no sessions involved); output `windows` + joined `text`.\n  It replaced the earlier raw-keystroke output at the owner's request.\n  Window: default last 10 min,\n  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept\n  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;\n  `text` resolves it to exactly one app and reports the full id.\"\"\",\"\"\"- `brain query text` reconstructs \"stupidly\": the keys typed in the time\n  range, per app and window title, run through the tier 0/1 adapters from\n  an empty text (no sessions involved); output `windows` + joined `text`.\n  It replaced the earlier raw-keystroke output at the owner's request.\n  Range: default last 10 min, `--at T` = the 10 minutes ending at T, or\n  `--from/--to`. Times accept relative (`-2h`), local and RFC 3339 forms.\n  `--app` may be part of the id; `text` resolves it to exactly one app and\n  reports the full id.\"\"\")])\nedit('README.md',[(\"\"\"* **`query text` reconstructs \"stupidly\", by window.** It takes the keys\n  typed in the time window and runs them through the same tier 0/1 adapters\n  the sessions use, per app and window title, from an empty text: no session\n  boundaries, no text from before the window.\"\"\",\"\"\"* **`query text` reconstructs \"stupidly\", per app window.** It takes the\n  keys typed in the time range and runs them through the same tier 0/1\n  adapters the sessions use, per app and window title, from an empty text:\n  no session boundaries, no text from before the range.\"\"\")])\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'",
+  "description": "Fix CLAUDE.md and README wording"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+[This command modified 2 files you've previously read: CLAUDE.md, README.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:01:33.670Z</sub>
+
+Docs and lint are clean. Now the full test suite, including every opt-in test. First, whether the screen is unlocked for the Kate tests:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "echo \"locked: $(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\"",
+  "description": "Check screen lock state"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+locked: false
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:01:39.911Z</sub>
+
+It's unlocked, so I'm running the two Kate tests first. **Hands off the keyboard and mouse for about 40 s. Kate windows will open, and the layout will switch to Hebrew and back.**
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --test real_keyboard_e2e --test repeat_e2e -- --ignored --nocapture --test-threads=1 2>&1 | grep -E 'kate [AB]|^hold|^[a-k⌫] |test result|panicked'; echo \"layout: $(qdbus6 org.kde.keyboard /Layouts getLayout)  leftover kate: $(pgrep -fc '^kate -n /tmp')\"",
+  "description": "Run both Kate end-to-end tests",
+  "timeout": 240000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.12s
+a      80       1          1          1              1
+b     300       1          1          1              1
+c     620       2          2          2              2
+d    1020      12         12         11             12
+e    2020      37         37         36             37
+f    4020      87         87         86             87
+g    1000      12         12         12             12  (boundary)
+h    1001      12         12         12             12  (boundary)
+i     999      11         11         11             11  (boundary)
+j     640       3          3          2              3  (boundary)
+k    2020      37         37         23             25
+⌫    1020      12         12
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.45s
+layout: 0  leftover kate: 0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:02:42.800Z</sub>
+
+Both Kate tests pass; the layout is back to English and no windows were left open. Now the default suite and the 13 VS Code tests (about 5 minutes):
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'; cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Run default suite and VS Code tests",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+     Running unittests src/lib.rs 
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.27s
+     Running tests/vscode_replay.rs 
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 249.89s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T11:08:47.315Z</sub>
+
+Every suite passes. Last, the smoke run of the real binary on your desktop. It only reads, nothing is typed.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "D=$(mktemp -d); B=./target/release/brain; $B run --data-dir $D/d > $D/err 2>&1 & P=$!; sleep 3; $B run --data-dir $D/d; echo \"second run exit: $?\"; $B query search hello --data-dir $D/d | tr -d '\\n'; echo; $B query text --app ghostty --data-dir $D/d; echo \"exit $?\"; $B query text --app x --from -1h --to -2h --data-dir $D/d; echo \"exit $?\"; kill -INT $P; wait $P; echo \"run exit: $?\"; cat $D/err; rm -rf $D; $B query search x --data-dir /nonexistent; echo \"exit $?\"",
+  "description": "Smoke-test the real binary on the desktop"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+brain: error: another `brain run` is already using /tmp/tmp.ks2crD7vP7/d (lock: /tmp/tmp.ks2crD7vP7/d/run.lock)
+second run exit: 1
+{  "query": "hello",  "from": null,  "to": null,  "results": []}
+brain: error: no app matches "ghostty": no typing has been captured in any app yet
+exit 1
+brain: error: the time window is empty: it starts at 2026-11-17T12:08:52.651+02:00 and ends at 2026-11-17T11:08:52.651+02:00
+exit 1
+run exit: 0
+brain: capturing from 1 keyboard(s), focus tracking via KWin, layout us,il; data in /tmp/tmp.ks2crD7vP7/d
+brain: received signal 2, stopping
+brain: error: data dir /nonexistent does not exist (start `brain run --data-dir /nonexistent` first)
+exit 1
+```
+
+</details>
+
