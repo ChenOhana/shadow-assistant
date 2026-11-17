@@ -453,11 +453,23 @@ cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-t
 #    needs no VS Code and also runs with plain `cargo test`)
 ```
 
-The Kate tests need two narrow permissions, granted once by
-`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`):
-passwordless `sudo /usr/sbin/rtcwake -m no -s 30` only (sets a wake alarm
-for a sleep/wake check that suspends with `systemctl suspend`), and access to
-`/dev/uinput` for the user at the local seat.
+`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`) grants two
+narrow permissions once: access to `/dev/uinput` for the user at the local
+seat, which the Kate tests need, and passwordless
+`sudo /usr/sbin/rtcwake -m no -s 30` only, which the manual sleep/wake check
+below uses (it sets a wake alarm; nothing else is allowed).
+
+Sleep/wake is checked by hand, with a real suspend through logind (the same
+path as the KDE menu or closing the lid); no automated test does it:
+
+```sh
+brain run --data-dir /tmp/brain-sleep                     # terminal 1
+sudo /usr/sbin/rtcwake -m no -s 30 && systemctl suspend   # terminal 2: wakes after 30 s
+# after the resume, brain prints how many keyboards it reopened;
+# type something in Kate, wait 30+ s, then:
+grep -E '"state":"(sleep|wake)"' /tmp/brain-sleep/events.jsonl
+brain query text --data-dir /tmp/brain-sleep              # shows the text typed after the resume
+```
 
 ## Where the agent failed
 

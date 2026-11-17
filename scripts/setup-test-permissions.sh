@@ -1,11 +1,11 @@
 #!/bin/sh
-# Grants the two narrow permissions brain's hardware tests need. Run once:
+# Grants the two narrow permissions brain's hardware checks need. Run once:
 #   sudo sh scripts/setup-test-permissions.sh          # install
 #   sudo sh scripts/setup-test-permissions.sh --undo   # remove
 #
-# 1. Sleep/wake test: lets the invoking user run exactly
-#    `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only sets
-#    the RTC wake alarm 30 s ahead. The test then suspends through logind
+# 1. Manual sleep/wake check (see the README): lets the invoking user run
+#    exactly `sudo /usr/sbin/rtcwake -m no -s 30` without a password: it only
+#    sets the RTC wake alarm 30 s ahead. The check then suspends through logind
 #    (`systemctl suspend`, allowed for the desktop user without root), so
 #    brain sees the same PrepareForSleep signals as a real suspend.
 #    (`rtcwake -m mem` would suspend behind logind's back.) No other
