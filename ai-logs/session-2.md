@@ -12969,3 +12969,1968 @@ test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 </details>
 
+## Assistant  <sub>2026-11-17T09:05:26.528Z</sub>
+
+All green. Committing the review fixes, then refreshing `ai-logs/`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A src scripts README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nFix mismatches found in the final review\n\nCLI: `query text --app` help now says it resolves to exactly one app\nand reports the full id; the query help says output is JSON in local\ntime; `run` help says it also builds sessions with searchable text.\n`text` with nothing captured yet says so instead of listing no apps.\n\nCode: remove two unused functions (Recorder::is_paused,\nSessions::open_count); module docs no longer say the input loop reads\nall devices, list the tier 2 thread and the vscode/ directory, and\nstop claiming query output is UTC. The ai-logs exporter finds the\ntranscripts from the current directory instead of a hardcoded path.\n\nDocs: PLAN.md had the draft's notes on capture approaches twice and\nlacked the `renamed` focus flag; the README moved --vscode-replay out\nof the service section (and says how to enable it there), no longer\nclaims X11 support, shows real log lines for every event type, groups\nthe query decisions, and records that PLAN.md was rewritten. CLAUDE.md\nreflects the finished stages, the opt-in hardware tests, local query\ntimes, full app ids and the rename rule.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Transcripts through the final review.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2; git status --short",
+  "description": "Commit review fixes, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+d6c481b Refresh AI logs
+485f490 Fix mismatches found in the final review
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:05:51.730Z</sub>
+
+The review is done, and every fix is committed and pushed (`485f490`, then the `ai-logs/` refresh `d6c481b`). Nothing I found was a bug in capture or reconstruction. The problems were wording that hadn't kept up with recent changes, a duplicated section, a few small rough edges and two unused functions. All tests pass and clippy is clean.
+
+**CLI help vs. what the program actually does:**
+- `query text --app` said it matched any app containing the text. It now says it must match exactly one app and reports the full id.
+- `query` didn't say its output is JSON in local time. Now it does.
+- `run` only mentioned capture. It now also mentions building sessions with searchable text.
+- `query text` before anything had been typed said `known apps: ` with an empty list. It now says no typing has been captured yet.
+
+**Code:**
+- Removed two unused functions: `Recorder::is_paused` and `Sessions::open_count`.
+- Four outdated module comments were fixed:
+  - The input loop reads keyboards, not all devices.
+  - The tier-2 worker thread is listed.
+  - The `vscode/` folder appears in the data-folder layout.
+  - Query output is no longer described as UTC.
+- `scripts/export-ai-logs.py` had this machine's path, with your username, hardcoded. It's now worked out from the current directory.
+
+**Docs:**
+- **PLAN.md:**
+  - The notes on capture approaches appeared twice: the old draft's copy came along with the table. One copy is removed.
+  - The new `renamed` focus flag is now described.
+- **README:**
+  - `--vscode-replay` sat under the service section, though the service runs without it. It now sits under "Run", with a note on how to turn it on for the service.
+  - It claimed focus tracking works on X11, which was never tested. Now it says tested on Wayland only.
+  - There are example log lines for every event type. I checked them against what the code actually writes, which caught one wrong example.
+  - Query decisions have their own group, including local times and app-name matching.
+  - "Where the agent failed" item 3 now says PLAN.md was rewritten.
+- **CLAUDE.md:** brought up to date. It now shows the stages as finished, lists the opt-in hardware tests, covers local query times, full app ids, the rename rule and the no-mouse decision, and fixes the code map.
+
+**Checked and found consistent:**
+- Every `pub` function has a caller, and every dependency in `Cargo.toml` is used.
+- Every JSON field in the README examples matches the real output.
+- A smoke run on your desktop behaved as documented: startup message, a second `run` refused, queries working, a clean stop, and the live `"renamed": true` flag arriving from KWin.
+
+As before, the only things left are yours: give the reviewers access to the private repo, and read it through once yourself. Run `! make` to install the final build.
+
+## User  <sub>2026-11-17T09:33:49.020Z</sub>
+
+explain how does query text work today
+
+## Assistant  <sub>2026-11-17T09:34:11.260Z</sub>
+
+`brain query text` reads the raw keystrokes straight from the log, not from the sessions table, and prints one app's stream for a time window. Here are the steps, following `query::text` in `src/query.rs`:
+
+**1. Parse the CLI** (`src/main.rs`)
+- `--app A` is required. `--at`, `--from` and `--to` are optional. `--at` can't be combined with the other two, which clap enforces.
+- It checks that the data folder and `brain.db` exist, and stops with an error if not.
+- It takes "now" once, so every relative time in the command uses the same reference.
+
+**2. Work out the window** (`resolve`)
+- Each time flag is parsed: relative (`-2h`), local (`14:00`, `2026-11-17 09:00`), or RFC 3339.
+- Then:
+
+| Flags | Window |
+|---|---|
+| none | the last 10 minutes |
+| `--at T` | T − 10 min … T |
+| `--from A` | A … now |
+| `--to B` | B − 10 min … B |
+| `--from A --to B` | A … B |
+
+- If the window starts after it ends, that's an error.
+
+**3. Read two things from the database**, read-only:
+- **Where to start in the log:** the byte position of the latest bookmark at or before the window's start (`log_checkpoints`). Bookmarks are at most 5 s apart, so reading starts at most 5 s before the window.
+- **The known apps:** every distinct app id in `sessions`. These are candidates for resolving `--app`.
+
+**4. Read the log forward** from that byte (`LogReader`, which returns only complete lines, never one still being written):
+- Lines that don't parse are skipped.
+- **It stops** at the first event more than 60 s past the window's end. That margin allows for small clock wobbles.
+- **It keeps** only events that are inside the window, are typing (a key or a paste), and whose app id contains the `--app` text, ignoring case.
+- Each kept event is held in memory together with its app id, and each such app is added to the candidate list.
+- Focus, lock and sleep events are ignored.
+
+**5. Resolve `--app` to one app** (`resolve_app`), among the apps with sessions plus those that typed in the window:
+- An exact match wins, ignoring case: `code` is `code`, even though `com.microsoft.VSCode` also contains it.
+- Otherwise, the one id that contains the text.
+- **Several matches are an error** listing them, so two apps' streams are never mixed. **No match is an error** too: it lists the known apps, or says nothing has been typed yet.
+
+**6. Render that app's events in log order** (`render_key`), with no editing applied:
+
+| Event | Output |
+|---|---|
+| a typed character (Shift/AltGr already applied: `H`, `ש`, `€`) | the character |
+| Enter / Tab | a newline / a tab |
+| any other key | `<Backspace>`, `<Left>`, `<Delete>`, … |
+| a shortcut | `<Ctrl+V>`, `<Ctrl+Shift+V>`, `<Alt+Tab>` |
+| a paste | the pasted text, inline |
+
+Held-key repeats are included, because the app received them. So a held Backspace shows as several `<Backspace>`.
+
+**7. Print the JSON**, with times in local time:
+```json
+{
+  "app": "org.kde.konsole",
+  "at": null,
+  "from": "2026-11-17T10:00:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "git staus<Backspace><Backspace>tus\n"
+}
+```
+`app` is the full id, and `from`/`to`/`at` echo the window that was actually used.
+
+**While `brain run` is writing:** the bookmark comes from a consistent database snapshot. The log reader never returns a half-written line. Lines appended after the read started may or may not be included, which is fine either way. Events from the last second, not yet ingested, are still read because they're in the log.
+
+**Cost:** about the window's length plus at most 5 s of log is read, so a 10-minute query reads about 10 minutes of log whatever its total size. Only that app's matching events are held in memory.
+
+**Limitations:**
+- If the system clock is stepped backwards while capturing, keys typed after that point can be missed. That's the "time order" assumption we discussed; it's documented.
+- An app that never had a session and typed nothing in the window can't be resolved. Asking for it is an error, though nothing would be printed for it anyway.
+
+## User  <sub>2026-11-17T09:40:20.508Z</sub>
+
+i want the output text to be reconstructed instead of rendered narrowly. don't duplicate code
+
+## Assistant  <sub>2026-11-17T09:41:11.123Z</sub>
+
+To confirm what I'm changing: until now `query text` returned the raw stream, as you'd originally decided. From now on it returns **reconstructed** text, built with the same session and reconstruction code `search` uses. No second implementation.
+
+**What `text` will return:** the app's text **as it stood at the end of the window**.
+- **Sessions that ended inside the window:** their stored final text, as already in the database (tier 2 included).
+- **Sessions still running at the end of the window**, e.g. `--at 10:05` when you kept typing until 10:20: the session is replayed from its start up to 10:05 through the same engine. You get exactly what was written at 10:05, not later edits.
+- **Editors (multi-line):** each later session continues the previous one's document, so only the latest state of each document is shown, not every intermediate copy.
+- **Single-line fields:** each session is its own entry (a command, a search, a chat message), so all of them in the window are listed, in order.
+- **Output:** a `text` field joining everything, plus a `sessions` list with each part's id, window title and times.
+
+**How it avoids duplicating code:** to replay a session to a point in time, the engine needs the document the session started from. Today that's only available for sessions still open, which crash recovery uses via `context_state`. I'll store each session's starting state (text, cursor, selection) in its row. Then crash recovery and "text at T" become **the same replay function**, called with different bounds. Recovery gets simpler too. This changes the schema (v5), so your `brain.db` gets rebuilt from the log.
+
+The raw rendering (`<Backspace>`, `<Ctrl+V>`) goes away entirely.
+
+Here's the recovery code I'll turn into the shared replay:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub fn recover' -A75 src/sessions.rs | head -95; grep -n 'fn load_context' -A45 src/sessions.rs | head -50; grep -n 'fn ensure_open' -A30 src/sessions.rs | head -34",
+  "description": "Read recover, load_context and ensure_open"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+131:    pub fn recover(
+132-        conn: &Connection,
+133-        log_path: &Path,
+134-        upto: u64,
+135-        tier2: Option<Box<dyn Tier2Snapshotter>>,
+136-    ) -> Result<Self> {
+137-        let mut s = Self {
+138-            open: HashMap::new(),
+139-            suppress_paste: None,
+140-            aliases: HashMap::new(),
+141-            last_key: None,
+142-            tier2,
+143-            staged_jobs: Vec::new(),
+144-            staged_discards: Vec::new(),
+145-            wrote: false,
+146-        };
+147-        let mut stmt = conn.prepare(
+148-            "SELECT id, app, window, started_at, start_offset, tier2_status
+149-             FROM sessions WHERE status = 'open' ORDER BY start_offset",
+150-        )?;
+151-        let rows = stmt
+152-            .query_map([], |r| {
+153-                Ok((
+154-                    r.get::<_, i64>(0)?,
+155-                    r.get::<_, String>(1)?,
+156-                    r.get::<_, String>(2)?,
+157-                    r.get::<_, String>(3)?,
+158-                    r.get::<_, i64>(4)?,
+159-                    r.get::<_, Option<String>>(5)?,
+160-                ))
+161-            })?
+162-            .collect::<rusqlite::Result<Vec<_>>>()?;
+163-        drop(stmt);
+164-        let mut starts: HashMap<Key, u64> = HashMap::new();
+165-        for (id, app, window, started_at, start_offset, tier2) in rows {
+166-            let started = timefmt::parse_rfc3339_ms(&started_at)
+167-                .with_context(|| format!("session {id}: bad started_at"))?;
+168-            let buf = load_context(conn, &app, &window, started, false)?;
+169-            let start_hash = text_hash(&buf.text());
+170-            let key = (app.clone(), window);
+171-            starts.insert(key.clone(), start_offset as u64);
+172-            s.open.insert(
+173-                key,
+174-                OpenSession {
+175-                    id,
+176-                    editor: FieldEditor::new(classify(&app), buf),
+177-                    last_activity: started,
+178-                    end_offset: start_offset as u64,
+179-                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
+180-                    dirty: false,
+181-                    start_hash,
+182-                    latest: None,
+183-                },
+184-            );
+185-        }
+186-        let Some(&from) = starts.values().min() else {
+187-            return Ok(s);
+188-        };
+189-        let mut reader = LogReader::open(log_path, from)?;
+190-        while let Some(line) = reader.next_line()? {
+191-            if line.offset >= upto {
+192-                break;
+193-            }
+194-            let next = reader.offset();
+195-            let Some(ev) = line.event else { continue };
+196-            let in_session = |k: &Key| starts.get(k).is_some_and(|&st| line.offset >= st);
+197-            s.replay_event(conn, &ev, line.offset, next, &in_session)?;
+198-        }
+199-        Ok(s)
+200-    }
+201-
+202-    /// Applies one event to the open sessi
+… [2880 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:41:37.688Z</sub>
+
+Now the refactor. I'll start with the schema (session start state) and the shared replay function in `sessions.rs`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/store.rs',[\n(\"pub const SCHEMA_VERSION: i64 = 4;\",\"pub const SCHEMA_VERSION: i64 = 5;\"),\n(\"\"\"  start_offset       INTEGER NOT NULL,           -- log offset of the session's first event\"\"\",\"\"\"  start_offset       INTEGER NOT NULL,           -- log offset of the session's first event\n  start_text         TEXT NOT NULL DEFAULT '',   -- the document the session started from,\n  start_cursor       INTEGER NOT NULL DEFAULT 0, --   so it can be replayed to any point in time\n  start_anchor       INTEGER,\"\"\"),\n])\ns=open('src/sessions.rs').read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\n# 1. recover -> load + replay\nold=s[s.index(\"    /// Rebuilds the open sessions from the database and the log: each open\"):s.index(\"    /// Applies one event to the open session it belongs to, without opening\")]\nnew='''    /// Rebuilds the open sessions from the database and the log: each open\n    /// session starts from the document stored in its row and its events\n    /// (from `start_offset` up to `upto`, the ingested offset) are replayed.\n    pub fn recover(\n        conn: &Connection,\n        log_path: &Path,\n        upto: u64,\n        tier2: Option<Box<dyn Tier2Snapshotter>>,\n    ) -> Result<Self> {\n        let replays = load_replays(conn, \"status = 'open'\", [])?;\n        Self::replay(conn, log_path, replays, upto, None, tier2)\n    }\n\n    /// Replays the given sessions from their start up to log offset `upto`,\n    /// ignoring events later than `until` if given, with the same rules as\n    /// live ingest (without opening or closing sessions). Used by crash\n    /// recovery and to know a session's text at a point in time.\n    fn replay(\n        conn: &Connection,\n        log_path: &Path,\n        replays: Vec<Replay>,\n        upto: u64,\n        until: Option<Millis>,\n        tier2: Option<Box<dyn Tier2Snapshotter>>,\n    ) -> Result<Self> {\n        let mut s = Self {\n            open: HashMap::new(),\n            suppress_paste: None,\n            aliases: HashMap::new(),\n            last_key: None,\n            tier2,\n            staged_jobs: Vec::new(),\n            staged_discards: Vec::new(),\n            wrote: false,\n        };\n        let mut starts: HashMap<Key, u64> = HashMap::new();\n        for r in replays {\n            starts.insert(r.key.clone(), r.start_offset);\n            s.open.insert(\n                r.key.clone(),\n                OpenSession {\n                    id: r.id,\n                    start_hash: text_hash(&r.buf.text()),\n                    editor: FieldEditor::new(classify(&r.key.0), r.buf),\n                    last_activity: r.started,\n                    end_offset: r.start_offset,\n                    tier2_snapshot: r.tier2_snapshot,\n                    dirty: false,\n                    latest: None,\n                },\n            );\n        }\n        let Some(&from) = starts.values().min() else {\n            return Ok(s);\n        };\n        let mut reader = LogReader::open(log_path, from)?;\n        while let Some(line) = reader.next_line()? {\n            if line.offset >= upto {\n                break;\n            }\n            let next = reader.offset();\n            let Some(ev) = line.event else { continue };\n            if until.is_some_and(|u| ev.ts > u) {\n                continue;\n            }\n            let in_session = |k: &Key| starts.get(k).is_some_and(|&st| line.offset >= st);\n            s.replay_event(conn, &ev, line.offset, next, &in_session)?;\n        }\n        Ok(s)\n    }\n\n'''\ns=s.replace(old,new)\n# 2. text_at public fn + Replay struct + load_replays, before load_context doc\nanchor=\"/// Loads the modelled document of a cont
+… [6926 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:42:17.947Z</sub>
+
+It builds. The crash-recovery tests now exercise the new replay path, so they show whether behavior is unchanged:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --lib 2>&1 | grep -E 'test result|panicked'; cargo test --release --test crash_safety 2>&1 | grep -E 'test result|panicked'",
+  "description": "Run unit tests and crash test after refactor",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All 121 unit tests and the crash test pass on the new replay, so behavior is unchanged. I'm now writing unit tests for `text_at` covering a part-way session, a closed one, a later session continuing a document, and a still-open session.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/sessions.rs'; s=open(p).read()\nanchor=\"\"\"    #[test]\n    fn enter_commits_single_line_fields() {\"\"\"\ntest='''    #[test]\n    fn text_at_a_point_in_time() {\n        let mut l = Log::new();\n        let t = l.typ(T0, \"notes\", \"n\", \"alpha\");\n        let t2 = l.typ(t + 10_000, \"notes\", \"n\", \" beta\");\n        // A second session on the same document, after the idle timeout.\n        l.typ(t2 + 40_000, \"notes\", \"n\", \"!\");\n        // A session that is still open at the end.\n        l.typ(t2 + 120_000, \"chat\", \"c\", \"typing now\");\n        let mut ing = l.ingester(\"b.db\");\n        run(&mut ing, clock_t0);\n        let c = ing.connection();\n        let log = l.log_path();\n        let at = |id, ts| super::text_at(c, &log, id, ts).unwrap();\n        assert_eq!(at(1, T0 + 2_000), \"alpha\", \"mid-session: only what was typed by then\");\n        assert_eq!(at(1, t + 10_100), \"alpha b\");\n        assert_eq!(at(1, t2 + 5_000), \"alpha beta\", \"ended: the stored text\");\n        // The second session starts from the document the first one left.\n        assert_eq!(at(2, t2 + 39_000), \"alpha beta\");\n        assert_eq!(at(2, t2 + 41_000), \"alpha beta!\");\n        // An open session is replayed from the log up to the time asked.\n        assert_eq!(at(3, t2 + 120_000 + 350), \"typi\");\n        assert_eq!(at(3, t2 + 200_000), \"typing now\");\n        assert_eq!(sessions(c)[2].2, \"open\");\n    }\n\n'''\nassert s.count(anchor)==1; s=s.replace(anchor,test+anchor); open(p,'w').write(s)\nEOF\ncargo test --lib text_at 2>&1 | grep -E 'test |test result|panicked|left|right'",
+  "description": "Add text_at unit test"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test sessions::tests::text_at_a_point_in_time ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 121 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:43:33.049Z</sub>
+
+`text_at` works for every case. Now rewriting `query::text` on top of it, and deleting the raw renderer:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\nrep(\"\"\"//! Both run while `brain run` writes. `search` is a single SELECT on a\n//! read-only connection, so it sees one consistent snapshot of the index\n//! (WAL). `text` reads the capture log, whose reader only returns complete\n//! lines, starting at the checkpoint just before its window.\"\"\",\"\"\"//! Both run while `brain run` writes, on a read-only connection that sees one\n//! consistent snapshot of the index (WAL). `search` matches session text;\n//! `text` returns an app's reconstructed text as it stood at the end of a\n//! window, replaying sessions still running then from the log\n//! ([`crate::sessions::text_at`]).\"\"\")\nrep(\"\"\"use crate::datadir::DataDir;\nuse crate::event::{EventKind, Mod};\nuse crate::eventlog::LogReader;\nuse crate::store;\"\"\",\"\"\"use crate::datadir::DataDir;\nuse crate::reconstruct::apps::classify;\nuse crate::sessions;\nuse crate::store;\"\"\")\nrep(\"\"\"/// Snippet context on each side of the first match, in characters.\nconst SNIPPET_CONTEXT: usize = 40;\n/// `text` keeps reading this far past its window, in case the clock stepped\n/// back while writing the log (timestamps are almost, not strictly, ordered).\nconst CLOCK_SLACK_MS: Millis = 60_000;\"\"\",\"\"\"/// Snippet context on each side of the first match, in characters.\nconst SNIPPET_CONTEXT: usize = 40;\"\"\")\nstart=s.index(\"#[derive(Debug, Serialize)]\\npub struct TextOutput {\")\nend=s.index(\"/// The full app id `given` refers to\")\ns=s[:start]+'''/// One session's part of `text`.\n#[derive(Debug, Serialize)]\npub struct TextSession {\n    pub session_id: String,\n    pub window: String,\n    pub started_at: String,\n    /// `None` if the session was still open at the end of the window.\n    pub ended_at: Option<String>,\n    pub text: String,\n}\n\n#[derive(Debug, Serialize)]\npub struct TextOutput {\n    pub app: String,\n    pub at: Option<String>,\n    pub from: Option<String>,\n    pub to: Option<String>,\n    /// The sessions' texts, in order, one per line.\n    pub text: String,\n    pub sessions: Vec<TextSession>,\n}\n\n/// The reconstructed text of one app as it stood at the end of the window:\n/// every session of the app active in the window, each as it was at that\n/// moment (a session still running is replayed up to it). In editors and\n/// other multi-line apps a later session continues the previous one's\n/// document, so only the latest session per window is kept; single-line\n/// fields (commands, searches, messages) are all kept. `app` may be part of\n/// the app id; see [`resolve_app`].\npub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {\n    let w = resolve(flags, Command::Text, now)?;\n    let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));\n    let conn = store::open_reader(&dir.db_path())?;\n    let known: Vec<String> = conn\n        .prepare(\"SELECT DISTINCT app FROM sessions\")?\n        .query_map([], |r| r.get(0))?\n        .collect::<rusqlite::Result<_>>()?;\n    let full = resolve_app(app, &known)?;\n    // Sessions overlapping the window (open ones \"end\" now).\n    let rows: Vec<(i64, String, String, Option<String>)> = conn\n        .prepare(\n            \"SELECT id, window, started_at, ended_at FROM sessions\n             WHERE app = ?1 AND started_at <= ?2 AND COALESCE(ended_at, ?3) >= ?4\n             ORDER BY started_at, id\",\n        )?\n        .query_map(\n            rusqlite::params![\n                full,\n                timefmt::format_ms(to),\n                timefmt::format_ms(now),\n                timefmt::format_ms(from)\n            ],\n            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),\n        )?\n        .collect::<rusqlite::Result<_>>()?;\n    let mut parts: Vec<TextSession> = Vec::new();\n    for (id,
+… [2182 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+383:            bail!("no app matches {given:?}: no typing has been captured in any app yet")
+497:        assert!(e.contains("no typing has been captured"), "{e}");
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:44:07.684Z</sub>
+
+It builds. Now rewriting the CLI tests for the new behavior. I'm adding a fixture session that's still running at a queried time, so a query in the middle of it is covered.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn text_is_the_raw_stream' -A55 tests/query_cli.rs | head -70; grep -n 'Session 4' -A16 tests/query_cli.rs",
+  "description": "Read the current text test and fixture end"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+231:fn text_is_the_raw_stream() {
+232-    let f = fixture();
+233-    let d = &f.dir;
+234-    // Session 1's window, absolute bounds: raw keys, no editing applied.
+235-    let from = format_ms(f.t0);
+236-    let to = format_ms(f.t0 + 5 * 60_000);
+237-    let (code, v, _) = brain(d, &["text", "--app", "kate", "--from", &from, "--to", &to]);
+238-    assert_eq!(code, 0);
+239-    assert_eq!(
+240-        v["text"],
+241-        format!("the cat sat secret{}", "<Backspace>".repeat(7))
+242-    );
+243-    // The full app id, not the part that was given.
+244-    assert_eq!(v["app"], "org.kde.kate");
+245-    assert_eq!(v["at"], Value::Null);
+246-    assert_local(&v["from"]);
+247-    // --at: the 10 minutes ending at T; only that app's keys.
+248-    let at = format_ms(f.t0 + 90 * 60_000 + 60_000);
+249-    let (_, v, _) = brain(d, &["text", "--app", "konsole", "--at", &at]);
+250-    assert_eq!(v["text"], "git status\n");
+251-    assert_eq!(v["app"], "org.kde.konsole");
+252-    assert_eq!(instant(&v["at"]), parse_rfc3339_ms(&at).unwrap());
+253-    assert_local(&v["at"]);
+254-    // Default: the last 10 minutes, with shortcuts named and pastes inline.
+255-    let (_, v, _) = brain(d, &["text", "--app", "chrome"]);
+256-    assert_eq!(v["text"], "<Ctrl+V>pasted words\n");
+257-    assert_eq!(v["app"], "google-chrome");
+258-    // A known app with nothing typed in the window: empty text, full id.
+259-    let (code, v, _) = brain(d, &["text", "--app", "konsole", "--at", "-1m"]);
+260-    assert_eq!((code, v["text"].as_str()), (0, Some("")));
+261-    assert_eq!(v["app"], "org.kde.konsole");
+262-    // An unknown app, or one matching several apps, is an error.
+263-    let (code, _, err) = brain(d, &["text", "--app", "nosuchapp"]);
+264-    assert_ne!(code, 0);
+265-    assert!(
+266-        err.contains("no app matches") && err.contains("org.kde.kate"),
+267-        "{err}"
+268-    );
+269-    let (code, _, err) = brain(d, &["text", "--app", "org.kde"]);
+270-    assert_ne!(code, 0);
+271-    assert!(err.contains("several apps"), "{err}");
+272-}
+273-
+274-#[test]
+275-fn errors_exit_non_zero_with_a_message() {
+276-    let f = fixture();
+277-    let d = &f.dir;
+278-    for args in [
+279-        vec!["search", ""],
+280-        vec!["search", "x", "--limit", "0"],
+281-        vec!["search", "x", "--from", "yesterday"],
+282-        vec!["text", "--app", "a", "--from", "-1h", "--to", "-2h"],
+283-    ] {
+284-        let (code, _, err) = brain(d, &args);
+285-        assert_ne!(code, 0, "{args:?}");
+286-        assert!(err.starts_with("brain: error: "), "{args:?}: {err}");
+117:    // Session 4 (+115 min, i.e. ~5 min ago): a paste in Chrome.
+118-    let t3 = t0 + 115 * 60_000;
+119-    key(
+120-        &mut w,
+121-        t3,
+122-        "google-chrome",
+123-        "New tab - Google Chrome",
+124-        "v",
+125-        &[Mod::Ctrl],
+126-    );
+127-    w.append(&Event {
+128-        ts: t3,
+129-        app: "google-chrome".into(),
+130-        kind: EventKind::Paste {
+131-            text:
+… [102 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 134,150p tests/query_cli.rs",
+  "description": "Read the rest of the fixture"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/query_cli.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\nrep(\"\"\"        \"Enter\",\n        &[],\n    );\n    drop(w);\"\"\",\"\"\"        \"Enter\",\n        &[],\n    );\n    // Session 5 (+117 min): \"alpha\", then \" beta\" 10 s later, same session.\n    let t4 = t0 + 117 * 60_000;\n    let t = typ(&mut w, t4, \"org.example.notes\", \"draft\", \"alpha\");\n    typ(&mut w, t + 10_000, \"org.example.notes\", \"draft\", \" beta\");\n    drop(w);\"\"\")\nstart=s.index(\"#[test]\\nfn text_is_the_raw_stream() {\")\nend=s.index(\"#[test]\\nfn errors_exit_non_zero_with_a_message()\")\ns=s[:start]+'''#[test]\nfn text_is_reconstructed() {\n    let f = fixture();\n    let d = &f.dir;\n    // Session 1's time, absolute bounds: the edited text, not the keys\n    // (\"secret\" was typed and deleted), and the full app id.\n    let from = format_ms(f.t0);\n    let to = format_ms(f.t0 + 5 * 60_000);\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"kate\", \"--from\", &from, \"--to\", &to]);\n    assert_eq!(code, 0);\n    assert_eq!(v[\"text\"], \"the cat sat\");\n    assert_eq!(v[\"app\"], \"org.kde.kate\");\n    assert_eq!(v[\"at\"], Value::Null);\n    assert_local(&v[\"from\"]);\n    let s = &v[\"sessions\"][0];\n    assert_eq!((s[\"session_id\"].as_str(), s[\"window\"].as_str()), (Some(\"1\"), Some(\"notes.md — Kate\")));\n    assert_local(&s[\"started_at\"]);\n    assert_local(&s[\"ended_at\"]);\n    // Over both Kate sessions: the document as it stood at the end (session 2\n    // deleted \"cat\" and added Hebrew), not both copies.\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"kate\", \"--from\", \"-3h\"]);\n    assert_eq!(v[\"text\"], \"the  sat גרתי בבית\");\n    assert_eq!(v[\"sessions\"].as_array().unwrap().len(), 1);\n    // --at: the 10 minutes ending at T.\n    let at = format_ms(f.t0 + 90 * 60_000 + 60_000);\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", &at]);\n    assert_eq!(v[\"text\"], \"git status\");\n    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    assert_eq!(instant(&v[\"at\"]), parse_rfc3339_ms(&at).unwrap());\n    assert_local(&v[\"at\"]);\n    // --at in the middle of a session: its text at that moment, replayed\n    // from the log (\"alpha\" typed by then, \" beta\" 10 s later).\n    let at = format_ms(f.t0 + 117 * 60_000 + 3_000);\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"notes\", \"--at\", &at]);\n    assert_eq!(v[\"text\"], \"alpha\");\n    assert_eq!(v[\"sessions\"][0][\"ended_at\"], Value::Null, \"still running at T\");\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"notes\"]);\n    assert_eq!(v[\"text\"], \"alpha beta\");\n    // Default: the last 10 minutes; pasted text is part of the session.\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"chrome\"]);\n    assert_eq!(v[\"text\"], \"pasted words\");\n    assert_eq!(v[\"app\"], \"google-chrome\");\n    // A known app with nothing in the window: empty text, full id.\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", \"-1m\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\n    assert_eq!(v[\"app\"], \"org.kde.konsole\");\n    // An unknown app, or one matching several apps, is an error.\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"nosuchapp\"]);\n    assert_ne!(code, 0);\n    assert!(\n        err.contains(\"no app matches\") && err.contains(\"org.kde.kate\"),\n        \"{err}\"\n    );\n    let (code, _, err) = brain(d, &[\"text\", \"--app\", \"org.kde\"]);\n    assert_ne!(code, 0);\n    assert!(err.contains(\"several apps\"), \"{err}\");\n}\n\n'''+s[end:]\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A6 | head; cargo test --release --test query_cli 2>&1 | grep -E '^test |test result|panicked|left|right' | head -20",
+  "description": "R
+… [63 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+    })
+    .unwrap();
+    key(
+        &mut w,
+        t3 + 100,
+        "google-chrome",
+        "New tab - Google Chrome",
+        "Enter",
+        &[],
+    );
+    drop(w);
+    let log = dir.join("events.jsonl");
+
+    let mut ing = Ingester::new(store::open_writer(&dir.join("brain.db")).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    Fixture { _tmp: tmp, dir, t0 }
+}
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+test errors_exit_non_zero_with_a_message ... ok
+test search_time_windows ... ok
+test text_is_reconstructed ... ok
+test search_semantics_and_shapes ... ok
+test queries_are_consistent_while_run_writes ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+[This command modified 2 files you've previously read: src/sessions.rs, tests/query_cli.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All CLI tests pass now, but `query text` no longer reads the log by time, so the log checkpoints and clock-jump limitation may be dead code. I'm checking what still uses them.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'seek_offset_before\\|insert_checkpoint\\|latest_checkpoint\\|log_checkpoints\\|checkpoint_due\\|CHECKPOINT_INTERVAL' src tests | cut -c1-110",
+  "description": "Find remaining uses of log checkpoints"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/ingest.rs:26:pub const CHECKPOINT_INTERVAL_MS: Millis = 5_000;
+src/ingest.rs:76:            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok(
+src/ingest.rs:148:                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
+src/ingest.rs:149:                    store::insert_checkpoint(&tx, &timefmt::format_ms(event.ts), line.offset
+src/ingest.rs:235:/// at least [`CHECKPOINT_INTERVAL_MS`] away in log time. The distance is absolute
+src/ingest.rs:238:fn checkpoint_due(last: Option<Millis>, ts: Millis) -> bool {
+src/ingest.rs:241:        Some(prev) => (ts - prev).abs() >= CHECKPOINT_INTERVAL_MS,
+src/ingest.rs:293:        assert_eq!(count(c, "SELECT count(*) FROM log_checkpoints"), 4);
+src/ingest.rs:318:            count(ing.connection(), "SELECT count(*) FROM log_checkpoints"),
+src/ingest.rs:340:        assert!(checkpoint_due(None, 0));
+src/ingest.rs:341:        assert!(!checkpoint_due(Some(0), 4_999));
+src/ingest.rs:342:        assert!(checkpoint_due(Some(0), 5_000));
+src/ingest.rs:343:        assert!(checkpoint_due(Some(100_000), 0), "backwards clock jump");
+src/store.rs:91:CREATE TABLE log_checkpoints (
+src/store.rs:178:pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
+src/store.rs:179:    conn.prepare_cached("INSERT OR IGNORE INTO log_checkpoints (ts, byte_offset) VALUES (?1, 
+src/store.rs:185:pub fn latest_checkpoint(conn: &Connection) -> Result<Option<String>> {
+src/store.rs:186:    Ok(conn.query_row("SELECT MAX(ts) FROM log_checkpoints", [], |r| r.get(0))?)
+src/store.rs:190:pub fn seek_offset_before(conn: &Connection, ts: &str) -> Result<u64> {
+src/store.rs:193:            "SELECT byte_offset FROM log_checkpoints WHERE ts <= ?1 ORDER BY ts DESC LIMIT 1"
+src/store.rs:308:        assert_eq!(latest_checkpoint(&c).unwrap(), None);
+src/store.rs:309:        insert_checkpoint(&c, "2026-01-01T00:00:00.000Z", 0).unwrap();
+src/store.rs:310:        insert_checkpoint(&c, "2026-01-01T00:00:05.000Z", 500).unwrap();
+src/store.rs:311:        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 900).unwrap();
+src/store.rs:312:        insert_checkpoint(&c, "2026-01-01T00:00:10.000Z", 999).unwrap(); // ignored duplicate
+src/store.rs:314:            seek_offset_before(&c, "2026-01-01T00:00:07.000Z").unwrap(),
+src/store.rs:318:            seek_offset_before(&c, "2026-01-01T00:00:10.000Z").unwrap(),
+src/store.rs:322:            seek_offset_before(&c, "2025-01-01T00:00:00.000Z").unwrap(),
+src/store.rs:326:            latest_checkpoint(&c).unwrap().as_deref(),
+tests/crash_safety.rs:7:use brain::ingest::CHECKPOINT_INTERVAL_MS;
+tests/crash_safety.rs:125:        if last.is_none_or(|prev| (ev.ts - prev).abs() >= CHECKPOINT_INTERVAL_MS) {
+tests/crash_safety.rs:135:        .prepare("SELECT ts, byte_offset FROM log_checkpoints ORDER BY byte_offset")
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Bookmarks are no longer read, since `text` now replays from each session's start position, so I'm removing them entirely along with their helpers, ingest code and tests, which also retires the clock-jump limitation.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 20,40p src/ingest.rs; sed -n 120,160p src/ingest.rs; sed -n 228,245p src/ingest.rs; sed -n 270,345p src/ingest.rs; sed -n 85,96p src/store.rs; sed -n 300,335p src/store.rs; sed -n 110,145p tests/crash_safety.rs",
+  "description": "Read all checkpoint code to remove"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+use crate::timefmt::{self, Millis};
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+use std::path::{Path, PathBuf};
+
+/// Minimum spacing between two checkpoints for the same app, in log time.
+pub const CHECKPOINT_INTERVAL_MS: Millis = 5_000;
+/// Upper bound on lines per transaction, which bounds memory use and commit latency.
+pub const MAX_LINES_PER_STEP: usize = 5_000;
+
+pub struct Ingester {
+    conn: Connection,
+    log_path: PathBuf,
+    offset: u64,
+    last_checkpoint: Option<Millis>,
+    sessions: Option<Sessions>,
+    /// Tier 2 results waiting to be written: (session id, text or error).
+    tier2_results: Vec<(i64, std::result::Result<String, String>)>,
+    /// Tier 2 jobs whose sessions are committed as pending, to hand to the worker.
+    tier2_jobs: Vec<i64>,
+}
+        }
+        r
+    }
+
+    fn try_step(&mut self, clock: Clock) -> Result<StepStats> {
+        let Some(sessions) = self.sessions.as_mut() else {
+            anyhow::bail!("session state unavailable");
+        };
+        let mut stats = StepStats::default();
+        // Checkpoint decisions are staged and only become the in-memory state
+        // once the transaction commits, so a failed commit cannot desync them.
+        let mut staged: Option<Millis> = None;
+        let tx = self
+            .conn
+            .transaction()
+            .context("starting ingest transaction")?;
+        let mut new_offset = self.offset;
+        if self.log_path.exists() {
+            let mut reader = LogReader::open(&self.log_path, self.offset)?;
+            while stats.lines < MAX_LINES_PER_STEP {
+                let Some(line) = reader.next_line()? else {
+                    break;
+                };
+                stats.lines += 1;
+                let Some(event) = line.event else {
+                    stats.invalid_lines += 1;
+                    continue;
+                };
+                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {
+                    store::insert_checkpoint(&tx, &timefmt::format_ms(event.ts), line.offset)?;
+                    staged = Some(event.ts);
+                    stats.checkpoints += 1;
+                }
+                sessions.on_event(&tx, line.offset, reader.offset(), &event)?;
+            }
+            new_offset = reader.offset();
+        }
+        if stats.lines < MAX_LINES_PER_STEP {
+            // Caught up with the log: idle sessions can close on the wall clock.
+            sessions.close_idle(&tx, clock())?;
+        }
+            rusqlite::params![format!("failed: {why}"), id],
+        )?,
+    };
+    Ok(())
+}
+
+/// A new checkpoint is due when none exists yet for this app, or the last one is
+/// at least [`CHECKPOINT_INTERVAL_MS`] away in log time. The distance is absolute
+/// so that a backwards clock jump (NTP, manual change) cannot suppress
+/// checkpoints until the clock catches up again.
+fn checkpoint_due(last: Option<Millis>, ts: Millis) -> bool {
+    match last {
+        None => true,
+        Some(prev) => (ts - pr
+… [5922 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\ndef cut(p, start, end_marker):\n    s=open(p).read(); i=s.index(start); j=s.index(end_marker,i); open(p,'w').write(s[:i]+s[j:])\n# store\nedit('src/store.rs',[(\"\"\"INSERT INTO ingest_state (id, log_offset) VALUES (1, 0);\n\n-- Seek points into the capture log, at most one per 5 s of log time: the\n-- first event at or after `ts` starts at `byte_offset`. `query text` starts\n-- reading the log there instead of at the beginning.\nCREATE TABLE log_checkpoints (\n  ts          TEXT PRIMARY KEY,\n  byte_offset INTEGER NOT NULL\n);\n\\\"#;\"\"\",\"\"\"INSERT INTO ingest_state (id, log_offset) VALUES (1, 0);\n\\\"#;\"\"\")])\ncut('src/store.rs',\"pub fn insert_checkpoint(\",\"#[cfg(test)]\")\ncut('src/store.rs',\"    #[test]\\n    fn checkpoint_seek()\",\"\\n}\\n\")\ns=open('src/store.rs').read()\n# ensure the tests module closes properly (cut removed through before final \"\\n}\\n\")\nopen('src/store.rs','w').write(s)\n# ingest\nedit('src/ingest.rs',[\n(\"\"\"/// Minimum spacing between two checkpoints for the same app, in log time.\npub const CHECKPOINT_INTERVAL_MS: Millis = 5_000;\n\"\"\",\"\"),\n(\"\"\"    offset: u64,\n    last_checkpoint: Option<Millis>,\n    sessions: Option<Sessions>,\"\"\",\"\"\"    offset: u64,\n    sessions: Option<Sessions>,\"\"\"),\n(\"\"\"        let mut stats = StepStats::default();\n        // Checkpoint decisions are staged and only become the in-memory state\n        // once the transaction commits, so a failed commit cannot desync them.\n        let mut staged: Option<Millis> = None;\n        let tx\"\"\",\"\"\"        let mut stats = StepStats::default();\n        let tx\"\"\"),\n(\"\"\"                if checkpoint_due(staged.or(self.last_checkpoint), event.ts) {\n                    store::insert_checkpoint(&tx, &timefmt::format_ms(event.ts), line.offset)?;\n                    staged = Some(event.ts);\n                    stats.checkpoints += 1;\n                }\n\"\"\",\"\"),\n(\"\"\"        // One checkpoint per 5 s of log time: t = 0, 5, 10, 15 s.\n        assert_eq!(count(c, \"SELECT count(*) FROM log_checkpoints\"), 4);\n\"\"\",\"\"),\n(\"\"\"        assert_eq!(s.lines, 5, \"only the new lines are read\");\n        assert_eq!(\n            count(ing.connection(), \"SELECT count(*) FROM log_checkpoints\"),\n            15\n        );\"\"\",\"\"\"        assert_eq!(s.lines, 5, \"only the new lines are read\");\n        assert_eq!(ing.offset(), w.len());\"\"\"),\n(\"fn ingests_and_checkpoints_every_five_seconds()\",\"fn ingests_the_whole_log_and_records_the_offset()\"),\n])\ncut('src/ingest.rs',\"/// A new checkpoint is due when none exists yet\",\"#[cfg(test)]\")\ncut('src/ingest.rs',\"    #[test]\\n    fn checkpoint_spacing_rule()\",\"\\n}\\n\")\nEOF\ngrep -n 'last_checkpoint\\|checkpoints\\|checkpoint' src/ingest.rs src/store.rs | head; tail -5 src/store.rs; tail -5 src/ingest.rs",
+  "description": "Remove log checkpoints from store and ingest"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/ingest.rs:10://! A step derives log checkpoints (seek points for `query text`) and feeds
+src/ingest.rs:43:    pub checkpoints: usize,
+src/ingest.rs:72:        let last_checkpoint =
+src/ingest.rs:73:            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok());
+src/ingest.rs:80:            last_checkpoint,
+src/ingest.rs:169:            self.last_checkpoint = staged;
+src/ingest.rs:193:            total.checkpoints += s.checkpoints;
+        assert!(hits("\"walk\"").is_empty());
+    }
+
+
+}
+        assert_eq!(ing.offset(), committed);
+    }
+
+
+}
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,20p src/ingest.rs; sed -n 38,46p src/ingest.rs; sed -n 66,84p src/ingest.rs; sed -n 162,172p src/ingest.rs; sed -n 186,196p src/ingest.rs",
+  "description": "Read remaining checkpoint references in ingest"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Ingest: tails the capture log into the SQLite index.
+//!
+//! Each [`Ingester::step`] reads a bounded batch of complete log lines starting at
+//! the persisted offset. It writes everything it derives from them and the new
+//! offset in **one transaction**. If the process dies before the commit, nothing
+//! from the batch is visible and the next start re-reads the same bytes. If it
+//! dies after the commit, the offset already covers the batch. Either way there
+//! are no gaps and no duplicates.
+//!
+//! A step derives log checkpoints (seek points for `query text`) and feeds
+//! every event to the [`Sessions`] engine, which opens, updates and closes
+//! writing sessions and their reconstructed text in the same transaction.
+//! If a step fails, the engine's in-memory state may be ahead of the
+//! database, so it is rebuilt from the database and the log
+//! ([`Sessions::recover`]) before the next attempt.
+
+use crate::eventlog::LogReader;
+use crate::sessions::{Sessions, Tier2Snapshotter};
+use crate::store;
+use crate::timefmt::{self, Millis};
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StepStats {
+    pub lines: usize,
+    pub invalid_lines: usize,
+    pub checkpoints: usize,
+}
+
+/// Where the ingest clock comes from: the wall clock in production, fixed in tests.
+                "brain: ingest offset {offset} is past the end of the log ({log_len} bytes); \
+                 resuming from the end"
+            );
+            offset = log_len;
+            store::set_ingest_offset(&conn, offset)?;
+        }
+        let last_checkpoint =
+            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok());
+        let sessions = Sessions::recover(&conn, log_path, offset, tier2)
+            .context("recovering open sessions")?;
+        Ok(Self {
+            conn,
+            log_path: log_path.to_owned(),
+            offset,
+            last_checkpoint,
+            sessions: Some(sessions),
+            tier2_results: Vec::new(),
+            tier2_jobs: Vec::new(),
+        })
+        if let Err(e) = tx.commit() {
+            self.tier2_results = results; // retry them next time
+            return Err(e).context("committing ingest transaction");
+        }
+
+        self.offset = new_offset;
+        if staged.is_some() {
+            self.last_checkpoint = staged;
+        }
+        let (jobs, discards) = sessions.take_committed_effects();
+        self.tier2_jobs.extend(jobs);
+    /// Steps until caught up with the log (or `max_steps` reached).
+    pub fn catch_up(&mut self, max_steps: usize) -> Result<StepStats> {
+        let mut total = StepStats::default();
+        for _ in 0..max_steps {
+            let s = self.step()?;
+            total.lines += s.lines;
+            total.invalid_lines += s.invalid_lines;
+            total.checkpoints += s.checkpoints;
+            if s.lines < MAX_LINES_PER_STEP {
+                break;
+            }
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/ingest.rs',[\n(\"\"\"//! A step derives log checkpoints (seek points for `query text`) and feeds\n//! every event to the [`Sessions`] engine, which opens, updates and closes\"\"\",\"\"\"//! A step feeds every event to the [`Sessions`] engine, which opens, updates\n//! and closes\"\"\"),\n(\"\"\"    pub invalid_lines: usize,\n    pub checkpoints: usize,\n}\"\"\",\"\"\"    pub invalid_lines: usize,\n}\"\"\"),\n(\"\"\"        let last_checkpoint =\n            store::latest_checkpoint(&conn)?.and_then(|ts| timefmt::parse_rfc3339_ms(&ts).ok());\n\"\"\",\"\"),\n(\"\"\"            offset,\n            last_checkpoint,\n            sessions: Some(sessions),\"\"\",\"\"\"            offset,\n            sessions: Some(sessions),\"\"\"),\n(\"\"\"        self.offset = new_offset;\n        if staged.is_some() {\n            self.last_checkpoint = staged;\n        }\"\"\",\"\"\"        self.offset = new_offset;\"\"\"),\n(\"\"\"            total.checkpoints += s.checkpoints;\n\"\"\",\"\"),\n])\ns=open('src/ingest.rs').read()\ns=s.replace(\"    }\\n\\n\\n}\\n\",\"    }\\n}\\n\"); open('src/ingest.rs','w').write(s)\ns=open('src/store.rs').read()\ns=s.replace(\"    }\\n\\n\\n}\\n\",\"    }\\n}\\n\"); open('src/store.rs','w').write(s)\n# crash test\np='tests/crash_safety.rs'; s=open(p).read()\ni=s.index(\"    // ...and its checkpoints are exactly what one uninterrupted pass over the\")\nj=s.index(\"    // Sessions and documents are a pure function of the log:\")\ns=s[:i]+s[j:]\ns=s.replace(\"use brain::ingest::CHECKPOINT_INTERVAL_MS;\\n\",\"\")\ns=s.replace(\"    // Ingest covered the whole log...\\n\",\"    // Ingest covered the whole log.\\n\")\nopen(p,'w').write(s)\nEOF\ncargo build --release --tests 2>&1 | grep -E '^(error|warning)' -A8 | head -30",
+  "description": "Finish removing checkpoints from ingest and crash test; build"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+warning: unused import: `OptionalExtension`
+  --> src/store.rs:15:39
+   |
+15 | use rusqlite::{Connection, OpenFlags, OptionalExtension};
+   |                                       ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `brain` (lib) generated 1 warning (run `cargo fix --lib -p brain` to apply 1 suggestion)
+warning: `brain` (lib) generated 1 warning (1 duplicate)
+warning: `brain` (lib test) generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 39.01s
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -i 's/^use rusqlite::{Connection, OpenFlags, OptionalExtension};/use rusqlite::{Connection, OpenFlags};/' src/store.rs && grep -n 'timefmt::\\|Millis' src/ingest.rs | head -5; cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A6 | head -20; grep -rn 'checkpoint' src tests | grep -vi 'wal checkpoint' | head",
+  "description": "Fix unused import; lint; check for leftover checkpoint mentions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+20:use crate::timefmt::{self, Millis};
+46:pub type Clock = fn() -> Millis;
+100:        self.step_at(timefmt::now_ms)
+222:    fn ev(ts: Millis, app: &str) -> Event {
+src/event.rs:11://! checkpoint seek) without replaying earlier focus events.
+[This command modified 1 file you've previously read: src/store.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/event.rs'; s=open(p).read()\nold=\"\"\"//! Every event carries the app it belongs to. Events that relate to a text\n//! context (keys, pastes) also carry the window title, so each line is\n//! self-describing: a reader can start at any line (for example after a\n//! checkpoint seek) without replaying earlier focus events.\"\"\"\nnew=\"\"\"//! Every event carries the app it belongs to. Events that relate to a text\n//! context (keys, pastes) also carry the window title, so each line is\n//! self-describing: a reader can start at any line (for example a session's\n//! first event, to replay it) without replaying earlier focus events.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\np='src/main.rs'; s=open(p).read()\nold=s[s.index(\"    /// The raw typed stream of an app (no editing applied)\"):s.index(\"    #[command(after_help = TIME_HELP)]\\n    Text {\")]\nnew=\"\"\"    /// The reconstructed text of one app as it stood at the end of the\n    /// window: each session active in it, at that moment (in editors, the\n    /// latest state of each document). Without time flags it covers the last\n    /// 10 minutes; --to alone means the 10 minutes ending at T.\n\"\"\"\ns=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED'",
+  "description": "Fix event doc and text help; lint and run all tests",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:48:40.008Z</sub>
+
+The code is done and all tests pass (119 unit tests now: three old ones removed, one added). Next I'm updating the docs, which still describe the raw stream and the bookmarks.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n -i 'checkpoint\\|bookmark\\|raw stream\\|raw decoded\\|raw typed\\|<Backspace>\\|clock is stepped\\|clock steps\\|time order' README.md PLAN.md CLAUDE.md | cut -c1-140",
+  "description": "Find docs describing raw text and checkpoints"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+CLAUDE.md:35:- `brain query text` returns the **raw decoded keystroke stream** (no
+CLAUDE.md:97:  Commit at meaningful checkpoints.
+README.md:9:brain query text --app A       # the raw typed stream of an app
+README.md:122:* **`text`**: the raw stream typed into the app, as captured, with no
+README.md:124:  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
+README.md:308:* **`query text` is the raw stream, `search` the edited text.** As the
+README.md:309:  owner decided, `text` returns exactly what was typed (with `<Backspace>`
+README.md:325:* **`query text` assumes the log is in time order.** It starts reading at
+README.md:326:  the last checkpoint before its window and stops 60 s of log after it. If
+README.md:327:  the system clock is stepped backwards while capturing (an NTP correction,
+README.md:341:                          #                 documents and checkpoints must equal a
+PLAN.md:19:                                                              checkpoints     log_checkpoints
+PLAN.md:22: brain query text   ──► log_checkpoints → events.jsonl
+PLAN.md:31:  second. In one SQLite transaction per batch it writes log checkpoints,
+PLAN.md:127:  Repeats are emitted in time order with the transitions around them: on
+PLAN.md:222:2. write a log checkpoint at most every 5 s of log time;
+PLAN.md:238:(WAL checkpoints, FTS updates, lock contention), and a stalled reader of the
+PLAN.md:254:document and checkpoint equals a clean rebuild from the log.
+PLAN.md:385:- **`log_checkpoints`**: `(ts, byte_offset)`, at most one per 5 s of log time.
+PLAN.md:411:### 5.5 Log checkpoints
+PLAN.md:414:scanning it from the start. Each checkpoint says "the event at this byte has
+PLAN.md:415:this timestamp". Because the log is written in time order, starting at the
+PLAN.md:416:latest checkpoint at or before the window misses nothing, and reads at most
+PLAN.md:418:checkpoints would not save work, since the log interleaves apps and the
+PLAN.md:419:window has to be read anyway. Clock steps backwards are discussed in section
+PLAN.md:431:- **`brain query text --app A [--from T] [--to T] [--at T]`**: the raw stream
+PLAN.md:433:  newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
+PLAN.md:529:- **Clock steps backwards** (NTP corrections, manual changes) break the
+PLAN.md:530:  "log in time order" assumption `query text` relies on: events in its window
+PLAN.md:532:  the checkpoints' 5 s spacing (start at the earliest checkpoint within 5 s
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 118,126p README.md; sed -n 158,168p README.md; sed -n 14,34p PLAN.md; sed -n 216,226p PLAN.md; sed -n 250,256p PLAN.md; sed -n 380,445p PLAN.md; sed -n 525,536p PLAN.md; sed -n 33,40p CLAUDE.md",
+  "description": "Read all passages to update"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+* **`search`**: sessions whose text contains *every* word, anywhere inside
+  a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
+  first (default limit 20). Open sessions are included with what has been
+  typed so far (`ended_at: null`).
+* **`text`**: the raw stream typed into the app, as captured, with no
+  editing applied: characters as typed, Enter as a newline, Tab as a tab,
+  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
+  pasted text inline.
+* **`--app A`** can be part of the app id, ignoring case (`--app chrome`
+    {
+      "session_id": "1",
+      "app": "synthetic",
+      "window": "corpus.txt",
+      "started_at": "2026-11-16T16:51:14.684+02:00",
+      "ended_at": null,
+      "snippet": "the migration is blocked on the schema change. Dana a…"
+    }
+  ]
+}
+```
+ (evdev,         │ xkbcommon      ▲ app + window                │ ~1 s
+  passive)       │ key repeat     │ from KWin                   ▼
+                 ▼                │                       ingest thread ──► brain.db (SQLite WAL)
+ KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
+ Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+                                                              checkpoints     log_checkpoints
+                                    tier 2 worker (opt-in): VS Code replay ──┘
+ brain query search ──► brain.db (read-only snapshot)
+ brain query text   ──► log_checkpoints → events.jsonl
+```
+
+* **Capture** reads keyboards directly from the kernel (evdev), passively, and
+  resolves each key to the character the app receives with libxkbcommon and
+  the user's real layouts. Focus (app id and window title) comes from a KWin
+  script calling back over D-Bus. Every event is one JSON line appended to
+  `events.jsonl`.
+* **Ingest** (a thread in the same process) tails the log about once a
+  second. In one SQLite transaction per batch it writes log checkpoints,
+  opens, updates and closes writing sessions, reconstructs their text, and
+  advances the log offset. The log is the ground truth; the database is
+  derived from it and can be rebuilt from it.
+
+Once a second, the ingest thread syncs the log and runs steps of at most 5,000
+lines until it has caught up. **Each step is one SQLite transaction** that
+holds everything derived from those lines and the new log offset:
+
+1. read complete lines from `ingest_state.log_offset`;
+2. write a log checkpoint at most every 5 s of log time;
+3. feed each event to the session engine (section 4);
+4. once caught up, close sessions idle on the wall clock, write finished tier
+   2 results, refresh the live text of open sessions;
+5. store the new offset and commit.
+| with sessions open | open sessions are rebuilt from the database and their events replayed from the log (section 4.5); the restart's `start` event then closes them |
+
+`tests/crash_safety.rs` kills brain 25 times under load and checks datab
+… [5044 more characters in the raw transcript]
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\ndef cut(p, start, end_marker):\n    s=open(p).read(); i=s.index(start); j=s.index(end_marker,i); open(p,'w').write(s[:i]+s[j:])\nTEXT_DESC=\"\"\"the app's **reconstructed** text as it stood at the end of\n  the window: each of its sessions active in the window, as it was at that\n  moment (a session still running then is replayed from the log up to it).\n  In editors a later session continues the previous one's document, so\n  only the latest state of each document is shown; single-line fields\n  (commands, searches, messages) are each listed. `text` joins them one per\n  line; `sessions` gives each part with its window and times.\"\"\"\nedit('README.md',[\n(\"brain query text --app A       # the raw typed stream of an app\",\"brain query text --app A       # what an app's text was at a point in time\"),\n(\"\"\"* **`text`**: the raw stream typed into the app, as captured, with no\n  editing applied: characters as typed, Enter as a newline, Tab as a tab,\n  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),\n  pasted text inline.\"\"\",\"\"\"* **`text`**: \"\"\"+TEXT_DESC),\n(\"\"\"* **`query text` is the raw stream, `search` the edited text.** As the\n  owner decided, `text` returns exactly what was typed (with `<Backspace>`\n  and other keys visible) rather than reconstructed text; reconstructed,\n  edit-aware text is what `search` matches and returns.\"\"\",\"\"\"* **`query text` returns reconstructed text at a point in time.** It\n  reuses the session engine: each session row keeps the document it started\n  from, so a session can be replayed from the log to any moment, the same\n  way crash recovery rebuilds open sessions. (An earlier version returned\n  the raw keystroke stream; the owner changed it.)\"\"\"),\n(\"\"\"                          #   crash_safety  25 random kill -9s under load; sessions,\n                          #                 documents and checkpoints must equal a\n                          #                 clean rebuild from the log\"\"\",\"\"\"                          #   crash_safety  25 random kill -9s under load; sessions\n                          #                 and documents must equal a clean\n                          #                 rebuild from the log\"\"\"),\n])\ncut('README.md',\"* **`query text` assumes the log is in time order.**\",\"\\n**Running**\")\n# README text JSON example\ns=open('README.md').read()\ni=s.index('```json\\n{\\n  \"app\": \"org.kde.konsole\",')\nj=s.index('```',i+8)+3\ns=s[:i]+'''```json\n{\n  \"app\": \"org.kde.kate\",\n  \"at\": \"2026-11-17T10:05:00.000+02:00\",\n  \"from\": \"2026-11-17T09:55:00.000+02:00\",\n  \"to\": \"2026-11-17T10:05:00.000+02:00\",\n  \"text\": \"Goals\\\\n- ship search\\\\n- fix the rename rule\",\n  \"sessions\": [\n    {\n      \"session_id\": \"42\",\n      \"window\": \"goals.md — Kate\",\n      \"started_at\": \"2026-11-17T09:58:12.040+02:00\",\n      \"ended_at\": null,\n      \"text\": \"Goals\\\\n- ship search\\\\n- fix the rename rule\"\n    }\n  ]\n}\n```'''+s[j:]\nopen('README.md','w').write(s)\n# PLAN\nedit('PLAN.md',[\n(\"\"\"                                                              checkpoints     log_checkpoints\n                                    tier 2 worker (opt-in): VS Code replay ──┘\n brain query search ──► brain.db (read-only snapshot)\n brain query text   ──► log_checkpoints → events.jsonl\"\"\",\"\"\"                                    tier 2 worker (opt-in): VS Code replay ──┘\n brain query search ──► brain.db (read-only snapshot)\n brain query text   ──► brain.db + replay of running sessions from events.jsonl\"\"\"),\n(\"\"\"  second. In one SQLite transaction per batch it writes log checkpoints,\n  opens, updates and closes writing sessions, reconstructs their text, and\n 
+… [3262 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+PLAN.md:427:  was the raw keystroke stream; the owner changed it.
+README.md:280:  `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
+README.md:324:  the raw keystroke stream; the owner changed it.)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:49:22.469Z</sub>
+
+Two PLAN.md details to check: a Rust doc-link that doesn't render in Markdown, and the recovery description, which may still say starting documents come from `context_state`.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'context_state\\|\\[`sessions::text_at`\\]\\|start_text\\|5.5\\|section 10' PLAN.md | cut -c1-140",
+  "description": "Check PLAN references to recovery and links"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n '### 4.5' -A12 PLAN.md; grep -n 'sessions` \\*\\*:\\|\\*\\*`sessions`\\*\\*' -A8 PLAN.md | head -12",
+  "description": "Read PLAN recovery section and sessions schema bullet"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+18: Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+84:  GTK/Qt apps (section 10).
+97:  or anything else. Mice and touchpads are not opened at all (section 10:
+288:sessions (`context_state`, forgotten after 24 h), so the next session
+347:their starting documents from `context_state`, and replays their events from
+380:- **`context_state`**: each multi-line window's document between sessions.
+424:  text; one still running is replayed with [`sessions::text_at`] from its
+473:  by key events alone (section 10).
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+344:### 4.5 Restart with open sessions
+345-
+346-On start, ingest loads the sessions still open in the database, restores
+347-their starting documents from `context_state`, and replays their events from
+348-each session's `start_offset` up to the ingested offset, through the same
+349-key-to-action rules. The `start` event that follows closes them (input while
+350-brain was not running is unknown). Everything the engine decides is a
+351-function of the log, so a database rebuilt from the log alone is identical;
+352-`sessions::tests::crash_recovery_reproduces_an_uninterrupted_run` restarts
+353-ingest after every line to prove it.
+354-
+355-## 5. Storage and indexing
+356-
+371:- **`sessions`**: `id`, `app`, `window` (normalized), `started_at`,
+372-  `ended_at` (NULL while open), `status`, `tier_used`, `reconstructed_text`,
+373-  `start_offset` / `end_offset` (the session's events in the log),
+374-  `end_reason` (`idle`, `commit`, `cancel`, `field`, `stop`, `restart`),
+375-  `tier2_status`, `tier2_file`. Indexes on `(app, started_at)`, `status`, and
+376-  `(app, end_reason, end_offset)` for shell history.
+377-- **`sessions_fts`**: FTS5 over `reconstructed_text`, external content (the
+378-  text is stored once, in `sessions`), kept in sync by insert/update/delete
+379-  triggers in the same transaction.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('PLAN.md',[\n(\"\"\"### 4.5 Restart with open sessions\n\nOn start, ingest loads the sessions still open in the database, restores\ntheir starting documents from `context_state`, and replays their events from\neach session's `start_offset` up to the ingested offset, through the same\nkey-to-action rules.\"\"\",\"\"\"### 4.5 Replaying a session: restart, and text at a point in time\n\nEach session row stores the document it started from (`start_text`, cursor\nand selection), so any session can be replayed from the log to any moment.\nOn start, ingest loads the sessions still open in the database and replays\ntheir events from each session's `start_offset` up to the ingested offset,\nthrough the same key-to-action rules. `query text` uses the same replay,\nbounded by a time instead, to know a session's text at the end of its\nwindow.\"\"\"),\n(\"\"\"  `start_offset` / `end_offset` (the session's events in the log),\"\"\",\"\"\"  `start_offset` / `end_offset` (the session's events in the log),\n  `start_text` / `start_cursor` / `start_anchor` (the document it started\n  from, for replays),\"\"\"),\n(\"\"\"replayed with [`sessions::text_at`] from its\"\"\",\"\"\"replayed with `sessions::text_at` from its\"\"\"),\n(\"### 5.2 Schema (version 4)\",\"### 5.2 Schema (version 5)\"),\n])\nEOF\ngrep -n 'Schema (version' PLAN.md; awk '/^- \\*\\*`brain query text/,/owner changed it/' PLAN.md",
+  "description": "Update PLAN replay section, schema list and version"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+372:### 5.2 Schema (version 5)
+- **`brain query text --app A [--from T] [--to T] [--at T]`**: the app's **reconstructed** text as it stood at the end of
+  the window: each of its sessions active in the window, as it was at that
+  moment (a session still running then is replayed from the log up to it).
+  In editors a later session continues the previous one's document, so
+  only the latest state of each document is shown; single-line fields
+  (commands, searches, messages) are each listed. `text` joins them one per
+  line; `sessions` gives each part with its window and times.
+  A session that ended by the end of the window contributes its stored
+  text; one still running is replayed with `sessions::text_at` from its
+  stored starting document up to that moment, which is the same replay
+  crash recovery uses (section 4.5). *Differs from the design*, where `text`
+  was the raw keystroke stream; the owner changed it.
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\nold=\"\"\"- **`brain query text --app A [--from T] [--to T] [--at T]`**: the app's **reconstructed** text as it stood at the end of\n  the window:\"\"\"\nnew=\"\"\"- **`brain query text --app A [--from T] [--to T] [--at T]`**: the app's\n  **reconstructed** text as it stood at the end of the window:\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\nawk 'length > 100 && !/^\\|/ && !/^{/ && !/^ *\"/ && !/```/ && !/──/' PLAN.md README.md CLAUDE.md | head; cargo build --release 2>&1 | tail -1",
+  "description": "Rewrap the line; check for other long lines; build"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+  writing sessions, reconstructs their text, and advances the log offset. The log is the ground truth; the database is
+  **reconstructed** text as it stood at the end of the window: each of its sessions active in the window, as it was at that
+cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+    Finished `release` profile [optimized] target(s) in 16.93s
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\nimport textwrap,re\np='PLAN.md'; lines=open(p).read().split('\\n')\nout=[]\nfor l in lines:\n    if len(l)>100 and l.startswith('  ') and not l.strip().startswith(('|','{','\"','`')) and '──' not in l:\n        out.extend(textwrap.wrap(l.strip(), width=76, initial_indent='  ', subsequent_indent='  ', break_on_hyphens=False, break_long_words=False))\n    else:\n        out.append(l)\nopen(p,'w').write('\\n'.join(out))\nEOF\nawk 'length > 100 && !/^\\|/ && !/^{/ && !/^ *\"/ && !/```/ && !/──/' PLAN.md; grep -n 'The log is the ground truth; the database' -B2 -A3 PLAN.md; grep -n 'reconstructed\\*\\* text as it stood' -B1 -A4 PLAN.md",
+  "description": "Rewrap overlong PLAN.md lines and verify"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+30-  second. In one SQLite transaction per batch it opens, updates and closes
+31-  writing sessions, reconstructs their text, and advances the log offset.
+32:  The log is the ground truth; the database is
+33-  derived from it and can be rebuilt from it.
+34-* **Query** reads the database (`search`) or the log (`text`) while `run`
+35-  keeps writing, and prints JSON.
+422-- **`brain query text --app A [--from T] [--to T] [--at T]`**: the app's
+423:  **reconstructed** text as it stood at the end of the window: each of its
+424-  sessions active in the window, as it was at that
+425-  moment (a session still running then is replayed from the log up to it).
+426-  In editors a later session continues the previous one's document, so
+427-  only the latest state of each document is shown; single-line fields
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='PLAN.md'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nrep(\"\"\"  writing sessions, reconstructs their text, and advances the log offset.\n  The log is the ground truth; the database is\n  derived from it and can be rebuilt from it.\n* **Query** reads the database (`search`) or the log (`text`) while `run`\n  keeps writing, and prints JSON.\"\"\",\"\"\"  writing sessions, reconstructs their text, and advances the log offset.\n  The log is the ground truth; the database is derived from it and can be\n  rebuilt from it.\n* **Query** reads the database while `run` keeps writing, and prints JSON:\n  `search` matches session text; `text` gives an app's text at a point in\n  time, replaying sessions still running then from the log.\"\"\")\nrep(\"\"\"  **reconstructed** text as it stood at the end of the window: each of its\n  sessions active in the window, as it was at that\n  moment (a session still running then is replayed from the log up to it).\"\"\",\"\"\"  **reconstructed** text as it stood at the end of the window: each of its\n  sessions active in the window, as it was at that moment (a session still\n  running then is replayed from the log up to it).\"\"\")\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'",
+  "description": "Fix PLAN summary wording"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+[This command modified 1 file you've previously read: PLAN.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:50:25.299Z</sub>
+
+Docs are updated. A live check of the new `text` output against a running `brain`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "D=$(mktemp -d); B=./target/release/brain; $B run --synthetic 60 --data-dir $D/d 2>/dev/null & P=$!; sleep 6; $B query text --app konsole --data-dir $D/d; $B query text --app synthetic --at -4s --data-dir $D/d | head -12; kill -INT $P; wait $P; rm -rf $D",
+  "description": "Show new text output live"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+{
+  "app": "org.kde.konsole",
+  "at": null,
+  "from": "2026-11-17T11:40:32.715+02:00",
+  "to": "2026-11-17T11:50:32.715+02:00",
+  "text": "git status\ncargo test\nls -la\ngit status",
+  "sessions": [
+    {
+      "session_id": "2",
+      "window": "~",
+      "started_at": "2026-11-17T11:50:27.497+02:00",
+      "ended_at": "2026-11-17T11:50:27.663+02:00",
+      "text": "git status"
+    },
+    {
+      "session_id": "3",
+      "window": "~",
+      "started_at": "2026-11-17T11:50:29.363+02:00",
+      "ended_at": "2026-11-17T11:50:29.530+02:00",
+      "text": "cargo test"
+    },
+    {
+      "session_id": "4",
+      "window": "~",
+      "started_at": "2026-11-17T11:50:30.497+02:00",
+      "ended_at": "2026-11-17T11:50:30.597+02:00",
+      "text": "ls -la"
+    },
+    {
+      "session_id": "5",
+      "window": "~",
+      "started_at": "2026-11-17T11:50:31.397+02:00",
+      "ended_at": "2026-11-17T11:50:31.563+02:00",
+      "text": "git status"
+    }
+  ]
+}
+{
+  "app": "synthetic",
+  "at": "2026-11-17T11:50:28.717+02:00",
+  "from": "2026-11-17T11:40:28.717+02:00",
+  "to": "2026-11-17T11:50:28.717+02:00",
+  "text": "the migration is blocked on the schema change. Dana asked whether we can ship search on Friday; I said yes if",
+  "sessions": [
+    {
+      "session_id": "1",
+      "window": "corpus.txt",
+      "started_at": "2026-11-17T11:50:26.730+02:00",
+      "ended_at": null,
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Both cases check out: Konsole lists each command separately, and the synthetic editor shows its text as it was 4 seconds ago, so the corrected typo is gone. Committing next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | head -5; git add -A src tests README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nMake query text return reconstructed text\n\n`query text` now returns an app's reconstructed text as it stood at the\nend of the window instead of the raw keystroke stream: each session of\nthe app active in the window, at that moment. Sessions that ended in\ntime contribute their stored text; a session still running is replayed\nfrom the log up to the end of the window. In editors only the latest\nstate of each document is kept (later sessions continue the earlier\nones); single-line fields are each listed. The output keeps `text`\n(the parts, one per line) and adds `sessions` with each part's window\nand times.\n\nNo reconstruction code is duplicated: each session row now stores the\ndocument it started from (schema v5), so the replay crash recovery\nalready did becomes one function, `Sessions::replay`, used both by\nrecovery (open sessions, up to the ingested offset) and by the new\n`sessions::text_at` (one session, up to a time). Recovery no longer\ndepends on context_state for this, which also removes its write-back.\n\nThe raw renderer is gone, and so are the log checkpoints: only the raw\n`text` read the log by time, so nothing used them any more, and the\ndocumented clock-jump limitation of that read goes with them.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1",
+  "description": "Run tests, commit and push",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.89s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+eb0da31 Make query text return reconstructed text
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -1",
+  "description": "Refresh ai-logs and push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+fe7c229 Refresh AI logs
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T09:52:09.797Z</sub>
+
+`query text` now returns reconstructed text, built with the same engine as `search` and crash recovery; no reconstruction code is duplicated. Everything is pushed (`eb0da31`, then the `ai-logs/` refresh `fe7c229`).
+
+**What it returns:** the app's text as it stood at the end of the window.
+- **A session that ended inside the window** contributes its stored final text.
+- **A session still running at the end of the window** is replayed from the log up to that moment, so `--at 11:50:28` shows exactly what was there then, not later edits. In the live check, the editor queried at "4 s ago" showed its text up to that point, with the typo the typist had corrected already gone.
+- **Editors:** each later session continues the previous one's document, so only the latest state of each document is shown.
+- **Single-line fields** (commands, searches, messages) are each listed in order. Konsole gave `git status`, `cargo test`, `ls -la`, `git status`.
+- **Output:** `text` joins the parts one per line. A new `sessions` list gives each part's id, window, start and end. `ended_at` is `null` if the session was still running at the end of the window.
+
+**How duplication was avoided:** each session row now stores the document it started from (text, cursor, selection). Crash recovery's replay became one shared function that works two ways:
+- **Crash recovery:** all open sessions, up to what has been ingested.
+- **`text`:** one session, up to a point in time.
+
+Recovery got simpler as a side effect: it no longer depends on `context_state`.
+
+**Removed, since nothing uses it any more:**
+- The raw renderer (`<Backspace>`, `<Ctrl+V>`).
+- The log bookmarks (`log_checkpoints`). Only the raw `text` read the log by time.
+- The clock-jump limitation, which only affected that read.
+
+**Tests:**
+- **New unit test:** a session part-way through and at its end, a later session continuing a document, and a still-open session.
+- **CLI tests rewritten for the new output:**
+  - "secret", typed and deleted, doesn't appear.
+  - Two Kate sessions give only the final document.
+  - `--at` in the middle of a running session gives the partial text.
+  - Commands, pastes, local times, full app ids and the error cases.
+- **Results:** 119 unit tests, crash safety, `query_cli` and `perf_budget` all pass, and clippy is clean.
+
+**Docs:** README, PLAN.md, CLAUDE.md and the `text` help all describe the new behavior, with the earlier raw output noted as changed at your request.
+
+The schema is now version 5, so rebuild once:
+```
+! rm ~/brain-data/brain.db && make
+```
+
+## User  <sub>2026-11-17T10:10:31.993Z</sub>
+
+this is not good. let's go back to as it was before this change. I think this is the right commit checkpoint d6c481bdbc11285e110fbabb7ec6cbeb8e8dcf40.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git log --oneline d6c481b..HEAD; git status --short",
+  "description": "List commits after the requested checkpoint"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fe7c229 Refresh AI logs
+eb0da31 Make query text return reconstructed text
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:10:47.722Z</sub>
+
+Both commits after that checkpoint can be undone with `git revert`. That restores the checkpoint's code exactly while keeping the history, so I won't rewrite the already-pushed `main`.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git revert --no-commit fe7c229 eb0da31 && git diff --cached --stat d6c481b | tail -2; echo \"diff vs checkpoint: $(git diff --cached d6c481b | wc -l) lines\"; git commit -q -F - <<'EOF'\nRevert reconstructed query text\n\nThe owner reviewed the change that made `query text` return\nreconstructed text and decided against it. Restore the state of\nd6c481b: `query text` returns the raw keystroke stream again, with log\ncheckpoints for seeking, and sessions do not store their starting\ndocument. Reverts eb0da31 and fe7c229.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\necho \"tree equals checkpoint: $([ -z \"$(git diff d6c481b HEAD)\" ] && echo yes || echo no)\"; git log --oneline | head -3",
+  "description": "Revert both commits in one commit and verify the tree"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+diff vs checkpoint: 0 lines
+tree equals checkpoint: yes
+6d6dbc4 Revert reconstructed query text
+fe7c229 Refresh AI logs
+eb0da31 Make query text return reconstructed text
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:10:58.613Z</sub>
+
+The files now match `d6c481b` exactly. I'll confirm it builds and passes all tests, then push.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | head -5; git push -q origin main && git log --oneline | head -1",
+  "description": "Verify the reverted build and push",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 121 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.54s
+6d6dbc4 Revert reconstructed query text
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:12:54.216Z</sub>
+
+The project is back to checkpoint `d6c481b`, pushed as `6d6dbc4`. The files match that commit exactly, and clippy and every test pass (121 unit tests, crash safety, `query_cli`, `perf_budget`).
+
+- **`query text`** returns the raw keystroke stream again, with the full app id and local times.
+- **The log bookmarks** that `text` uses to find its window are back.
+- **Sessions** no longer store their starting document. The schema is back to version 4.
+
+I used `git revert` rather than resetting the branch, so the pushed history wasn't rewritten. The change and its reversal stay visible in the log.
+
+**Your database:** if you ran `rm ~/brain-data/brain.db && make` after the change, that `brain.db` is version 5, which this build refuses. Run the same thing once more to rebuild it from your log:
+```
+! rm ~/brain-data/brain.db && make
+```
+If you didn't, your database is still version 4 and works as is.
+
+**`ai-logs/`** is also back to its state at that checkpoint, so the transcripts don't include this change and its reversal. Should I refresh them so they're complete? That touches only `ai-logs/`, not the code.
+
+## User  <sub>2026-11-17T10:19:44.357Z</sub>
+
+i want the output text to be reconstructed instead of rendered narrowly. don't duplicate code. I simply want the step of rendering to be reconstruction using tier 0/1 adapters, no need to change the design, just the output step. explain how you are going to implement it before starting, my approval is needed to continue
+
+## Assistant  <sub>2026-11-17T10:20:22.225Z</sub>
+
+Here's the plan. Nothing else in the design changes: the window, the bookmarks, reading the log, app resolution, the JSON shape and the schema all stay as they are. Only the last step, turning the selected events into text, changes, and it reuses the existing tier 0/1 code.
+
+**What stays exactly as it is** (`query::text` in `src/query.rs`):
+1. Work out the window from the time flags.
+2. Find the starting point in the log from the bookmarks.
+3. Read the log forward. Keep the typing events (keys and pastes) inside the window whose app matches, and resolve `--app` to one full id.
+4. Output `{app, at, from, to, text}`. Same fields, local times.
+
+**What changes: step 5, the text.** `render_key` is deleted. The chosen app's events, in log order, go through the same tier 0/1 pieces the session engine uses, called directly with no copies:
+- `apps::classify(app)` picks the app class (terminal, browser, editor…), and `apps::normalize_window(title)` gives the window's key.
+- `editor::action(class, key, mods)` turns each key into an action.
+- `FieldEditor::apply` applies it to a `TextBuffer`.
+- `FieldEditor::paste` inserts pasted text.
+- `editor::key_suppresses_paste` drops the paste after a plain Ctrl+V in a terminal.
+
+**Putting it together:**
+- **One text field per window title** (normalized), so typing in two Kate documents isn't merged.
+- **An action that ends the field** (Enter in a terminal or browser, Ctrl+C at a prompt, Tab or Ctrl+L in a browser) closes that field's text as one part, and the next keys start a new empty field. That's the same thing the session engine does.
+- **Shell history (Up/Down)** recalls the lines already submitted earlier in the same window of the query, so no database lookup is needed.
+- **The output `text`** is the parts in order (closed fields when they close, open fields at the end of the window), one per line. Blank parts are dropped.
+
+**Example:** the keys `t h e ␣ c a t ␣ s a t ␣ s e c r e t` followed by 7 × Backspace give `"the cat sat"`, not `the cat sat secret<Backspace>×7`. In Konsole, `git status⏎ls⏎` gives `"git status\nls"`.
+
+**Limits of doing it only on the window's keys** (to be documented):
+- The text starts empty at the window's start, because text typed before the window isn't known. A Backspace or Ctrl+A that reaches into earlier text has nothing to act on.
+- Cursor moves made with the mouse aren't seen, as everywhere else.
+- A window whose title changes because of the typing (a new VS Code file) would be split into several fields. Following those renames is session-engine logic, and I'd rather not duplicate it here.
+
+**Tests and docs:**
+- Remove the `render_key` unit test. Add a unit test for the reconstruction step: backspace and word deletion, selection, two windows, terminal commits with Up recall, plain Ctrl+V in a terminal.
+- Update the `query_cli` expectations (`"the cat sat"`, `"git status"`, `"pasted words"`).
+- Update the README, PLAN.md, CLAUDE.md and the `text` help, which currently say "raw stream".
+
+Do you approve? And about the rename case: is splitting into several fields acceptable, or do you want those renames followed too?
+
+## User  <sub>2026-11-17T10:33:05.241Z</sub>
+
+i simply want the text in a certain time window, from T to T to be reconstructed "stupidly". simply take the raw text and run it through the correct tier 0/1 adapter. the only splitting that should be done is per-app and per-window in that time window. explain now how will you implement this
+
+## Assistant  <sub>2026-11-17T10:33:27.567Z</sub>
+
+Here's the simplified version.
+
+**Unchanged:** the window, the bookmarks, reading the log, filtering to typing events of the resolved app inside the window, local times. All of that stays as it is today.
+
+**The new last step**, replacing `render_key`:
+1. **Split the selected events by window**, using the window title stamped on each event. It goes through `apps::normalize_window`, so the unsaved-file dot or a terminal spinner doesn't create extra windows. That's the only split: per app (already done) and per window. No session logic and no rename tracking.
+2. **Run each window's events, in log order, through the existing tier 0/1 adapter for that app**, starting from an empty text:
+   - `apps::classify(app)` selects the adapter: terminal, browser, chat, launcher, editor, or generic.
+   - Each key goes through `editor::action(class, key, mods)` and then `FieldEditor::apply` on a `TextBuffer`. Each paste goes through `FieldEditor::paste`, with `editor::key_suppresses_paste` dropping the paste after a plain Ctrl+V in a terminal.
+   - **A field submit inside one window** (Enter at a shell prompt or in a browser bar, Ctrl+C at a prompt, Tab or Ctrl+L in a browser): the adapter clears its field there, so the submitted line is kept and followed by a newline, and typing continues on a fresh line in the same window's text. In Konsole, `git status⏎ls⏎` gives `"git status\nls"`. It's still one text for that window, not a separate part.
+   - Up/Down in a terminal recall lines submitted earlier in that window's text.
+3. **The output keeps its current shape**, with one addition:
+   ```json
+   {
+     "app": "org.kde.kate", "at": null, "from": "…+02:00", "to": "…+02:00",
+     "text": "the cat sat\nanother doc",
+     "windows": [
+       { "window": "notes.md — Kate", "text": "the cat sat" },
+       { "window": "todo.md — Kate",  "text": "another doc" }
+     ]
+   }
+   ```
+   `windows` holds each window's reconstructed text, ordered by the window's first keystroke in the time range. `text` joins them one per line, so the assignment's `text` field is still there.
+
+**Code:** a small function in `src/query.rs` that takes the selected events and returns `(window, text)` pairs. It only calls the existing functions above, so there's no new reconstruction logic.
+
+**Limits to document:** each window starts empty at the window's start time. Edits that reach into earlier text (Backspace past the start, Ctrl+A) only affect what was typed inside the window. Mouse cursor moves aren't seen. A window whose title changes because of the typing (a new VS Code file) counts as separate windows.
+
+**Tests and docs:**
+- Replace the `render_key` test with a unit test of the new function: Backspace, word deletion, selection and Ctrl+A, undo, paste, two windows kept apart, terminal submit plus Up recall, plain Ctrl+V in a terminal.
+- Update the `query_cli` expectations.
+- Update the README, PLAN.md, CLAUDE.md and the `text` help.
+
+Do you approve, including the extra `windows` field?
+
+## User  <sub>2026-11-17T10:37:12.705Z</sub>
+
+that looks good, give me a more detailed example of how the output will look like, use special characters and consider text that exists in different sessions (of course for text it shouldn't matter). wait with the implementation for my approval
+
+## Assistant  <sub>2026-11-17T10:38:06.550Z</sub>
+
+Here's a worked example on one log that covers several sessions. All times are local (+02:00).
+
+## What was typed (10:00–10:10)
+
+**Kate, window `notes.md — Kate`, first session (10:00:00–10:00:20)**
+```
+Shopping list:⏎- milk⏎- breadd⌫
+```
+After this, nothing is typed in `notes.md` for over 30 s, so the database closes session 1.
+
+**Kate, window `todo.md — Kate` (10:01)**
+```
+TODO: call Dana⏎⇥send the "Q3" report⏎path: C:\temp
+```
+(⇥ = Tab, and the quotes and backslash are typed as normal keys.)
+
+**Kate, window `notes.md — Kate`, second session (10:03).** The database records this as a separate session.
+```
+Ctrl+Home  ↓  End  Ctrl+⌫  oat milk          ← replaces "milk" with "oat milk"
+Ctrl+End  ⏎  - 
+Alt+Shift  קפה  Alt+Shift                     ← Hebrew, then back to English
+Ctrl+V  (clipboard: " ☕ x2")  Ctrl+Z          ← pasted, then undone
+ x2
+```
+The window title briefly becomes `notes.md * — Kate` while unsaved. It normalizes to `notes.md — Kate`, so it's the same window.
+
+**Konsole, window `~` (10:05)**
+```
+git stauts⌫⌫⌫tus⏎
+↑ -s⏎                          ← Up recalls "git status"
+rm -rf build Ctrl+C            ← abandoned at the prompt
+echo "שלום" > out.txt⏎
+```
+
+## Query 1: Kate over the whole range
+`brain query text --app kate --from 10:00 --to 10:10`
+```json
+{
+  "app": "org.kde.kate",
+  "at": null,
+  "from": "2026-11-17T10:00:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "Shopping list:\n- oat milk\n- bread\n- קפה x2\nTODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp",
+  "windows": [
+    {
+      "window": "notes.md — Kate",
+      "text": "Shopping list:\n- oat milk\n- bread\n- קפה x2"
+    },
+    {
+      "window": "todo.md — Kate",
+      "text": "TODO: call Dana\n\tsend the \"Q3\" report\npath: C:\\temp"
+    }
+  ]
+}
+```
+- **Sessions don't matter.** `notes.md` was two sessions in the database, but `text` runs all of that window's keys in the range through one text field. So the second session's edits apply to the first session's text: "milk" becomes "oat milk", and the new line is added below.
+- **Edits are applied:** `breadd⌫` gives `bread`, Ctrl+⌫ deletes the word, and the undone paste disappears completely, emoji included.
+- **Windows are kept apart** and ordered by their first keystroke in the range.
+- **Special characters are JSON-escaped as usual:** a newline is `\n`, a Tab `\t`, a quote `\"`, a backslash `\\`. Hebrew and emoji appear as-is (UTF-8).
+
+## Query 2: the same Kate keys, starting after the first session
+`brain query text --app kate --from 10:02 --to 10:10`
+```json
+{
+  "app": "org.kde.kate",
+  "at": null,
+  "from": "2026-11-17T10:02:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "oat milk\n- קפה x2",
+  "windows": [
+    { "window": "notes.md — Kate", "text": "oat milk\n- קפה x2" }
+  ]
+}
+```
+This shows the "starts empty" limit. The range starts after "Shopping list…" was typed, so `notes.md` starts empty. Ctrl+Home, ↓, End and Ctrl+⌫ have no text to act on, and only what was typed after 10:02 remains. `todo.md` isn't listed because nothing was typed in it after 10:02.
+
+## Query 3: Konsole
+`brain query text --app konsole --at 10:10`
+```json
+{
+  "app": "org.kde.konsole",
+  "at": "2026-11-17T10:10:00.000+02:00",
+  "from": "2026-11-17T10:00:00.000+02:00",
+  "to": "2026-11-17T10:10:00.000+02:00",
+  "text": "git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt",
+  "windows": [
+    {
+      "window": "~",
+      "text": "git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt"
+    }
+  ]
+}
+```
+- This uses the terminal adapter. Each Enter submits the line, and the next one starts fresh in the same window's text.
+- ↑ recalls `git status` from earlier in this text, and ` -s` is appended to it.
+- Ctrl+C abandons a line: it's kept, as written, and the next line starts fresh.
+- The database has four separate sessions here, one per Enter or Ctrl+C. `text` doesn't care, since it's one window.
+- For comparison, today's raw output for the same range is `git stauts<Backspace><Backspace><Backspace>tus\n<Up> -s\nrm -rf build<Ctrl+C>echo "שלום" > out.txt\n`.
+
+Should I implement it this way?
+
+## User  <sub>2026-11-17T10:40:33.391Z</sub>
+
+looks good start implementing and also create a test similar to this detailed example
+
+## Assistant  <sub>2026-11-17T10:41:01.590Z</sub>
+
+I'll implement it as planned, and add a test that replays that exact example (Kate's two windows across two sessions, Konsole, and the "starts empty" range) through the real binary. First, the current `text` function and the helpers I'll reuse:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub struct TextOutput' -A8 src/query.rs; grep -n 'let full = resolve_app' -A22 src/query.rs; grep -n 'pub fn key_suppresses_paste\\|pub fn action\\|pub fn apply\\|pub fn paste\\|pub fn new(class' src/reconstruct/editor.rs; grep -n '^use' src/query.rs",
+  "description": "Read text output step and reusable editor API"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+281:pub struct TextOutput {
+282-    pub app: String,
+283-    pub at: Option<String>,
+284-    pub from: Option<String>,
+285-    pub to: Option<String>,
+286-    pub text: String,
+287-}
+288-
+289-/// The raw typed stream of one app over the window: every key as captured,
+322:    let full = resolve_app(app, &known)?;
+323-    let mut out = String::new();
+324-    for (a, kind) in matching {
+325-        if a != full {
+326-            continue;
+327-        }
+328-        match kind {
+329-            EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),
+330-            EventKind::Paste {
+331-                text: Some(text), ..
+332-            } => out.push_str(&text),
+333-            _ => {}
+334-        }
+335-    }
+336-    Ok(TextOutput {
+337-        app: full,
+338-        at: fmt_opt(w.at),
+339-        from: fmt_opt(w.from),
+340-        to: fmt_opt(w.to),
+341-        text: out,
+342-    })
+343-}
+344-
+57:pub fn action(class: AppClass, key: &str, mods: &[Mod]) -> Action {
+197:pub fn key_suppresses_paste(class: AppClass, key: &str, mods: &[Mod]) -> bool {
+216:    pub fn new(class: AppClass, buf: TextBuffer) -> Self {
+227:    pub fn apply(
+278:    pub fn paste(&mut self, text: &str) {
+8:use crate::datadir::DataDir;
+9:use crate::event::{EventKind, Mod};
+10:use crate::eventlog::LogReader;
+11:use crate::store;
+12:use crate::timefmt::{self, Millis};
+13:use anyhow::{Result, bail};
+14:use serde::Serialize;
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 289,321p src/query.rs",
+  "description": "Read the event collection part of text"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+/// The raw typed stream of one app over the window: every key as captured,
+/// with no editing applied (see [`render_key`]), and pasted text inline.
+/// `app` may be part of the app id; see [`resolve_app`].
+pub fn text(dir: &DataDir, app: &str, flags: &TimeFlags, now: Millis) -> Result<TextOutput> {
+    let w = resolve(flags, Command::Text, now)?;
+    let (from, to) = (w.from.unwrap_or(Millis::MIN), w.to.unwrap_or(now));
+    let conn = store::open_reader(&dir.db_path())?;
+    let start = store::seek_offset_before(&conn, &timefmt::format_ms(from))?;
+    let needle = app.to_lowercase();
+    let mut known: Vec<String> = conn
+        .prepare("SELECT DISTINCT app FROM sessions")?
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    drop(conn);
+    // Events of every app matching `app` in the window, in log order; the
+    // app is resolved once the window's apps are known too.
+    let mut matching: Vec<(String, EventKind)> = Vec::new();
+    if dir.log_path().exists() {
+        let mut reader = LogReader::open(&dir.log_path(), start)?;
+        while let Some(line) = reader.next_line()? {
+            let Some(ev) = line.event else { continue };
+            if ev.ts > to.saturating_add(CLOCK_SLACK_MS) {
+                break;
+            }
+            let typed = matches!(ev.kind, EventKind::Key { .. } | EventKind::Paste { .. });
+            if typed && ev.ts >= from && ev.ts <= to && ev.app.to_lowercase().contains(&needle) {
+                if !known.contains(&ev.app) {
+                    known.push(ev.app.clone());
+                }
+                matching.push((ev.app, ev.kind));
+            }
+        }
+    }
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:41:21.345Z</sub>
+
+Now the change: everything up to choosing the app stays as it is. The output step becomes the reconstruction, which only calls the existing tier 0/1 functions.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\nrep(\"\"\"//! Both run while `brain run` writes. `search` is a single SELECT on a\n//! read-only connection, so it sees one consistent snapshot of the index\n//! (WAL). `text` reads the capture log, whose reader only returns complete\n//! lines, starting at the checkpoint just before its window.\"\"\",\"\"\"//! Both run while `brain run` writes. `search` is a single SELECT on a\n//! read-only connection, so it sees one consistent snapshot of the index\n//! (WAL). `text` reads the capture log, whose reader only returns complete\n//! lines, starting at the checkpoint just before its window, and runs the\n//! window's keys through the tier 0/1 reconstruction, one text per window.\"\"\")\nrep(\"\"\"use crate::datadir::DataDir;\nuse crate::event::{EventKind, Mod};\nuse crate::eventlog::LogReader;\nuse crate::store;\"\"\",\"\"\"use crate::datadir::DataDir;\nuse crate::event::EventKind;\nuse crate::eventlog::LogReader;\nuse crate::reconstruct::apps::{AppClass, classify, normalize_window};\nuse crate::reconstruct::buffer::TextBuffer;\nuse crate::reconstruct::editor::{Action, FieldEditor, Outcome, action, key_suppresses_paste};\nuse crate::store;\"\"\")\nrep(\"\"\"pub struct TextOutput {\n    pub app: String,\n    pub at: Option<String>,\n    pub from: Option<String>,\n    pub to: Option<String>,\n    pub text: String,\n}\n\n/// The raw typed stream of one app over the window: every key as captured,\n/// with no editing applied (see [`render_key`]), and pasted text inline.\n/// `app` may be part of the app id; see [`resolve_app`].\"\"\",\"\"\"pub struct TextOutput {\n    pub app: String,\n    pub at: Option<String>,\n    pub from: Option<String>,\n    pub to: Option<String>,\n    /// The windows' texts, one per line.\n    pub text: String,\n    pub windows: Vec<TextWindow>,\n}\n\n/// One window's reconstructed text.\n#[derive(Debug, Serialize, PartialEq, Eq)]\npub struct TextWindow {\n    pub window: String,\n    pub text: String,\n}\n\n/// The text typed into one app over the window, reconstructed: the window's\n/// keys and pastes, per window title, run through the app's tier 0/1 adapter\n/// (see [`reconstruct_windows`]). `app` may be part of the app id; see\n/// [`resolve_app`].\"\"\")\nrep(\"\"\"    let mut matching: Vec<(String, EventKind)> = Vec::new();\"\"\",\"\"\"    let mut matching: Vec<(String, Millis, EventKind)> = Vec::new();\"\"\")\nrep(\"\"\"                matching.push((ev.app, ev.kind));\"\"\",\"\"\"                matching.push((ev.app, ev.ts, ev.kind));\"\"\")\nrep(\"\"\"    let full = resolve_app(app, &known)?;\n    let mut out = String::new();\n    for (a, kind) in matching {\n        if a != full {\n            continue;\n        }\n        match kind {\n            EventKind::Key { key, mods, .. } => render_key(&key, &mods, &mut out),\n            EventKind::Paste {\n                text: Some(text), ..\n            } => out.push_str(&text),\n            _ => {}\n        }\n    }\n    Ok(TextOutput {\n        app: full,\n        at: fmt_opt(w.at),\n        from: fmt_opt(w.from),\n        to: fmt_opt(w.to),\n        text: out,\n    })\n}\"\"\",\"\"\"    let full = resolve_app(app, &known)?;\n    let events: Vec<(Millis, EventKind)> = matching\n        .into_iter()\n        .filter(|(a, ..)| *a == full)\n        .map(|(_, ts, kind)| (ts, kind))\n        .collect();\n    let windows = reconstruct_windows(classify(&full), &events);\n    Ok(TextOutput {\n        at: fmt_opt(w.at),\n        from: fmt_opt(w.from),\n        to: fmt_opt(w.to),\n        text: windows\n            .iter()\n            .map(|w| w.text.as_str())\n            .collect::<Vec<_>>()\n            .join(\"\\\\n\"),\n        app: full,\n        windows,\n    })\n}\n\n/// Reconstructs one app's typing, given its key and paste events in log\n/// order. The events are split p
+… [4098 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:41:55.808Z</sub>
+
+It builds. Now the unit test: the detailed example, event for event, through `reconstruct_windows`.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\nanchor=\"\"\"    #[test]\n    fn like_patterns_escape_wildcards() {\"\"\"\ntest='''    use crate::event::Mod;\n\n    /// Events of the detailed example in the README: two Kate windows (the\n    /// first one edited in two separate sessions) and a Konsole prompt.\n    struct Typing(Vec<(Millis, EventKind)>);\n    impl Typing {\n        fn key(&mut self, ts: Millis, window: &str, key: &str, mods: &[Mod]) {\n            self.0.push((\n                ts,\n                EventKind::Key {\n                    key: key.into(),\n                    mods: mods.to_vec(),\n                    repeat: false,\n                    window: window.into(),\n                },\n            ));\n        }\n        /// Types `s` (⏎ Enter, ⌫ Backspace, ⇥ Tab) from `ts`, 100 ms apart.\n        fn typ(&mut self, ts: Millis, window: &str, s: &str) -> Millis {\n            let mut t = ts;\n            for c in s.chars() {\n                let k = match c {\n                    '⏎' => \"Enter\".to_string(),\n                    '⌫' => \"Backspace\".to_string(),\n                    '⇥' => \"Tab\".to_string(),\n                    c => c.to_string(),\n                };\n                self.key(t, window, &k, &[]);\n                t += 100;\n            }\n            t\n        }\n        fn paste(&mut self, ts: Millis, window: &str, text: &str) {\n            self.0.push((\n                ts,\n                EventKind::Paste {\n                    text: Some(text.into()),\n                    window: window.into(),\n                },\n            ));\n        }\n    }\n\n    const CTRL: &[Mod] = &[Mod::Ctrl];\n    const NOTES: &str = \"notes.md — Kate\";\n\n    /// Kate: notes.md (two sessions, 3 minutes apart) and todo.md. Returns\n    /// the events and the time the second notes.md session starts.\n    fn kate_example() -> (Vec<(Millis, EventKind)>, Millis) {\n        let mut k = Typing(Vec::new());\n        k.typ(NOW, NOTES, \"Shopping list:⏎- milk⏎- breadd⌫\");\n        k.typ(NOW + 60_000, \"todo.md — Kate\", \"TODO: call Dana⏎⇥send the \\\\\"Q3\\\\\" report⏎path: C:\\\\\\\\temp\");\n        let s2 = NOW + 180_000;\n        // While unsaved, Kate's title is \"notes.md * — Kate\": same window.\n        let dirty = \"notes.md * — Kate\";\n        k.key(s2, dirty, \"Home\", CTRL);\n        k.key(s2 + 100, dirty, \"Down\", &[]);\n        k.key(s2 + 200, dirty, \"End\", &[]);\n        k.key(s2 + 300, dirty, \"Backspace\", CTRL);\n        let t = k.typ(s2 + 400, dirty, \"oat milk\");\n        k.key(t, dirty, \"End\", CTRL);\n        let t = k.typ(t + 100, dirty, \"⏎- קפה\");\n        k.key(t, dirty, \"v\", CTRL);\n        k.paste(t, dirty, \" ☕ x2\");\n        k.key(t + 100, dirty, \"z\", CTRL); // undoes the paste\n        k.typ(t + 200, dirty, \" x2\");\n        (k.0, s2)\n    }\n\n    #[test]\n    fn text_reconstructs_each_window_across_sessions() {\n        let (events, _) = kate_example();\n        assert_eq!(\n            reconstruct_windows(classify(\"org.kde.kate\"), &events),\n            vec![\n                TextWindow {\n                    window: NOTES.into(),\n                    text: \"Shopping list:\\\\n- oat milk\\\\n- bread\\\\n- קפה x2\".into(),\n                },\n                TextWindow {\n                    window: \"todo.md — Kate\".into(),\n                    text: \"TODO: call Dana\\\\n\\\\tsend the \\\\\"Q3\\\\\" report\\\\npath: C:\\\\\\\\temp\".into(),\n                },\n            ]\n        );\n    }\n\n    #[test]\n    fn text_starts_empty_at_the_window_start() {\n        // Only the second notes.md session is inside the window: the edits\n        // that reached into earlier text have nothing to act on.\n        let (events, s2) = kate_example();\n        let later: Vec<_> = events.into_iter().filter(|(ts, _)| *ts >= s2).collect();\n        assert_eq!(\n            reconstruct_windows(classify(\"org.kde.kate\"), &later),\n           
+… [1354 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test datadir::tests::query_on_missing_dir_is_an_error ... ok
+test query::tests::like_patterns_escape_wildcards ... ok
+test query::tests::app_names_resolve_to_full_ids ... ok
+test query::tests::snippets ... ok
+test query::tests::windows ... ok
+test query::tests::bad_windows_are_errors ... ok
+test query::tests::text_follows_the_terminal_adapter ... ok
+test query::tests::text_starts_empty_at_the_window_start ... ok
+test query::tests::text_reconstructs_each_window_across_sessions ... ok
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 114 filtered out; finished in 0.00s
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All three tests pass on the first run, and I'm now running the same example through the real binary in tests/query_cli.rs.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/query_cli.rs'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1,(old[:70],s.count(old)); s=s.replace(old,new)\nrep(\"\"\"#[test]\nfn text_is_the_raw_stream() {\n    let f = fixture();\n    let d = &f.dir;\n    // Session 1's window, absolute bounds: raw keys, no editing applied.\n    let from = format_ms(f.t0);\n    let to = format_ms(f.t0 + 5 * 60_000);\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"kate\", \"--from\", &from, \"--to\", &to]);\n    assert_eq!(code, 0);\n    assert_eq!(\n        v[\"text\"],\n        format!(\"the cat sat secret{}\", \"<Backspace>\".repeat(7))\n    );\"\"\",\"\"\"#[test]\nfn text_is_reconstructed() {\n    let f = fixture();\n    let d = &f.dir;\n    // Session 1's window, absolute bounds: \"secret\" was typed and deleted.\n    let from = format_ms(f.t0);\n    let to = format_ms(f.t0 + 5 * 60_000);\n    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"kate\", \"--from\", &from, \"--to\", &to]);\n    assert_eq!(code, 0);\n    assert_eq!(v[\"text\"], \"the cat sat\");\n    assert_eq!(v[\"windows\"][0][\"window\"], \"notes.md — Kate\");\"\"\")\nrep(\"\"\"    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", &at]);\n    assert_eq!(v[\"text\"], \"git status\\\\n\");\"\"\",\"\"\"    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", &at]);\n    assert_eq!(v[\"text\"], \"git status\");\"\"\")\nrep(\"\"\"    // Default: the last 10 minutes, with shortcuts named and pastes inline.\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"chrome\"]);\n    assert_eq!(v[\"text\"], \"<Ctrl+V>pasted words\\\\n\");\"\"\",\"\"\"    // Default: the last 10 minutes; the pasted text, submitted with Enter.\n    let (_, v, _) = brain(d, &[\"text\", \"--app\", \"chrome\"]);\n    assert_eq!(v[\"text\"], \"pasted words\");\"\"\")\nrep(\"\"\"    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", \"-1m\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\"\"\",\"\"\"    let (code, v, _) = brain(d, &[\"text\", \"--app\", \"konsole\", \"--at\", \"-1m\"]);\n    assert_eq!((code, v[\"text\"].as_str()), (0, Some(\"\")));\n    assert_eq!(v[\"windows\"], serde_json::json!([]));\"\"\")\nanchor=\"\"\"#[test]\nfn errors_exit_non_zero_with_a_message() {\"\"\"\ntest='''/// The detailed example from the README, through the binary: two Kate\n/// windows (notes.md edited in two separate sessions) and a Konsole prompt,\n/// with Hebrew, an emoji, quotes, a backslash and a Tab.\n#[test]\nfn text_example_from_the_readme() {\n    let tmp = tempfile::tempdir().unwrap();\n    let dir = tmp.path().join(\"data\");\n    std::fs::create_dir_all(&dir).unwrap();\n    let mut w = LogWriter::open(&dir.join(\"events.jsonl\")).unwrap();\n    let t0 = now_ms() - 30 * 60_000; // \"10:00\"\n    // Types `s` (⏎ Enter, ⌫ Backspace, ⇥ Tab) from `ts`, 100 ms apart.\n    let mut typ = |w: &mut LogWriter, ts: Millis, app: &str, win: &str, s: &str| -> Millis {\n        let mut t = ts;\n        for c in s.chars() {\n            let k = match c {\n                '⏎' => \"Enter\".to_string(),\n                '⌫' => \"Backspace\".to_string(),\n                '⇥' => \"Tab\".to_string(),\n                c => c.to_string(),\n            };\n            key(w, t, app, win, &k, &[]);\n            t += 100;\n        }\n        t\n    };\n    let kate = \"org.kde.kate\";\n    let notes = \"notes.md — Kate\";\n    typ(&mut w, t0, kate, notes, \"Shopping list:⏎- milk⏎- breadd⌫\");\n    typ(&mut w, t0 + 60_000, kate, \"todo.md — Kate\", \"TODO: call Dana⏎⇥send the \\\\\"Q3\\\\\" report⏎path: C:\\\\\\\\temp\");\n    // 10:03: a new session on notes.md (unsaved title, same window).\n    let s2 = t0 + 180_000;\n    let dirty = \"notes.md * — Kate\";\n    key(&mut w, s2, kate, dirty, \"Home\", &[Mod::Ctrl]);\n    key(&mut w, s2 + 100, kate, dirty, \"Down\", &[]);\n    key(&mut w, s2 + 200, kate, dirty, \"End\", &
+… [4066 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+warning: this `if` can be collapsed into the outer `match`
+   --> src/query.rs:427:17
+    |
+427 | /                 if f.suppress_paste_at.take() != Some(*ts) {
+428 | |                     f.editor.paste(text);
+429 | |                 }
+    | |_________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.100.0/index.html#collapsible_match
+--
+warning: `brain` (lib) generated 1 warning (run `cargo clippy --fix --lib -p brain -- ` to apply 1 suggestion)
+warning: variable does not need to be mutable
+   --> tests/query_cli.rs:284:9
+    |
+284 |     let mut typ = |w: &mut LogWriter, ts: Millis, app: &str, win: &str, s: &str| -> Millis {
+    |         ----^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+test errors_exit_non_zero_with_a_message ... ok
+test text_example_from_the_readme ... ok
+test text_is_reconstructed ... ok
+test search_time_windows ... ok
+test search_semantics_and_shapes ... ok
+test queries_are_consistent_while_run_writes ... ok
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.53s
+[This command modified 2 files you've previously read: src/query.rs, tests/query_cli.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:43:22.646Z</sub>
+
+Both CLI tests pass, including the README example. Fixing two lint warnings:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/query.rs'; s=open(p).read()\nold=\"\"\"            EventKind::Paste {\n                text: Some(text), ..\n            } => {\n                if f.suppress_paste_at.take() != Some(*ts) {\n                    f.editor.paste(text);\n                }\n            }\n            _ => {}\"\"\"\nnew=\"\"\"            // `take`: the suppression applies to the one paste right after it.\n            EventKind::Paste {\n                text: Some(text), ..\n            } if f.suppress_paste_at.take() != Some(*ts) => f.editor.paste(text),\n            _ => {}\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\np='tests/query_cli.rs'; s=open(p).read()\ns=s.replace(\"    let mut typ = |w: &mut LogWriter, ts: Millis, app: &str, win: &str, s: &str| -> Millis {\",\"    let typ = |w: &mut LogWriter, ts: Millis, app: &str, win: &str, s: &str| -> Millis {\")\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head; cargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | head -6",
+  "description": "Fix clippy warnings; full test run",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 123 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.84s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.13s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.52s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[This command modified 2 files you've previously read: tests/query_cli.rs, src/query.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:45:14.825Z</sub>
+
+All tests pass (123 unit tests, up from 121) and clippy is clean. Now the CLI help and the docs, which still describe the raw stream:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n -i 'raw stream\\|raw typed\\|raw decoded\\|raw keys\\|<Backspace>\\|no editing\\|raw keystroke' README.md PLAN.md CLAUDE.md src/main.rs | cut -c1-150",
+  "description": "Find remaining raw-stream descriptions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/main.rs:93:    /// The raw typed stream of an app (no editing applied): characters as
+src/main.rs:94:    /// typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>...
+CLAUDE.md:35:- `brain query text` returns the **raw decoded keystroke stream** (no
+README.md:9:brain query text --app A       # the raw typed stream of an app
+README.md:122:* **`text`**: the raw stream typed into the app, as captured, with no
+README.md:124:  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),
+README.md:268:  `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
+README.md:308:* **`query text` is the raw stream, `search` the edited text.** As the
+README.md:309:  owner decided, `text` returns exactly what was typed (with `<Backspace>`
+PLAN.md:413:`query text` must read raw keys from the log for a time window without
+PLAN.md:431:- **`brain query text --app A [--from T] [--to T] [--at T]`**: the raw stream
+PLAN.md:433:  newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
+PLAN.md:434:  `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 90,98p src/main.rs; sed -n 33,38p CLAUDE.md; sed -n 305,312p README.md; sed -n 429,436p PLAN.md; grep -n '\"app\": \"org.kde.konsole\",' -B2 -A8 README.md",
+  "description": "Read passages to rewrite"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+        #[arg(long, value_name = "N", default_value_t = 20)]
+        limit: usize,
+    },
+    /// The raw typed stream of an app (no editing applied): characters as
+    /// typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>...
+    /// Without time flags it covers the last 10 minutes; --to alone means the
+    /// 10 minutes ending at T.
+    #[command(after_help = TIME_HELP)]
+    Text {
+## Decisions already made by the owner — do not re-litigate
+
+- `brain query text` returns the **raw decoded keystroke stream** (no
+  backspace/cursor editing applied) over a window: default last 10 min,
+  `--at T` = 10-min window ending at T, or `--from/--to`. Times accept
+  relative (`-2h`), local and RFC 3339 forms. `--app` may be part of the id;
+  extensions exceed 300 MB. Suggestion acceptance may not replay the same.
+
+**Queries**
+* **`query text` is the raw stream, `search` the edited text.** As the
+  owner decided, `text` returns exactly what was typed (with `<Backspace>`
+  and other keys visible) rather than reconstructed text; reconstructed,
+  edit-aware text is what `search` matches and returns.
+* **Search matches substrings.** The index uses SQLite FTS5's trigram
+  match. Open sessions are included with their live text and
+  `ended_at: null`. A session is in a time window if it overlaps it.
+- **`brain query text --app A [--from T] [--to T] [--at T]`**: the raw stream
+  typed into the app over the window: characters as typed, Enter as a
+  newline, Tab as a tab, other keys and shortcuts by name (`<Backspace>`,
+  `<Ctrl+V>`), pasted text inline. No editing is applied (the owner's
+  decision: an audit-style trail, distinct from the edited session text).
+- **`--app A`** can be part of an app id, ignoring case. `search` keeps
+170-```json
+171-{
+172:  "app": "org.kde.konsole",
+173-  "at": "2026-11-16T16:51:22.680+02:00",
+174-  "from": "2026-11-16T16:41:22.680+02:00",
+175-  "to": "2026-11-16T16:51:22.680+02:00",
+176-  "text": "git status\ncargo test\nls -la\n"
+177-}
+178-```
+179-
+180-## Sessions and reconstruction
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:70],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/main.rs',[(\"\"\"    /// The raw typed stream of an app (no editing applied): characters as\n    /// typed, Enter as a newline, other keys as <Backspace>, <Ctrl+V>...\n    /// Without time flags it covers the last 10 minutes; --to alone means the\n    /// 10 minutes ending at T.\"\"\",\"\"\"    /// What was typed into an app in the time window, reconstructed (edits\n    /// applied) per window title with the app's rules; each window's text\n    /// starts empty at the window's start. Without time flags it covers the\n    /// last 10 minutes; --to alone means the 10 minutes ending at T.\"\"\")])\nTEXT_README=\"\"\"* **`text`**: what was typed into the app during the window,\n  **reconstructed**: the window's keys and pastes, per window title, run\n  through the app's tier 0/1 rules (Backspace, selections, undo, Enter\n  submitting a shell line, …), each window starting empty at the window's\n  start. Sessions play no part: a document edited in several sessions is one\n  text. `windows` lists each window's text, ordered by its first keystroke;\n  `text` joins them one per line. Edits reaching into text typed before the\n  window (Backspace past its start, Ctrl+A) only affect what was typed\n  inside it.\"\"\"\nedit('README.md',[\n(\"brain query text --app A       # the raw typed stream of an app\",\"brain query text --app A       # what was typed into an app, reconstructed\"),\n(\"\"\"* **`text`**: the raw stream typed into the app, as captured, with no\n  editing applied: characters as typed, Enter as a newline, Tab as a tab,\n  other keys and shortcuts by name (`<Backspace>`, `<Left>`, `<Ctrl+V>`),\n  pasted text inline.\"\"\",TEXT_README),\n(\"\"\"* **`query text` is the raw stream, `search` the edited text.** As the\n  owner decided, `text` returns exactly what was typed (with `<Backspace>`\n  and other keys visible) rather than reconstructed text; reconstructed,\n  edit-aware text is what `search` matches and returns.\"\"\",\"\"\"* **`query text` reconstructs \"stupidly\", by window.** It takes the keys\n  typed in the time window and runs them through the same tier 0/1 adapters\n  the sessions use, per app and window title, from an empty text: no session\n  boundaries, no text from before the window. (An earlier version returned\n  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)\"\"\"),\n])\ns=open('README.md').read()\ni=s.index('```json\\n{\\n  \"app\": \"org.kde.konsole\",')\nj=s.index('```',i+8)+3\nexample='''```json\n{\n  \"app\": \"org.kde.kate\",\n  \"at\": null,\n  \"from\": \"2026-11-17T10:00:00.000+02:00\",\n  \"to\": \"2026-11-17T10:10:00.000+02:00\",\n  \"text\": \"Shopping list:\\\\n- oat milk\\\\n- bread\\\\n- קפה x2\\\\nTODO: call Dana\\\\n\\\\tsend the \\\\\"Q3\\\\\" report\\\\npath: C:\\\\\\\\temp\",\n  \"windows\": [\n    {\n      \"window\": \"notes.md — Kate\",\n      \"text\": \"Shopping list:\\\\n- oat milk\\\\n- bread\\\\n- קפה x2\"\n    },\n    {\n      \"window\": \"todo.md — Kate\",\n      \"text\": \"TODO: call Dana\\\\n\\\\tsend the \\\\\"Q3\\\\\" report\\\\npath: C:\\\\\\\\temp\"\n    }\n  ]\n}\n```\n\nThat is the output for this typing (`tests/query_cli.rs` replays it):\n\n| When | Window | Keys |\n|---|---|---|\n| 10:00 | `notes.md — Kate` | `Shopping list:⏎- milk⏎- breadd⌫` |\n| 10:01 | `todo.md — Kate` | `TODO: call Dana⏎⇥send the \"Q3\" report⏎path: C:\\\\temp` |\n| 10:03 (a new session) | `notes.md * — Kate` | Ctrl+Home `↓` End Ctrl+⌫ `oat milk` Ctrl+End `⏎- קפה` Ctrl+V (`\" ☕ x2\"`) Ctrl+Z `\" x2\"` |\n\nWith `--from 10:02` instead, `notes.md` starts empty and the result is\n`\"oat milk\\\\n- קפה x2\"`. In Konsole, `git stauts⌫⌫⌫tus⏎`, `↑ -s⏎`,\n`rm -rf build` Ctrl+C, `echo \"שלום\" > out.txt⏎` give\n`\"git status\\\\ngit status -s\\\\nrm -rf bu
+… [2228 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+README.md:340:  the raw keys with `<Backspace>` etc.; the owner asked for reconstruction.)
+    Finished `release` profile [optimized] target(s) in 16.79s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T10:46:10.525Z</sub>
+
+The docs are updated. A quick live check against a running `brain`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "D=$(mktemp -d); B=./target/release/brain; $B run --synthetic 60 --data-dir $D/d 2>/dev/null & P=$!; sleep 5; $B query text --app konsole --data-dir $D/d; $B query text --app synthetic --data-dir $D/d | head -9; kill -INT $P; wait $P; rm -rf $D; $B query text --help | head -3",
+  "description": "Live check of reconstructed text output"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+{
+  "app": "org.kde.konsole",
+  "at": null,
+  "from": "2026-11-17T12:36:17.458+02:00",
+  "to": "2026-11-17T12:46:17.458+02:00",
+  "text": "git status\ncargo test\nls -la\ngit status",
+  "windows": [
+    {
+      "window": "~",
+      "text": "git status\ncargo test\nls -la\ngit status"
+    }
+  ]
+}
+{
+  "app": "synthetic",
+  "at": null,
+  "from": "2026-11-17T12:36:17.463+02:00",
+  "to": "2026-11-17T12:46:17.463+02:00",
+  "text": "the migration is blocked on the schema change. Dana asked whether we can ship search on Friday; I said yes if the index rebuild finishes overnight. Next: run the backfill on prod and check the error rate.\nthe migration is blocked on the schema change. Dana ask",
+  "windows": [
+    {
+      "window": "corpus.txt",
+What was typed into an app in the time window, reconstructed (edits applied) per window title with the app's rules; each window's text starts empty at the window's start. Without time flags it covers the last 10 minutes; --to alone means the 10 minutes ending at T
+
+Usage: brain query text [OPTIONS] --app <A>
+```
+
+</details>
+
