@@ -624,7 +624,9 @@ a subprocess with an argument list.
   directory that brain itself ingests; the loop with a scripted model,
   including the cap, parallel calls, refusals and interruption; the request
   and a streamed tool call through the real SDK with a mock transport) and
-  a live check against the API that is run by hand.
+  a live check against the API that is run by hand (3/3 on 2026-11-18:
+  the commands on a host with the secrets masked, a note, and a correct
+  "no" for a host never used).
 
 ## 7. Resource budget
 

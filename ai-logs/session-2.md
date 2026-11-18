@@ -32122,3 +32122,112 @@ key <redacted> and <redacted>; "sk-ant-api03-zz" stays short
 
 </details>
 
+## Assistant  <sub>2026-11-18T13:12:08.623Z</sub>
+
+The exporter masks the key shape (a short non-key like `sk-ant-api03-zz` stays). Exporting now and checking that no part of the key survives anywhere in `ai-logs/`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"key fragments in ai-logs: $(grep -rc 'NQUac42EXwKHUZ\\|ZRltqb4O7gJ\\|sk-ant-usr' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; python3 -c \"\nimport json,glob\nbad=0\nfor f in glob.glob('ai-logs/raw/*.jsonl'):\n    for l in open(f):\n        try: json.loads(l)\n        except Exception: bad+=1\nprint('invalid raw JSONL lines:', bad)\"; git log --all -p -S'NQUac42EXwKHUZ' --oneline | head -2 | wc -l",
+  "description": "Export logs; verify no key fragment remains, JSONL valid, history clean"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+key fragments in ai-logs: 0
+email hits: 0
+invalid raw JSONL lines: 0
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:12:23.933Z</sub>
+
+Clean: no fragment of the key anywhere in `ai-logs/`, the raw JSONL is still valid, and the key was never in git history. Committing the exporter change and the refreshed logs:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add scripts/export-ai-logs.py ai-logs && git commit -q -F - <<'EOF'\nAlways mask Anthropic keys in exported AI logs\n\nThe owner pasted an API key into the session to run brain-chat's live\ncheck. The exporter only replaced the strings passed with --redact, so\na key in a transcript would have reached ai-logs. It now also masks\nanything shaped like an Anthropic key or token (sk-ant- followed by 16\nor more key characters) on every export, in both the raw JSONL and the\nMarkdown; the replacement keeps the JSONL valid. Checked: no fragment\nof the key in ai-logs, and none in the git history.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1",
+  "description": "Commit the exporter change and refreshed logs; push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+b5d7c4d Always mask Anthropic keys in exported AI logs
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:12:41.051Z</sub>
+
+The key is kept out of the repo, but I couldn't run the live check: my session's permission check blocked me from handling the key myself, and I didn't try to get around that. The redaction part is done and pushed (`b5d7c4d`):
+- **The exporter now always masks Anthropic keys.** It masks anything shaped like `sk-ant-…` on every export, even when nobody passes `--redact`.
+- **Checked:** no fragment of your key is in `ai-logs/`, it was never in git history, and the raw logs are still valid JSONL.
+- **Rotate the key when you're done.** It's still in this conversation's local transcript under `~/.claude/projects/`, outside the repo, and pasting it here also sent it as part of the conversation.
+
+**To run the live check,** from your own terminal (so the key stays out of this conversation):
+```sh
+cd ~/Documents/shadow-assistant
+ANTHROPIC_API_KEY='<your key>' chat/.venv/bin/python chat/live_check.py
+```
+Then paste the output here; it never prints the key. Everything else is ready: the SDK is installed in `chat/.venv`, and all 23 offline tests pass there. If you prefer, typing the same command in this chat with a leading `! ` also works: its output lands here, and the exporter masks the key in the logs.
+
+**What to expect:** for each of the three questions you'll see the tool calls (`→ sessions …`), the answer, and `ok` or what was missing, then `3/3 checks passed`. My estimate is about $0.25.
+
+**One thing to watch:** your key starts with `sk-ant-usr-`, while Anthropic API keys from platform.claude.com normally start with `sk-ant-api03-`. If the check stops with an authentication error, the key you have probably isn't an API key, and you'd need to create one there, under API keys.
+
+## User  <sub>2026-11-18T13:14:36.730Z</sub>
+
+<pasted_content id="1b36">
+=== Which commands did I run yesterday on prod-db?
+ANTHROPIC_API_KEY is set and takes precedence over the SDK's profile / federation auto-discovery; unset ANTHROPIC_API_KEY to use the auto-discovered credential.
+  → sessions window=prod-db from=2026-11-17 to=2026-11-18 limit=200
+Yesterday (Tue 2026-11-17) you ran these on prod-db, all within about 30 seconds starting at 10:00. They were typed in Konsole, in the window "juan@prod-db: ~":
+
+```
+df -h
+sudo systemctl restart nginx
+[redacted]
+curl -H 'Authorization: Bearer [redacted]' https://api.example.com/health
+exit
+```
+
+- **10:00:17:** Right after the `sudo` command you typed something that was hidden as a likely secret. It was probably your sudo password.
+- **10:00:23:** The bearer token in the `curl` command was also hidden.
+
+This list only shows what you typed, so I can't tell whether the commands worked, for example whether nginx restarted.
+--- ok
+
+=== What did I write in my notes yesterday?
+  → list_apps from=2026-11-17 to=2026-11-18
+  → sessions app=org.kde.kate from=2026-11-17 to=2026-11-18
+Yesterday you made one short note, at 16:00 in Kate in the file **notes.md**:
+
+> restarted nginx on prod after the 502s
+
+That's the only writing session in Kate yesterday. The rest of what you typed was terminal commands in Konsole.
+--- ok
+
+=== Did I run anything on a server called db-backup yesterday?
+  → sessions window=db-backup from=2026-11-17 to=2026-11-18
+  → search words=db-backup
+No, I found nothing for db-backup yesterday (Tuesday 2026-11-17), and nothing on any other day either.
+
+- **Window titles:** No terminal or other window yesterday had "db-backup" in its title. When you're connected to a server, the window title usually shows its name.
+- **Typed text:** "db-backup" doesn't appear anywhere in what you typed, at any time. That includes `ssh db-backup` or any other command naming it.
+
+If you connected through an alias, a saved connection or an IP address, the name might never have been typed or shown. If you know another name for that server, I can search for that.
+--- ok
+
+3/3 checks passed
+</pasted_content id="1b36">
+

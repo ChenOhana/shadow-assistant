@@ -90,3 +90,9 @@ ingested by brain itself), the question loop with a scripted model
 (rounds, the cap, parallel calls, errors, refusals, interruption), and the
 request and streamed reply through the real SDK with the network replaced.
 The SDK tests run once `make chat-setup` has installed it.
+
+Last live check (2026-11-18, `claude-opus-5-5`, effort `low`): 3/3. The
+prod-db commands came back in order from one `sessions` call, with the sudo
+password and the bearer token reaching the model only as `[redacted]`; the
+note was quoted with its time and file; and for a host never used, it said
+no and listed where it had looked.
