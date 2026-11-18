@@ -1,6 +1,8 @@
-//! Shared helpers for the tests that drive a real KDE session: a uinput
-//! virtual keyboard, process cleanup, and checks of what `brain` saw focused.
-//! Each test binary uses a subset, hence the `dead_code` allowance.
+//! Shared helpers for the integration tests: a guard for every `brain run`
+//! they start, a check of the index against a rebuild from the log, and for
+//! the tests that drive a real KDE session, a uinput virtual keyboard and
+//! checks of what `brain` saw focused. Each test binary uses a subset, hence
+//! the `dead_code` allowance.
 #![allow(dead_code)]
 
 use brain::capture::synthetic::us_keycode;
@@ -356,4 +358,100 @@ impl Drop for RestoreLayout {
             ]);
         }
     }
+}
+
+/// Switches to the first keyboard layout (us) for the test, if needed; the
+/// returned guard restores the layout that was active.
+pub fn use_first_layout() -> RestoreLayout {
+    let restore = RestoreLayout(layout_index());
+    if restore.0 != 0 {
+        qdbus(&[
+            "org.kde.keyboard",
+            "/Layouts",
+            "org.kde.KeyboardLayouts.setLayout",
+            "0",
+        ]);
+        let t = Instant::now();
+        while layout_index() != 0 {
+            assert!(
+                t.elapsed() < Duration::from_secs(2),
+                "layout did not switch to #0"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+    restore
+}
+
+/// Rebuilds the index of the data directory `data` from its log alone, into
+/// a new database at `scratch`, and asserts that the live index has exactly
+/// the same sessions and documents. Returns the live sessions.
+pub fn assert_matches_rebuild(data: &Path, scratch: &Path) -> Vec<SessionRow> {
+    let log = data.join("events.jsonl");
+    let mut ing =
+        brain::ingest::Ingester::new(brain::store::open_writer(scratch).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    let live = rusqlite::Connection::open(data.join("brain.db")).unwrap();
+    let rebuilt = rusqlite::Connection::open(scratch).unwrap();
+    let sessions = session_rows(&live);
+    assert_eq!(
+        sessions,
+        session_rows(&rebuilt),
+        "sessions differ from a rebuild"
+    );
+    assert_eq!(
+        context_rows(&live),
+        context_rows(&rebuilt),
+        "documents differ from a rebuild"
+    );
+    sessions
+}
+
+/// A session row: id, app, window, started_at, status, end_reason, text,
+/// start_offset, end_offset.
+pub type SessionRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    i64,
+    Option<i64>,
+);
+
+pub fn session_rows(c: &rusqlite::Connection) -> Vec<SessionRow> {
+    let mut st = c
+        .prepare(
+            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
+                    start_offset, end_offset FROM sessions ORDER BY id",
+        )
+        .unwrap();
+    st.query_map([], |r| {
+        Ok((
+            r.get(0)?,
+            r.get(1)?,
+            r.get(2)?,
+            r.get(3)?,
+            r.get(4)?,
+            r.get(5)?,
+            r.get(6)?,
+            r.get(7)?,
+            r.get(8)?,
+        ))
+    })
+    .unwrap()
+    .collect::<Result<_, _>>()
+    .unwrap()
+}
+
+pub fn context_rows(c: &rusqlite::Connection) -> Vec<(String, String, String, i64)> {
+    let mut st = c
+        .prepare("SELECT app, window, text, cursor FROM context_state ORDER BY app, window")
+        .unwrap();
+    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
 }

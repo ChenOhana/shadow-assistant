@@ -545,11 +545,17 @@ window has to be read anyway. Clock steps backwards are discussed in section
   text including the README's example, errors, and thousands of queries
   while `run` writes), `perf_budget` (CPU and memory budget), and
   `tier2_e2e`'s saved-file tests (diffs, shortcut-only sessions, the copy
-  taken on focus; no VS Code needed).
+  taken on focus; no VS Code needed), and `two_instances` (two synthetic
+  runs on separate folders: each keeps to its folder and matches a rebuild
+  of its own log, a second run on the same folder is refused, a `kill -9`
+  of one leaves the other running).
 - **Opt-in tests against real software**: `repeat_e2e` and
   `real_keyboard_e2e` type through a uinput keyboard into real Kate windows
   and compare Kate's saved files with brain (held-key repeats, Hebrew via
   Alt+Shift, focus moving between windows, keyboard unplug/replug);
+  `two_instances`' desktop test runs two real captures side by side (same
+  focus and keys in both; a stop or `kill -9` of one never unloads the
+  other's KWin script);
   `vscode_replay` and `tier2_e2e`'s replay tests drive real VS Code. The
   diff's output was also compared once with `git diff -U3` on 300 random
   edits (identical for distinct lines).
@@ -588,6 +594,11 @@ window has to be read anyway. Clock steps backwards are discussed in section
   replays faster than a human (so accepting a suggestion may not replay the
   same) and runs without extensions when they exceed 300 MB. Unsaved new
   files are not supported.
+- **Several runs side by side** (separate data directories) are supported.
+  After a `kill -9`, the next start unloads the leftover KWin script by its
+  `brain_focus_<pid>` name; if another run reused that process id in the
+  meantime, its script is unloaded instead (rare; a start-time suffix in
+  the name would close it).
 - **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
   be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
   are captured on any Linux, attributed to `unknown`.

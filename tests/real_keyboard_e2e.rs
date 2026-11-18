@@ -45,19 +45,8 @@ fn wait_for_layout(want: u32) {
 #[test]
 #[ignore]
 fn real_keyboard_layouts_focus_and_hotplug() {
-    let restore = RestoreLayout(layout_index());
-    if layout_index() != 0 {
-        // Start on the first layout (us); the guard restores the original.
-        let _ = std::process::Command::new("qdbus6")
-            .args([
-                "org.kde.keyboard",
-                "/Layouts",
-                "org.kde.KeyboardLayouts.setLayout",
-                "0",
-            ])
-            .status();
-        wait_for_layout(0);
-    }
+    // Start on the first layout (us); the guard restores the original.
+    let restore = use_first_layout();
     let tmp = tempfile::tempdir().unwrap();
     let data = tmp.path().join("data");
     let log = data.join("events.jsonl");

@@ -7,7 +7,7 @@ mod common;
 
 use brain::eventlog::LogReader;
 use brain::ingest::CHECKPOINT_INTERVAL_MS;
-use common::{assert_no_brain_on, spawn_brain};
+use common::{assert_matches_rebuild, assert_no_brain_on, spawn_brain};
 use rusqlite::Connection;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -133,14 +133,7 @@ fn kill_dash_nine_never_corrupts() {
 
     // Sessions and documents are a pure function of the log: rebuilding the
     // index from the log alone gives exactly the rows the crashing runs built.
-    let fresh = tmp.path().join("rebuild.db");
-    let mut ing =
-        brain::ingest::Ingester::new(brain::store::open_writer(&fresh).unwrap(), &log).unwrap();
-    while ing.step().unwrap().lines > 0 {}
-    let rebuilt = Connection::open(&fresh).unwrap();
-    let live_sessions = session_rows(&c);
-    assert_eq!(live_sessions, session_rows(&rebuilt));
-    assert_eq!(context_rows(&c), context_rows(&rebuilt));
+    let live_sessions = assert_matches_rebuild(&dir, &tmp.path().join("rebuild.db"));
     // The synthetic source types continuously, so each run is one session,
     // closed by the next run's start (after a kill) or by the final stop.
     assert!(
@@ -159,51 +152,4 @@ fn kill_dash_nine_never_corrupts() {
         live_sessions.len(),
         torn_tails
     );
-}
-
-type SessionRow = (
-    i64,
-    String,
-    String,
-    String,
-    String,
-    Option<String>,
-    String,
-    i64,
-    Option<i64>,
-);
-
-fn session_rows(c: &Connection) -> Vec<SessionRow> {
-    let mut st = c
-        .prepare(
-            "SELECT id, app, window, started_at, status, end_reason, reconstructed_text,
-                    start_offset, end_offset FROM sessions ORDER BY id",
-        )
-        .unwrap();
-    st.query_map([], |r| {
-        Ok((
-            r.get(0)?,
-            r.get(1)?,
-            r.get(2)?,
-            r.get(3)?,
-            r.get(4)?,
-            r.get(5)?,
-            r.get(6)?,
-            r.get(7)?,
-            r.get(8)?,
-        ))
-    })
-    .unwrap()
-    .collect::<Result<_, _>>()
-    .unwrap()
-}
-
-fn context_rows(c: &Connection) -> Vec<(String, String, String, i64)> {
-    let mut st = c
-        .prepare("SELECT app, window, text, cursor FROM context_state ORDER BY app, window")
-        .unwrap();
-    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap()
 }

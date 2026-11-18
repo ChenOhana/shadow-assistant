@@ -82,7 +82,9 @@ The service keeps its data in its systemd **state directory**,
 private to you (mode 0700) before starting it. Pass that directory to
 `brain query`. `make uninstall-service` deletes it with
 `systemctl --user clean --what=state brain`, unless `KEEP_DATA=1` is given.
-Only one `brain run` can use a data directory at a time. The service runs
+Only one `brain run` can use a data directory at a time; runs on separate
+directories work side by side (a test run next to the service, say), and
+each records everything you type. The service runs
 without `--vscode-replay`; add it to `ExecStart` in
 `~/.config/systemd/user/brain.service` to turn it on.
 
@@ -432,6 +434,12 @@ database read-only and reopen it to see the current state.
 * **Service as you, not root**: a systemd user service, because desktop
   integration needs your session's D-Bus, and a root keylogger is the
   worst case if it is ever compromised.
+* **Several runs on separate data directories are supported**, each
+  capturing everything. One rare gap: after a `kill -9`, the next start
+  unloads the KWin script the killed run left behind, by its name
+  `brain_focus_<pid>`; if another run has meanwhile started with that same,
+  reused process id, its script is unloaded instead and it stops seeing
+  focus changes until it restarts.
 
 ## Tests
 
@@ -445,6 +453,8 @@ cargo test --release      # unit tests (~130) and the default integration tests:
                           #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
                           #   tier2_e2e     VS Code saved-file diffs and shortcut-only
                           #                 sessions (no VS Code needed)
+                          #   two_instances two runs on separate folders stay apart;
+                          #                 a second run on the same folder is refused
 ```
 
 Tests against real software are opt-in (`-- --ignored`):
@@ -452,7 +462,7 @@ Tests against real software are opt-in (`-- --ignored`):
 ```sh
 # Type through a virtual keyboard into real Kate windows; hands off the
 # keyboard and mouse while they run, and the screen must be unlocked:
-cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+cargo test --release --test repeat_e2e --test real_keyboard_e2e --test two_instances -- --ignored --nocapture --test-threads=1
 # Replay into a real (headless) VS Code, incl. a file opened from outside
 # the window's folder, identified late through VS Code's window state:
 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1

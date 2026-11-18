@@ -115,11 +115,14 @@ tests/                   integration tests that drive the real binary;
   (or `start_brain`): the guard stops it even when the test fails, and
   tests end with `assert_no_brain_on(data)`. No test may leave a process or
   a file behind.
-- `tests/repeat_e2e.rs` and `tests/real_keyboard_e2e.rs` (`#[ignore]`) type
-  into real Kate windows through /dev/uinput: they need an unlocked KDE
-  session, `scripts/setup-test-permissions.sh`, and nobody touching the
-  keyboard or mouse while they run. They only type while brain's log shows
-  the intended window focused.
+- `brain run`s on separate data directories are supported side by side
+  (`tests/two_instances.rs`); one data directory allows one run.
+- `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test
+  in `tests/two_instances.rs` (`#[ignore]`) type into real Kate windows
+  through /dev/uinput: they need an unlocked KDE session,
+  `scripts/setup-test-permissions.sh`, and nobody touching the keyboard or
+  mouse while they run. They only type while brain's log shows the
+  intended window focused.
 - The input loop must deliver key transitions before emitting the repeats
   due at the same time (`keys::tests::ticking_past_an_unread_release_adds_repeats`).
 - Never change desktop session state you did not set up (lock/unlock,
