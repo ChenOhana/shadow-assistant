@@ -8,8 +8,9 @@ For every session transcript (and each subagent transcript under it):
 
 Redaction replaces the given strings (e.g. an email address) everywhere,
 case-insensitively, in both outputs, and always masks anything shaped like
-an Anthropic API key or token (`sk-ant-...`), so a key pasted into a session
-never reaches the repository.
+an Anthropic API key or token (`sk-ant-...`) and every 10-character piece
+of such a key found anywhere (a session may quote part of it), so a key
+pasted into a session never reaches the repository.
 
 Usage (from the repository root):
   python3 -I scripts/export-ai-logs.py --redact you@example.com \
@@ -26,11 +27,26 @@ MAX_TOOL_RESULT = 3000
 
 
 # Always masked, whatever --redact says: Anthropic keys and tokens.
-KEY_SHAPES = [re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}")]
+KEY_SHAPE = re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}")
+# A key's pieces this long are masked too, wherever they appear (a session
+# may quote part of a key, for example in a search for it).
+KEY_PIECE = 10
 
 
-def redactor(secrets):
-    pats = KEY_SHAPES + [re.compile(re.escape(s), re.IGNORECASE) for s in secrets if s]
+def key_pieces(texts):
+    """Every KEY_PIECE-character stretch of every key found in `texts`."""
+    pieces = set()
+    for text in texts:
+        for key in KEY_SHAPE.findall(text):
+            body = key[len("sk-ant-"):]
+            pieces |= {body[i:i + KEY_PIECE] for i in range(len(body) - KEY_PIECE + 1)}
+    return pieces
+
+
+def redactor(secrets, pieces=()):
+    pats = [KEY_SHAPE] + [re.compile(re.escape(s), re.IGNORECASE) for s in secrets if s]
+    if pieces:
+        pats.append(re.compile("|".join(map(re.escape, sorted(pieces, key=len, reverse=True)))))
 
     def apply(text):
         for p in pats:
@@ -118,7 +134,6 @@ def main():
     ap.add_argument("--out", default="ai-logs")
     ap.add_argument("--redact", action="append", default=[])
     args = ap.parse_args()
-    redact = redactor(args.redact)
     src, out = Path(args.src), Path(args.out)
     (out / "raw").mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +149,8 @@ def main():
                 agents[a.stem] = a
     for stem, a in sorted(agents.items(), key=lambda kv: kv[1].stat().st_mtime):
         jobs.append((a, f"subagent-{stem.removeprefix('agent-')}", f"Subagent transcript {stem}"))
+    pieces = key_pieces(path.read_text(encoding="utf-8") for path, _, _ in jobs)
+    redact = redactor(args.redact, pieces)
     for path, name, title in jobs:
         raw = redact(path.read_text(encoding="utf-8"))
         raw_out = out / "raw" / f"{name}.jsonl"
