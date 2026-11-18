@@ -81,10 +81,75 @@ pub enum Tier2Start {
     Skipped(String),
 }
 
-/// `tier2_status` of a closed VS Code session that only shortcuts touched
-/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the
-/// saved file's diff, or is removed; it is never replayed.
-pub const TIER2_PENDING_SAVED_ONLY: &str = "pending: saved file only";
+/// Why a session ended, as stored in `sessions.end_reason`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndReason {
+    /// No activity in its window for [`IDLE_TIMEOUT_MS`].
+    Idle,
+    /// A single-line field was submitted (Enter at a shell prompt).
+    Commit,
+    /// A single-line field was cancelled (Ctrl+C at a prompt).
+    Cancel,
+    /// Focus moved to another field of the same window (Tab in a form).
+    Field,
+    /// `brain run` stopped.
+    Stop,
+    /// `brain run` started again without a clean stop (a crash).
+    Restart,
+}
+
+impl EndReason {
+    /// The value stored in the database.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EndReason::Idle => "idle",
+            EndReason::Commit => "commit",
+            EndReason::Cancel => "cancel",
+            EndReason::Field => "field",
+            EndReason::Stop => "stop",
+            EndReason::Restart => "restart",
+        }
+    }
+}
+
+/// The fixed values of `sessions.tier2_status` while tier 2 works on a
+/// session; the outcomes are free text (`done: ...`, [`tier2_failed`],
+/// [`tier2_skipped`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier2Status {
+    /// Looking for the edited file (VS Code records it late).
+    Resolving,
+    /// The file's initial content is saved; the session is open.
+    Snapshot,
+    /// Closed, waiting for the worker (saved file's diff, or a replay).
+    Pending,
+    /// Closed after shortcuts only (its tier 0/1 text is unchanged, e.g.
+    /// Ctrl+D then Ctrl+S): it gets the saved file's diff, or is removed;
+    /// it is never replayed.
+    PendingSavedOnly,
+}
+
+impl Tier2Status {
+    /// The value stored in the database.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Tier2Status::Resolving => "resolving",
+            Tier2Status::Snapshot => "snapshot",
+            Tier2Status::Pending => "pending",
+            Tier2Status::PendingSavedOnly => "pending: saved file only",
+        }
+    }
+}
+
+/// `tier2_status` of a session tier 2 cannot handle, with the reason.
+pub fn tier2_skipped(why: &str) -> String {
+    format!("skipped: {why}")
+}
+
+/// `tier2_status` of a session whose tier 2 job failed, with the reason.
+pub fn tier2_failed(why: &str) -> String {
+    format!("failed: {why}")
+}
 
 /// Takes the file snapshot a tier 2 replay starts from, when a session opens
 /// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
@@ -203,7 +268,7 @@ impl Sessions {
                     editor: FieldEditor::new(classify(&app), buf),
                     last_activity: started,
                     end_offset: start_offset as u64,
-                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
+                    tier2_snapshot: tier2.as_deref() == Some(Tier2Status::Snapshot.as_str()),
                     dirty: false,
                     start_hash,
                     latest: None,
@@ -361,7 +426,9 @@ impl Sessions {
     pub fn on_event(&mut self, tx: &Connection, offset: u64, next: u64, ev: &Event) -> Result<()> {
         // Event-time idle rule: any session idle for the timeout before this
         // event closed before it.
-        self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+        self.close_where(tx, EndReason::Idle, |s| {
+            ev.ts - s.last_activity >= IDLE_TIMEOUT_MS
+        })?;
         match &ev.kind {
             EventKind::Key {
                 key, mods, window, ..
@@ -390,9 +457,9 @@ impl Sessions {
                 self.last_key = Some((k.clone(), ev.ts));
                 let reason = match outcome {
                     Outcome::Continue => return Ok(()),
-                    Outcome::Commit => "commit",
-                    Outcome::Cancel => "cancel",
-                    Outcome::FieldChange => "field",
+                    Outcome::Commit => EndReason::Commit,
+                    Outcome::Cancel => EndReason::Cancel,
+                    Outcome::FieldChange => EndReason::Field,
                 };
                 self.close(tx, &k, reason, true)?;
             }
@@ -420,7 +487,7 @@ impl Sessions {
                 SystemState::Start => {
                     // A start without a preceding stop means a crash; either
                     // way, input while not running is unknown.
-                    self.close_where(tx, "restart", |_| true)?;
+                    self.close_where(tx, EndReason::Restart, |_| true)?;
                     tx.execute("UPDATE context_state SET cursor_unknown = 1", [])?;
                     tx.execute(
                         "DELETE FROM context_state WHERE updated_at < ?1",
@@ -428,7 +495,7 @@ impl Sessions {
                     )?;
                     self.wrote = true;
                 }
-                SystemState::Stop => self.close_where(tx, "stop", |_| true)?,
+                SystemState::Stop => self.close_where(tx, EndReason::Stop, |_| true)?,
                 _ => {}
             },
         }
@@ -438,7 +505,7 @@ impl Sessions {
     /// Closes sessions idle on the wall clock. Call only when the log has
     /// been ingested up to its end.
     pub fn close_idle(&mut self, tx: &Connection, now: Millis) -> Result<()> {
-        self.close_where(tx, "idle", |s| {
+        self.close_where(tx, EndReason::Idle, |s| {
             now - s.last_activity >= IDLE_TIMEOUT_MS + IDLE_GRACE_MS
         })
     }
@@ -533,7 +600,7 @@ impl Sessions {
     fn close_where(
         &mut self,
         tx: &Connection,
-        reason: &str,
+        reason: EndReason,
         pred: impl Fn(&OpenSession) -> bool,
     ) -> Result<()> {
         let mut keys: Vec<Key> = self
@@ -557,7 +624,7 @@ impl Sessions {
     /// session with a tier 2 snapshot, which stays until the saved file's
     /// diff shows whether the file changed (shortcuts like Ctrl+D change it
     /// without changing the tier 0/1 text).
-    fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
+    fn close(&mut self, tx: &Connection, k: &Key, reason: EndReason, reset: bool) -> Result<()> {
         let Some(mut s) = self.open.remove(k) else {
             return Ok(());
         };
@@ -575,20 +642,20 @@ impl Sessions {
         }
         let text = s.editor.buf.text();
         let changed = text_hash(&text) != s.start_hash;
-        let typed = (changed || reason == "commit") && !text.trim().is_empty();
+        let typed = (changed || reason == EndReason::Commit) && !text.trim().is_empty();
         if typed || s.tier2_snapshot {
             let pending = if typed {
-                "pending"
+                Tier2Status::Pending
             } else {
-                TIER2_PENDING_SAVED_ONLY
+                Tier2Status::PendingSavedOnly
             };
             tx.prepare_cached(
                 "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
                     end_offset = ?3, end_reason = ?4,
                     tier2_status = CASE tier2_status
-                        WHEN 'snapshot' THEN ?6
+                        WHEN ?7 THEN ?6
                         -- still identifying when brain stopped or crashed
-                        WHEN 'resolving' THEN 'skipped: could not identify the file from the window title'
+                        WHEN ?8 THEN ?9
                         ELSE tier2_status END
                  WHERE id = ?5",
             )?
@@ -596,9 +663,12 @@ impl Sessions {
                 timefmt::format_ms(s.last_activity),
                 text,
                 s.end_offset as i64,
-                reason,
+                reason.as_str(),
                 s.id,
-                pending
+                pending.as_str(),
+                Tier2Status::Snapshot.as_str(),
+                Tier2Status::Resolving.as_str(),
+                tier2_skipped("could not identify the file from the window title"),
             ])?;
             if s.tier2_snapshot {
                 self.staged_jobs.push(s.id);
@@ -678,12 +748,12 @@ fn record_tier2(tx: &Connection, id: i64, outcome: Tier2Start) -> Result<bool> {
     let (status, file, taken) = match outcome {
         Tier2Start::NotApplicable => return Ok(false),
         Tier2Start::Snapshot { file } => (
-            "snapshot".to_string(),
+            Tier2Status::Snapshot.as_str().to_string(),
             Some(file.to_string_lossy().into_owned()),
             true,
         ),
-        Tier2Start::NotYet(_) => ("resolving".to_string(), None, false),
-        Tier2Start::Skipped(why) => (format!("skipped: {why}"), None, false),
+        Tier2Start::NotYet(_) => (Tier2Status::Resolving.as_str().to_string(), None, false),
+        Tier2Start::Skipped(why) => (tier2_skipped(&why), None, false),
     };
     tx.prepare_cached("UPDATE sessions SET tier2_status = ?1, tier2_file = ?2 WHERE id = ?3")?
         .execute(params![status, file, id])?;
@@ -761,12 +831,15 @@ fn load_context(
 fn history_entry(conn: &Connection, app: &str, before: u64, n: usize) -> Option<String> {
     conn.prepare_cached(
         "SELECT reconstructed_text FROM sessions
-         WHERE app = ?1 AND end_reason = 'commit' AND end_offset <= ?2
+         WHERE app = ?1 AND end_reason = ?4 AND end_offset <= ?2
          ORDER BY end_offset DESC LIMIT 1 OFFSET ?3",
     )
     .and_then(|mut st| {
-        st.query_row(params![app, before as i64, n as i64], |r| r.get(0))
-            .optional()
+        st.query_row(
+            params![app, before as i64, n as i64, EndReason::Commit.as_str()],
+            |r| r.get(0),
+        )
+        .optional()
     })
     .ok()
     .flatten()

@@ -28,7 +28,7 @@ use super::apps::normalize_window;
 use super::vscode::{self, ReplayEvent, ReplayInput, VsCodeReplayer};
 use crate::event::EventKind;
 use crate::eventlog::LogReader;
-use crate::sessions::{TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter, Tier2Start};
+use crate::sessions::{Tier2Snapshotter, Tier2Start, Tier2Status};
 use crate::store;
 use crate::timefmt::{Millis, now_ms};
 use anyhow::{Context, Result, bail};
@@ -137,10 +137,16 @@ impl VsCodeSnapshots {
     /// Removes snapshots no session needs any more (left behind when `brain
     /// run` died between taking a snapshot and committing its session).
     pub fn prune(&self, conn: &rusqlite::Connection) -> Result<()> {
-        let mut st = conn
-            .prepare("SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending', ?1)")?;
+        let mut st = conn.prepare("SELECT id FROM sessions WHERE tier2_status IN (?1, ?2, ?3)")?;
         let keep = st
-            .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get::<_, i64>(0))?
+            .query_map(
+                [
+                    Tier2Status::Snapshot.as_str(),
+                    Tier2Status::Pending.as_str(),
+                    Tier2Status::PendingSavedOnly.as_str(),
+                ],
+                |r| r.get::<_, i64>(0),
+            )?
             .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
         for entry in std::fs::read_dir(&self.dir)?.flatten() {
             let name = entry.file_name();
@@ -386,9 +392,15 @@ fn worker(
 fn pending_jobs(db_path: &Path) -> Result<Vec<i64>> {
     let conn = store::open_reader(db_path)?;
     let mut st =
-        conn.prepare("SELECT id FROM sessions WHERE tier2_status IN ('pending', ?1) ORDER BY id")?;
+        conn.prepare("SELECT id FROM sessions WHERE tier2_status IN (?1, ?2) ORDER BY id")?;
     let ids = st
-        .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get(0))?
+        .query_map(
+            [
+                Tier2Status::Pending.as_str(),
+                Tier2Status::PendingSavedOnly.as_str(),
+            ],
+            |r| r.get(0),
+        )?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(ids)
 }
@@ -413,8 +425,12 @@ fn run_job(
     let (app, window, start, end, file, ended_at, status): Row = conn
         .query_row(
             "SELECT app, window, start_offset, end_offset, tier2_file, ended_at, tier2_status
-             FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
-            rusqlite::params![id, TIER2_PENDING_SAVED_ONLY],
+             FROM sessions WHERE id = ?1 AND tier2_status IN (?2, ?3)",
+            rusqlite::params![
+                id,
+                Tier2Status::Pending.as_str(),
+                Tier2Status::PendingSavedOnly.as_str()
+            ],
             |r| {
                 Ok((
                     r.get(0)?,
@@ -451,7 +467,7 @@ fn run_job(
         }));
     }
     // Only shortcuts and no save: nothing shows that the file changed.
-    if status == TIER2_PENDING_SAVED_ONLY {
+    if status == Tier2Status::PendingSavedOnly.as_str() {
         return Ok(Tier2Outcome::Unchanged);
     }
     // 2. Otherwise, a best-effort replay.
