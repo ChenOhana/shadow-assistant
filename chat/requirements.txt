@@ -1,0 +1,3 @@
+# brain-chat's only dependency: the official Anthropic SDK (the version its
+# offline tests were written and checked against).
+anthropic==2.10.0

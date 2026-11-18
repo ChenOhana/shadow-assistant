@@ -7,6 +7,7 @@ lets you search it later.
 brain run                      # capture keystrokes + focus changes, store them
 brain query search "<words>"   # full-text search over writing sessions
 brain query text --app A       # what was typed into an app, reconstructed
+chat/brain-chat                # ask Claude about it in plain language
 ```
 
 > **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
@@ -136,12 +137,14 @@ shortcut) and `system` (`start`, `stop`, `sleep`, `wake`, `lock`,
 
 ## Query
 
-Both commands run while `brain run` is capturing and print JSON. Errors go
-to stderr with a non-zero exit code.
+All query commands run while `brain run` is capturing and print JSON.
+Errors go to stderr with a non-zero exit code.
 
 ```sh
 brain query search "migration blocked" [--app A] [--from T] [--to T] [--at T] [--limit N]
 brain query text --app A [--from T] [--to T] [--at T]
+brain query sessions [--app A] [--window W] [--from T] [--to T] [--at T] [--limit N] [--offset K]
+brain query apps [--from T] [--to T] [--at T]
 ```
 
 * **`search`**: sessions whose text contains *every* word, anywhere inside
@@ -157,6 +160,15 @@ brain query text --app A [--from T] [--to T] [--at T]
   window's text, ordered by its first keystroke; `text` joins them one per
   line. Edits reaching into text typed before the range (Backspace past its
   start, Ctrl+A) only affect what was typed inside it.
+* **`sessions`**: the sessions in the window, oldest first, with their full
+  text and why they ended, by app and **window-title** substring (default
+  limit 50, `total` and `--offset` to page). In a terminal each submitted
+  command is a session (`end_reason: "commit"`) and the title usually names
+  the host (`juan@prod-db: ~`), so `brain query sessions --app konsole
+  --window prod-db --from 2026-11-17 --to 2026-11-18` lists the commands
+  run on prod-db that day.
+* **`apps`**: the apps with sessions in the window, most recently active
+  first, with session counts: the ids `--app` accepts.
 * **`--app A`** can be part of the app id, ignoring case (`--app chrome`
   finds `google-chrome`). `search` keeps every app that matches. `text`
   resolves `A` to one app and reports its full id (`"app": "google-chrome"`):
@@ -164,11 +176,11 @@ brain query text --app A [--from T] [--to T] [--at T]
   or none, it is an error that lists them, so text of different apps is
   never mixed.
 
-**Time flags** (both commands): `--at T` is the 10 minutes ending at T;
+**Time flags** (all commands): `--at T` is the 10 minutes ending at T;
 `--from T` alone runs to now; `--from` and `--to` together are an explicit
 window. `--to T` alone means the 10 minutes ending at T for `text`, and
-everything up to T for `search`. With no flags, `text` covers the last 10
-minutes and `search` all time. T can be:
+everything up to T for the others. With no flags, `text` covers the last 10
+minutes and the others all time. T can be:
 
 | Form | Example |
 |---|---|
@@ -237,6 +249,26 @@ With `--from 10:02` instead, `notes.md` starts empty and the result is
 `"oat milk\n- קפה x2"`. In Konsole, `git stauts⌫⌫⌫tus⏎`, `↑ -s⏎`,
 `rm -rf build` Ctrl+C, `echo "שלום" > out.txt⏎` give
 `"git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt"`.
+
+## Ask in plain language: brain-chat
+
+[`chat/`](chat/README.md) wraps the query commands with Claude, so you can
+ask "which commands did I run yesterday on prod-db?" or "what did I tell
+Dana about the migration?" and get an answer that cites the times, apps and
+windows it comes from:
+
+```sh
+sudo apt install python3-venv && make chat-setup   # once
+export ANTHROPIC_API_KEY=...
+chat/brain-chat --data-dir ~/.local/state/brain    # a chat; or pass a question
+```
+
+Claude answers by calling read-only tools (`list_apps`, `sessions`,
+`search`, `text`) that run `brain query` on your machine, in a loop it ends
+when it has the answer (at most 10 rounds of tool calls per question).
+**Tool results go to Anthropic's API**: likely secrets (tokens, keys,
+passwords in commands, a password typed at a `sudo` prompt) are masked
+first, as a best effort, and every tool call is printed.
 
 ## Sessions and reconstruction
 
@@ -490,6 +522,12 @@ cargo test --release      # unit tests (~130) and the default integration tests:
                           #   two_instances two runs on separate folders stay apart;
                           #                 a second run on the same folder is refused
 ```
+
+brain-chat has its own tests (`make chat-test`, offline: redaction, the
+tools against a real data directory, the question loop with a scripted
+model, the request through the real SDK with the network replaced) and a
+live check against the API (`chat/.venv/bin/python chat/live_check.py`,
+which costs a little).
 
 GNOME is tested against a real GNOME Shell: a private, headless one that
 the test starts in its own D-Bus session and home, inside its own systemd

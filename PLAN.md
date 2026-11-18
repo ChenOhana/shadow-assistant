@@ -577,8 +577,54 @@ window has to be read anyway. Clock steps backwards are discussed in section
   take the earlier instant, DST gaps are an error), or RFC 3339 with a zone.
   Output times are local with their offset (RFC 3339), and the resolved
   window is echoed; the log and the database store UTC.
+- **`brain query sessions [--app A] [--window W] [--from T] [--to T] [--at T]
+  [--limit N] [--offset K]`**: the sessions overlapping the window, oldest
+  first, with full text and end reason, filtered by app and window-title
+  substrings, with the `total` count for paging (count and page read in one
+  transaction, so they agree). Terminal commands are sessions and terminal
+  titles name the host, so this is how "what did I run on host X" is
+  answered. **`brain query apps`**: the apps with sessions in the window and
+  their counts. Both use the same filters as `search` (one helper builds
+  the app and window-overlap conditions for all three).
 - Errors (empty query, bad time, empty window, `--at` with `--from`/`--to`,
   missing data directory) go to stderr with a non-zero exit code.
+
+### 6.1 brain-chat: questions in plain language
+
+`chat/` is a Python program on top of `brain query`, the "future assistant"
+of the assignment's diagram: Claude (`claude-opus-5-5`, adaptive thinking,
+effort `low`, streamed) answers questions by calling four read-only tools
+(`list_apps`, `sessions`, `search`, `text`), each running `brain query` as
+a subprocess with an argument list.
+
+- **The loop** runs locally on the Messages API: send the conversation and
+  the tools; if Claude asks for tools, run them (all results of a turn go
+  back in one message) and ask again; the question ends when Claude answers.
+  Claude decides what to look up and when it has enough; the system prompt
+  tells it to start narrow, stop when the evidence answers the question,
+  say when nothing matches, and cite times, apps and windows. At most 10
+  rounds of tool calls per question; then a final request with tools off
+  (`tool_choice: none` and a mid-conversation system message) makes it
+  answer from what it found. Tool errors go back as error results.
+- **Context**: each user message starts with the local time (so the stable
+  system prompt and tool list stay cacheable, `cache_control` on the
+  request); results are capped (long texts cut, lists cut with a note to
+  page). A follow-up question keeps the conversation.
+- **Privacy**: tool results leave the machine. `redact.py` masks likely
+  secrets first (token shapes, `password=`-style values, credentials in
+  URLs and command flags, and a password-like word typed right after a
+  command that prompts for one, such as `sudo`); it is best effort and
+  says so. Every tool call is printed. The Messages API with a local loop
+  was chosen over Anthropic-hosted agents so no session history is kept
+  on Anthropic's side.
+- **Why Python**: there is no official Anthropic SDK for Rust, and the
+  Python SDK provides streaming, retries and typed errors; brain-chat is a
+  separate process that only reads, so `brain run`'s budget is untouched.
+- **Tests**: offline unit tests (redaction; the tools against a data
+  directory that brain itself ingests; the loop with a scripted model,
+  including the cap, parallel calls, refusals and interruption; the request
+  and a streamed tool call through the real SDK with a mock transport) and
+  a live check against the API that is run by hand.
 
 ## 7. Resource budget
 

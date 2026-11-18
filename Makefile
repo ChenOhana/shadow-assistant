@@ -9,6 +9,9 @@
 #   make uninstall-service  stop and remove the service and its data
 #                           (KEEP_DATA=1: keep the data)
 #   make uninstall          remove the installed binary (and the extension)
+#   make chat-setup         virtual environment for brain-chat (chat/), which
+#                           needs Ubuntu's python3-venv package
+#   make chat-test          brain-chat's offline tests (no API calls)
 #
 # cargo runs as you; only the copy uses sudo, so target/ never becomes
 # root-owned and root needs no Rust toolchain.
@@ -18,7 +21,7 @@ BINDIR ?= $(PREFIX)/bin
 BIN    := target/release/brain
 
 .PHONY: all build install uninstall install-service uninstall-service \
-	install-gnome-extension uninstall-gnome-extension
+	install-gnome-extension uninstall-gnome-extension chat-setup chat-test
 
 all: install
 
@@ -63,3 +66,14 @@ else
 endif
 	rm -f $(UNITDIR)/brain.service
 	systemctl --user daemon-reload
+
+# brain-chat: an LLM chat over brain's data (see chat/README.md).
+CHAT_PY = $(if $(wildcard chat/.venv/bin/python),.venv/bin/python,python3)
+
+chat-setup:
+	python3 -m venv chat/.venv
+	chat/.venv/bin/pip install -q -r chat/requirements.txt
+	@echo "brain-chat ready: chat/brain-chat --data-dir DIR (needs ANTHROPIC_API_KEY)"
+
+chat-test: build
+	cd chat && $(CHAT_PY) -m unittest discover -s tests

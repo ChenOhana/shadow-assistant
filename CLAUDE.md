@@ -102,10 +102,12 @@ src/eventlog.rs          append-only JSONL log: torn-tail repair, line reader
 src/store.rs             SQLite schema (WAL, FTS5), helpers
 src/ingest.rs            log → SQLite, offset advanced in the same transaction
 src/sessions.rs          session rules, open/close, live text, crash recovery
-src/query.rs             `query search` / `query text`, time windows, JSON output
+src/query.rs             `query search|sessions|apps|text`, time windows, JSON output
 src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
                          tier2.rs + vscode/ tier 2 (VS Code diff / replay)
 src/event.rs, timefmt.rs event format, timestamp parsing/formatting
+chat/                    brain-chat (Python): Claude over `brain query` tools,
+                         redaction, the question loop; `make chat-test`
 tests/                   integration tests that drive the real binary;
                          tests/common: `brain run` guard, uinput keyboard,
                          KDE helpers
@@ -143,6 +145,10 @@ tests/                   integration tests that drive the real binary;
   desktop); its private shell must not get a login session, so it cannot
   touch the real session's lock state. Run it after changing gnome.rs or
   the extension.
+- brain-chat (`chat/`) only reads through `brain query`; it never touches
+  the data directory itself. Its offline tests (`make chat-test`) must not
+  call the API; `chat/live_check.py` does, costs money, and runs only with
+  the owner's OK. Keep the redaction in front of every tool result.
 - `brain run`s on separate data directories are supported side by side
   (`tests/two_instances.rs`); one data directory allows one run.
 - `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test
