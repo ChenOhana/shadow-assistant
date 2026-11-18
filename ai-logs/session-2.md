@@ -35081,3 +35081,398 @@ leftover vscode: 0 scopes: 0
 
 </details>
 
+<details><summary>Assistant thinking</summary>
+
+All 14 real-VS-Code tests pass, covering startup, the kill handle, timeouts, network isolation and cleanup. I'm committing the splits and documentation in two steps, with a CLAUDE.md rule to keep the docs complete.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add src/reconstruct/vscode/mod.rs src/reconstruct/tier2.rs && git diff --cached --stat | tail -1 && git commit -q -F - <<'EOF'\nSplit VS Code start and tier 2 jobs into steps\n\nFrom the clean-code review: VsCodeReplayer::start was 187 lines doing\neverything from the sandbox setup to the DevTools connection, and\ntier2::run_job mixed reading the job with both ways of answering it.\n\nstart now reads as its steps: systemd_available (the cap probe, once),\nscope_unit_name, command (the sandboxed command line, environment and\nlog), spawn_with_cdp_pipes (pipes, pre-exec, spawn), register (kill\nids and instance.json) and record_scope. run_job loads a Job struct\n(instead of a 7-tuple), then saved_file_outcome, then replay_outcome.\nSame statements in the same order; doc comments in this commit are\nthe new functions' own. The 14 real-VS-Code tests pass (startup,\nkill, timeout cleanup, no network, dying with the owner).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 - <<'EOF'\np='/home/juan/Documents/shadow-assistant/CLAUDE.md'; s=open(p).read()\nold=\"\"\"- `cargo fmt`, `cargo clippy --all-targets` (zero warnings) and `cargo test`\n  before every commit.\"\"\"\nnew=\"\"\"- `cargo fmt`, `cargo clippy --all-targets` (zero warnings) and `cargo test`\n  before every commit. Every public item has a `///` doc saying what it\n  means (units, where a value comes from), not restating its name:\n  `#![warn(missing_docs)]` in lib.rs makes a missing one a warning.\n  Every `unsafe` block has its own `// SAFETY:` comment.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ngit add src CLAUDE.md && git diff --cached --stat | tail -1 && git commit -q -F - <<'EOF'\nDocument every public item\n\nFrom the clean-code review: 210 public items (mostly struct fields and\nenum variants) had no doc comment. Each now says what it means: units\n(epoch ms, bytes, characters), where a value comes from, and what a\nvariant does. #![warn(missing_docs)] in lib.rs keeps it complete under\nthe zero-warnings rule. Two stale docs are corrected (the layout\nswitch message comes from any desktop, not only KDE; tier 2 is a\nsaved file's diff before a replay); main.rs gets a module doc; and\nthe four unsafe blocks that relied on a neighbour's SAFETY comment\nget their own. No code changes besides two one-line enum variants\nwritten out to hold their field docs.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null; echo \"email: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}') key-shaped: $(grep -rcE 'sk-ant-usr-[A-Za-z0-9]' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -5; git status --short | wc -l",
+  "description": "Commit the splits and the documentation; refresh logs; push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ 2 files changed, 240 insertions(+), 118 deletions(-)
+ 22 files changed, 224 insertions(+), 6 deletions(-)
+email: 0 key-shaped: 0
+4c7df89 Refresh AI logs
+855a1a7 Document every public item
+e522705 Split VS Code start and tier 2 jobs into steps
+6f06ada Type end reasons and tier 2 states as enums
+9c5df43 Refresh AI logs
+0
+[This command modified 1 file you've previously read: CLAUDE.md. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:13:30.048Z</sub>
+
+All four items are done, without changes to logic or design, and the full test suite passes. Everything is pushed (`6f06ada`, `e522705`, `855a1a7`, plus the logs).
+
+**1. Enums for the string-typed states** (`6f06ada`)
+- **`EndReason`** (idle, commit, cancel, field, stop, restart) replaces the `&str` that went through the session code, including the `reason == "commit"` comparison.
+- **`Tier2Status`** names the fixed tier-2 states, and `tier2_skipped`/`tier2_failed` build the free-text ones.
+- **SQL** now binds these values instead of repeating string literals in `sessions.rs`, `ingest.rs` and `tier2.rs`.
+- **Stored values are unchanged,** so the database format is the same; the unit tests that check the stored strings still pass.
+
+**2. Long functions split** (`e522705`)
+- **`VsCodeReplayer::start`** (187 lines) now reads as its steps: probe for the CPU/memory caps, name the scope, build the sandboxed command, spawn with the DevTools pipes, register for cleanup, record the scope.
+- **`tier2::run_job`** loads a `Job` struct (replacing a 7-element tuple), then tries the saved-file diff, then the replay.
+- **Same behaviour:** the same statements run in the same order. All 14 real VS Code tests pass, including startup, killing, timeout cleanup, network isolation, and the instance dying with its owner.
+
+**3. Every public item documented** (`855a1a7`)
+- **The real number was 210, not 85:** the lint also counts struct fields and enum variants. Each doc says what the item means (units, where a value comes from), rather than repeating its name.
+- **Kept complete:** `#![warn(missing_docs)]` in `lib.rs`, together with the zero-warnings rule, so new items can't slip in. CLAUDE.md now states the rule.
+- **Two stale docs corrected:** the layout-switch message now names any desktop, not only KDE, and tier 2 is described as diff-then-replay.
+
+**4. Small items:** `main.rs` has a module doc, and the four `unsafe` blocks that relied on a neighbour's SAFETY comment now have their own.
+
+**How I checked nothing else changed:** I filtered the diff down to lines that aren't comments. Outside the two refactored files, the only code changes are two one-line enum variants written out to hold their field docs, plus the lint line. Formatting, clippy and the generated docs are all clean.
+
+**Tests:** all 133 unit tests and every default suite pass (crash safety, CPU/memory budget, queries, tier 2, two instances), plus the 14 VS Code tests. I didn't rerun the Kate and GNOME desktop tests, since their code only gained comments.
+
+One inaccuracy in a pushed commit message: `e522705` says its doc comments are only the new functions' own, but it also carries a few of the item-3 docs and a SAFETY comment in the same two files, which I committed with the refactor. The code is right; only the message is off. I've left it rather than rewrite pushed history.
+
+## User  <sub>2026-11-18T14:24:01.111Z</sub>
+
+isnt the main.rs too big?
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "wc -l src/main.rs; grep -n '^fn \\|^struct \\|^enum \\|^impl \\|^const \\|^#\\[derive\\|^    /// \\|^    #\\[command' src/main.rs | head -40; awk '/^fn dispatch/,/^}/' src/main.rs | wc -l",
+  "description": "Check main.rs size and structure"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+216 src/main.rs
+13:#[derive(Parser)]
+15:struct Cli {
+16:    /// Directory holding the capture log and the index.
+25:    #[command(subcommand)]
+29:#[derive(Subcommand)]
+30:enum Command {
+31:    /// Capture keystrokes and focus changes, group them into writing sessions
+32:    /// with reconstructed, searchable text, until stopped (Ctrl+C / SIGTERM).
+46:    /// Query what has been captured; prints JSON, with times in local time.
+47:    /// Safe to run while `brain run` is running.
+55:const TIME_HELP: &str = "T is relative (-30s, -15m, -2h, -1d, -1h30m, now), \
+59:#[derive(clap::Args)]
+60:struct TimeArgs {
+61:    /// The 10 minutes ending at T.
+64:    /// Start of the window (with no --to: up to now).
+67:    /// End of the window.
+72:impl From<TimeArgs> for brain::query::TimeFlags {
+82:#[derive(Subcommand)]
+83:enum Query {
+84:    /// Full-text search over writing sessions, newest first. Every word must
+85:    /// appear in the same session, anywhere inside a word, in any case.
+86:    /// Without time flags it searches all sessions; --to alone means up to T.
+87:    #[command(after_help = TIME_HELP)]
+100:    /// Writing sessions in the time window, oldest first, with their full
+101:    /// text: of apps whose id contains A, in windows whose title contains W.
+102:    /// In a terminal each submitted command is a session and the title
+103:    /// usually names the host, so --window HOST lists the commands run
+104:    /// there. Without time flags it covers all time; --to alone means up to T.
+105:    #[command(after_help = TIME_HELP)]
+122:    /// The apps with sessions in the time window, most recently active
+123:    /// first, with session counts: the ids --app accepts. Without time flags
+124:    /// it covers all time.
+125:    #[command(after_help = TIME_HELP)]
+130:    /// What was typed into an app in the time range, reconstructed (edits
+131:    /// applied) per window title with the app's rules; each window's text
+132:    /// starts empty at the start of the range. Without time flags it covers
+133:    /// the last 10 minutes; --to alone means the 10 minutes ending at T.
+134:    #[command(after_help = TIME_HELP)]
+146:fn main() -> ExitCode {
+157:fn dispatch(cli: Cli) -> Result<()> {
+60
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:24:19.295Z</sub>
+
+Not really. It's 216 lines, but almost none of it is logic:
+
+| Part | Lines | What it is |
+|---|---|---|
+| The command-line definition (clap structs and enums) | ~140 | Mostly the `///` comments, which clap turns into the `--help` text you see, plus the flags of 2 commands and 4 query subcommands |
+| `dispatch` | ~60 | Hands each command's arguments to the library: `brain::capture::run`, `brain::query::search/sessions/apps/text`. It looks long because rustfmt puts each argument on its own line |
+| `main` | ~10 | Runs `dispatch`; on error prints `brain: error: …` to stderr and exits 1 |
+
+There's no logic in it. Every decision lives in the library (`capture`, `query`), which is where clean-code guidance wants it. ~200 lines is a normal size for a clap-based CLI, and most of it is user-facing help text that has to exist somewhere.
+
+**If you'd like it tighter anyway,** two options, both purely cosmetic with no behaviour change:
+1. **Move the definition into `src/cli.rs`** (the ~140 lines of structs and help text). `main.rs` shrinks to about 70 lines: `main` and `dispatch`.
+2. **Give `Query` a `run` method** that returns the JSON. The match in `dispatch` becomes one line per command, so `dispatch` shrinks to about 20 lines.
+
+I'd leave it as it is. If you want either, I'd pick option 1; it's the more common Rust layout for a CLI.
+
+## User  <sub>2026-11-18T14:25:56.285Z</sub>
+
+create a main.rs.preview so i can see how it will look like
+
+## Assistant  <sub>2026-11-18T14:26:02.524Z</sub>
+
+I'll write the preview with option 1, my pick: `main.rs` keeps only `main` and `dispatch`, and the clap definitions move to `src/cli.rs`. First the current file, so the preview matches it line for line:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,16p src/main.rs; sed -n 140,216p src/main.rs",
+  "description": "Read the current main.rs header and dispatch"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! The `brain` command line: `brain run` captures until stopped, `brain query`
+//! answers from the captured data and prints JSON. This file only parses the
+//! arguments and reports errors (on stderr, exit code 1); the work is in the
+//! library ([`brain::capture`], [`brain::query`]).
+
+use anyhow::Result;
+use brain::datadir::DataDir;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+/// A shadow assistant: captures what you type and makes it searchable.
+#[derive(Parser)]
+#[command(name = "brain", version, about)]
+struct Cli {
+    /// Directory holding the capture log and the index.
+        app: String,
+        #[command(flatten)]
+        time: TimeArgs,
+    },
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    match dispatch(cli) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("brain: error: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn dispatch(cli: Cli) -> Result<()> {
+    let data_dir = DataDir::new(cli.data_dir);
+    match cli.command {
+        Command::Run {
+            synthetic,
+            vscode_replay,
+        } => {
+            let opts = brain::capture::RunOptions {
+                synthetic_rate: synthetic,
+                vscode_replay,
+            };
+            brain::capture::run(&data_dir, &opts)
+        }
+        Command::Query { query } => {
+            data_dir.ensure_exists()?;
+            let now = brain::timefmt::now_ms();
+            let json =
+                match query {
+                    Query::Search {
+                        query,
+                        app,
+                        time,
+                        limit,
+                    } => serde_json::to_string_pretty(&brain::query::search(
+                        &data_dir,
+                        &query,
+                        app.as_deref(),
+                        &time.into(),
+                        limit,
+                        now,
+                    )?)?,
+                    Query::Sessions {
+                        app,
+                        window,
+                        time,
+                        limit,
+                        offset,
+                    } => serde_json::to_string_pretty(&brain::query::sessions(
+                        &data_dir,
+                        app.as_deref(),
+                        window.as_deref(),
+                        &time.into(),
+                        limit,
+                        offset,
+                        now,
+                    )?)?,
+                    Query::Apps { time } => serde_json::to_string_pretty(&brain::query::apps(
+                        &data_dir,
+                        &time.into(),
+                        now,
+                    )?)?,
+                    Query::Text { app, time } => serde_json::to_string_pretty(
+                        &brain::query::text(&data_dir, &app, &time.into(), now)?,
+                    )?,
+                };
+            println!("{json}");
+            Ok(()
+… [19 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/main.rs.preview",
+  "content": "//! The `brain` command line: `brain run` captures until stopped, `brain query`\n//! answers from the captured data and prints JSON. The arguments are defined\n//! in [`cli`]; this file only dispatches them and reports errors (on stderr,\n//! exit code 1). The work is in the library ([`brain::capture`],\n//! [`brain::query`]).\n\nmod cli;\n\nuse anyhow::Result;\nuse brain::datadir::DataDir;\nuse clap::Parser;\nuse cli::{Cli, Command, Query};\nuse std::process::ExitCode;\n\nfn main() -> ExitCode {\n    let cli = Cli::parse();\n    match dispatch(cli) {\n        Ok(()) => ExitCode::SUCCESS,\n        Err(e) => {\n            eprintln!(\"brain: error: {e:#}\");\n            ExitCode::FAILURE\n        }\n    }\n}\n\nfn dispatch(cli: Cli) -> Result<()> {\n    let data_dir = DataDir::new(cli.data_dir);\n    match cli.command {\n        Command::Run {\n            synthetic,\n            vscode_replay,\n        } => {\n            let opts = brain::capture::RunOptions {\n                synthetic_rate: synthetic,\n                vscode_replay,\n            };\n            brain::capture::run(&data_dir, &opts)\n        }\n        Command::Query { query } => {\n            data_dir.ensure_exists()?;\n            let now = brain::timefmt::now_ms();\n            let json =\n                match query {\n                    Query::Search {\n                        query,\n                        app,\n                        time,\n                        limit,\n                    } => serde_json::to_string_pretty(&brain::query::search(\n                        &data_dir,\n                        &query,\n                        app.as_deref(),\n                        &time.into(),\n                        limit,\n                        now,\n                    )?)?,\n                    Query::Sessions {\n                        app,\n                        window,\n                        time,\n                        limit,\n                        offset,\n                    } => serde_json::to_string_pretty(&brain::query::sessions(\n                        &data_dir,\n                        app.as_deref(),\n                        window.as_deref(),\n                        &time.into(),\n                        limit,\n                        offset,\n                        now,\n                    )?)?,\n                    Query::Apps { time } => serde_json::to_string_pretty(&brain::query::apps(\n                        &data_dir,\n                        &time.into(),\n                        now,\n                    )?)?,\n                    Query::Text { app, time } => serde_json::to_string_pretty(\n                        &brain::query::text(&data_dir, &app, &time.into(), now)?,\n                    )?,\n                };\n            println!(\"{json}\");\n            Ok(())\n        }\n    }\n}\n"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/main.rs.preview (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:26:23.501Z</sub>
+
+I wrote the preview to `/home/juan/Documents/shadow-assistant/src/main.rs.preview`. Cargo ignores it, and it isn't committed.
+
+It comes to 86 lines, more than the ~70 I estimated: what's left is the module doc, `mod cli;`, the imports, `main` and `dispatch`, which is unchanged. The ~140 lines of command-line definition would move to `src/cli.rs` as they are: `Cli`, `Command`, `Query`, `TimeArgs`, the `--help` time text, and the conversion into the library's time flags, made visible to `main.rs`. Nothing about the commands, flags or `--help` output would change.
+
+Most of what remains is `dispatch` (about 60 lines), long because rustfmt puts each argument on its own line. If that still looks too long, option 2 (a `run` method on `Query` in `cli.rs`) would make its match one line per command and bring `main.rs` to about 35 lines.
+
+Should I apply option 1, add option 2 on top, or leave it as is? I'll delete the preview either way.
+
+## User  <sub>2026-11-18T14:28:01.869Z</sub>
+
+it looks good let's apply it
+
+## Assistant  <sub>2026-11-18T14:28:10.654Z</sub>
+
+Applying option 1. The definitions move to `src/cli.rs` as they are, with `pub(crate)` added where `main.rs` needs to reach them; a parent module can't see its child's private items:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nsrc = open('src/main.rs').read()\nstart = src.index(\"/// A shadow assistant: captures what you type and makes it searchable.\")\nend = src.index(\"fn main() -> ExitCode {\")\ndefs = src[start:end].rstrip() + \"\\n\"\n# Visibility for main.rs: the types, Cli's fields; enum variants follow the enum.\nreps = [\n    (\"#[command(name = \\\"brain\\\", version, about)]\\nstruct Cli {\", \"#[command(name = \\\"brain\\\", version, about)]\\npub(crate) struct Cli {\"),\n    (\"#[derive(Subcommand)]\\nenum Command {\", \"#[derive(Subcommand)]\\npub(crate) enum Command {\"),\n    (\"#[derive(clap::Args)]\\nstruct TimeArgs {\", \"#[derive(clap::Args)]\\npub(crate) struct TimeArgs {\"),\n    (\"#[derive(Subcommand)]\\nenum Query {\", \"#[derive(Subcommand)]\\npub(crate) enum Query {\"),\n]\nfor old, new in reps:\n    assert defs.count(old) == 1, old\n    defs = defs.replace(old, new)\n# Cli's two fields.\nimport re\ncli_start = defs.index(\"pub(crate) struct Cli {\")\ncli_end = defs.index(\"\\n}\\n\", cli_start)\nbody = defs[cli_start:cli_end]\nbody2 = re.sub(r\"\\n    (data_dir|command):\", r\"\\n    pub(crate) \\1:\", body)\nassert body2.count(\"pub(crate) data_dir\") == 1 and body2.count(\"pub(crate) command\") == 1, body2\ndefs = defs[:cli_start] + body2 + defs[cli_end:]\ncli = '''//! The command-line arguments of `brain`, defined with clap. The `///`\n//! comments are the `--help` text.\n\nuse clap::{Parser, Subcommand};\nuse std::path::PathBuf;\n\n''' + defs\nopen('src/cli.rs', 'w').write(cli)\npreview = open('src/main.rs.preview').read()\nopen('src/main.rs', 'w').write(preview)\nEOF\nrm src/main.rs.preview && cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; wc -l src/main.rs src/cli.rs",
+  "description": "Move the CLI definitions to src/cli.rs; apply the new main.rs",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 31, in <module>
+FileNotFoundError: [Errno 2] No such file or directory: 'src/main.rs.preview'
+rm: cannot remove 'src/main.rs.preview': No such file or directory
+  216 src/main.rs
+  139 src/cli.rs
+  355 total
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The preview file vanished before the script ran, so `cli.rs` was written but `main.rs` was not replaced. Nothing is broken, since `cli.rs` isn't referenced yet; I'm now writing the new `main.rs` from the preview you approved.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nold = open('src/main.rs').read()\ni = old.index(\"fn main() -> ExitCode {\")\ntail = old[i:]  # main and dispatch, unchanged\nhead = '''//! The `brain` command line: `brain run` captures until stopped, `brain query`\n//! answers from the captured data and prints JSON. The arguments are defined\n//! in [`cli`]; this file only dispatches them and reports errors (on stderr,\n//! exit code 1). The work is in the library ([`brain::capture`],\n//! [`brain::query`]).\n\nmod cli;\n\nuse anyhow::Result;\nuse brain::datadir::DataDir;\nuse clap::Parser;\nuse cli::{Cli, Command, Query};\nuse std::process::ExitCode;\n\n'''\nopen('src/main.rs', 'w').write(head + tail)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; wc -l src/main.rs src/cli.rs; git diff --stat",
+  "description": "Write the new main.rs; lint",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+  85 src/main.rs
+ 139 src/cli.rs
+ 224 total
+ src/main.rs | 147 ++++--------------------------------------------------------
+ 1 file changed, 8 insertions(+), 139 deletions(-)
+[This command modified 1 file you've previously read: src/main.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Clippy passes, and I'm comparing every command's `--help` output against the old release binary from the last test run as the baseline.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "S=/tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad; help() { for c in \"\" \"run\" \"query\" \"query search\" \"query sessions\" \"query apps\" \"query text\"; do echo \"### brain $c\"; $1 $c --help; done; }; help target/release/brain > $S/help_before.txt 2>&1; cargo build --release -q && help target/release/brain > $S/help_after.txt 2>&1; diff $S/help_before.txt $S/help_after.txt && echo \"help identical ($(wc -l < $S/help_after.txt) lines)\"; target/release/brain query apps --data-dir /nonexistent; echo \"exit $?\"",
+  "description": "Diff every command's --help before and after; check error exit",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+help identical (70 lines)
+brain: error: data dir /nonexistent does not exist (start `brain run --data-dir /nonexistent` first)
+exit 1
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:29:00.220Z</sub>
+
+Every command's `--help` is identical (70 lines), and errors still go to stderr with exit code 1. Now the full default suite, which drives the binary through the CLI, and the CLAUDE.md code map:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='CLAUDE.md'; s=open(p).read()\nold=\"src/main.rs              CLI (clap), error → stderr + exit 1\"\nnew=\"src/main.rs              dispatches the commands, error → stderr + exit 1\\nsrc/cli.rs               the command-line definition (clap); its /// is --help\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo test --release 2>&1 | grep -E 'test result|panicked|FAILED' | awk '{print $1,$2,$3,$4,$5,$6}' | sort | uniq -c",
+  "description": "Update the code map; run the default test suite",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+      6 test result: ok. 0 passed; 0
+      3 test result: ok. 1 passed; 0
+      1 test result: ok. 133 passed; 0
+      1 test result: ok. 5 passed; 0
+      1 test result: ok. 7 passed; 0
+```
+
+</details>
+
