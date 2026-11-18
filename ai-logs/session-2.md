@@ -28036,3 +28036,852 @@ A  tests/gnome_e2e.rs
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git commit -q -F - <<'EOF'\nSupport stock Ubuntu's GNOME desktop\n\nGNOME on Wayland gives programs no way to see the focused window, so\nbrain now ships a GNOME Shell extension (packaging/gnome-extension/),\nthe counterpart of the KWin script: on GNOME Shell's own bus\nconnection it signals focus and title changes and layout switches, and\nanswers Current, InputSource and Clipboard. brain trusts it only from\nthe owner of org.gnome.Shell. `make install` installs and enables it\nfor the user when GNOME is present (scripts/gnome-extension.sh); GNOME\nloads it after one login.\n\nThe new GNOME backend (gnome.rs) takes focus, layout switches and\npaste text from the extension, the lock from org.gnome.ScreenSaver, and\nlayouts and key repeat from GSettings, mirroring mutter's keymaps of at\nmost four layouts. Without the extension it warns and files keys under\n`unknown`. Detection picks it from XDG_CURRENT_DESKTOP (ubuntu:GNOME)\nor GNOME Shell on the bus. The clipboard method answers anyone, like\nKlipper (the owner's call). Tier 1 learns GNOME Console; tier 2 knows\nthe VS Code snap's id (code_code). The service starts after GNOME\nShell too.\n\ntests/gnome_e2e.rs runs a real brain against a private headless GNOME\nShell (own D-Bus session with no services to start, own home, own\nsystemd scope): focus to windows without and with a desktop file and\nback, a rename, a switch to Hebrew, the clipboard, and the lock from a\nstand-in, since the private shell has no login session so it cannot\nreach the real session's lock state. A test-only helper extension does\nwhat a user would. It passed 5 runs of 5, leaving nothing behind; the\nKDE desktop tests still pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -3; git status --short | wc -l",
+  "description": "Commit stage 2, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+23af179 Refresh AI logs
+2a07cc7 Support stock Ubuntu's GNOME desktop
+ca94e97 Put capture behind platform interfaces
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:46:08.396Z</sub>
+
+Stock Ubuntu (GNOME) is now supported alongside KDE, and capture sits behind platform interfaces. Everything is pushed (`ca94e97` for the refactor, `2a07cc7` for GNOME), and `ai-logs/` is refreshed. It hasn't been checked on a real stock-Ubuntu login yet, only against a headless GNOME Shell on this machine.
+
+**How it works on GNOME**
+- **The extension:** `brain@shadowassistant`, in `packaging/gnome-extension/`, runs inside GNOME Shell and reports focus and title changes and layout switches (Super+Space), and answers clipboard reads. Your extension list is updated by editing GNOME's setting directly, because GNOME's own enable command doesn't know an extension until the next login.
+- **Who brain trusts:** it accepts these reports only from GNOME Shell itself, as it does with KWin on KDE.
+- **The backend (`gnome.rs`):**
+  - focus, layout switches and paste text come from the extension;
+  - the lock comes from GNOME's own lock service;
+  - layouts and key repeat come from GNOME's settings;
+  - it's chosen automatically, since Ubuntu sets `XDG_CURRENT_DESKTOP=ubuntu:GNOME`.
+- **Installing:** `make install` installs and enables the extension for your user when GNOME is present (`scripts/gnome-extension.sh`). GNOME loads it after one logout and login; until then brain warns and files keys under `unknown`.
+- **Clipboard:** the extension answers any program in your session, like Klipper, as you chose.
+- **Other desktops:** brain warns and keeps capturing, as you chose.
+- **Ubuntu's apps:** GNOME Console is now classed as a terminal, VS Code installed as a snap (`code_code`) works with tier 2, and the service unit also starts after GNOME Shell.
+
+**Tests**
+- **`tests/gnome_e2e.rs`** (`#[ignore]`, about 5 s) runs a real `brain run` against a private headless GNOME Shell. That GNOME has its own D-Bus session (with nothing set up to auto-start), its own home, and its own systemd scope, so your KDE session isn't touched. It checks:
+  - focus moves to a window without a desktop file, to one with a desktop file, and back;
+  - a window rename;
+  - a switch to Hebrew;
+  - the clipboard;
+  - the lock.
+
+  It passed 5 runs out of 5 and left nothing running. A small helper extension, loaded only into the test's GNOME, does what a user would: hide the startup overview, click a window, set the clipboard, switch the layout.
+- **The rest of the suite:** all default tests pass (133 unit tests), plus the KDE Kate tests, the two-instance desktop test and the VS Code tier-2 tests. Clippy and the generated docs are clean.
+
+**Not verified**
+- **No real stock-Ubuntu login yet:** the extension loading at login, and the GNOME lock screen itself. The private GNOME has no login session on purpose, so it can't touch your real session's lock state; the test checks the lock against a stand-in for GNOME's lock service.
+- **Paste from a real key press on GNOME isn't tested end to end.** A headless GNOME has no keyboard, and a virtual Ctrl+V would also reach your KDE desktop. The test checks the extension's clipboard answer; brain's side is the same short D-Bus call as with Klipper.
+
+**One side effect here:** now that GNOME Shell is installed, a `make install` on this machine also installs the extension into your home and adds it to GNOME's enabled list. That does nothing under KDE; `make uninstall` removes it.
+
+**Docs:** the README has a desktop table, GNOME install notes and the `gnome_e2e` command. PLAN.md has the GNOME design, security notes and limitations. CLAUDE.md's code map and rules are updated. "Where the agent failed" now has entry 16, the probe that left a desktop portal running.
+
+**Next step, when you can:** on a real stock-Ubuntu machine or VM, run `make install`, log out and back in, run `brain run`, and check that the start message says `focus tracking via the GNOME Shell extension`. Then switch windows, press Super+Space, paste, and lock the screen, and check the log.
+
+## User  <sub>2026-11-18T11:00:35.828Z</sub>
+
+how can i run the gnome version test myself on the kde
+
+## Assistant  <sub>2026-11-18T11:00:48.468Z</sub>
+
+It already runs on your KDE desktop. The test starts its own private, headless GNOME Shell in the background, so nothing appears on screen and your KDE session isn't touched:
+
+```sh
+cargo test --release --test gnome_e2e -- --ignored --nocapture
+```
+
+It takes about 5–10 s. Everything it needs is already on this machine: `gnome-shell` (you installed it), `gjs`, `python3-gi`, and your user in the `input` group. Nothing is typed, so you can keep working while it runs.
+
+**What it does:**
+1. Creates a temporary home with brain's extension installed and the layouts us + il.
+2. Starts a private D-Bus session and a headless GNOME Shell inside their own systemd scope, `brain-gnome-test-<pid>`.
+3. Runs a real `brain run` against that GNOME and checks its log for:
+   - focus moving to a GTK window, then to a second one that has a `.desktop` file, then back;
+   - the first window renaming itself;
+   - a switch to Hebrew;
+   - the extension returning the clipboard text;
+   - the screen lock.
+4. Stops brain and the scope, and fails if any process from that private session is still running.
+
+**If it fails,** it prints the last lines of each log (brain, GNOME Shell, the test windows) and brain's focus events before cleaning up, so you can see what went wrong.
+
+**To confirm nothing was left behind afterwards** (both counts should be 0):
+```sh
+ps -eo args | grep -c '[g]nome-shell --headless'; systemctl --user list-units --type=scope | grep -c brain-gnome-test
+```
+
+## User  <sub>2026-11-18T11:01:37.112Z</sub>
+
+i want to test it with real keyboard press
+
+## Assistant  <sub>2026-11-18T11:02:11.284Z</sub>
+
+Two ways to do that from your KDE machine. First, a check of whether GNOME's "devkit" mode, which shows a GNOME Shell in a window, is available here, since that's the easiest:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls /usr/libexec/mutter-devkit /usr/bin/mutter-devkit 2>&1; apt-cache policy mutter-dev-bin gnome-session 2>/dev/null | grep -E '^[a-z]|Installed|Candidate'; ls /usr/share/wayland-sessions/ 2>&1; apt-cache depends --no-recommends gnome-session 2>/dev/null | head -12",
+  "description": "Check for GNOME devkit and a GNOME login session package"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ls: cannot access '/usr/libexec/mutter-devkit': No such file or directory
+ls: cannot access '/usr/bin/mutter-devkit': No such file or directory
+mutter-dev-bin:
+  Installed: (none)
+  Candidate: 50.1-0ubuntu2.5
+gnome-session:
+  Installed: (none)
+  Candidate: 50.1-0ubuntu0.1
+plasma.desktop
+gnome-session
+  Depends: adwaita-icon-theme
+  Depends: fonts-adwaita
+  Depends: gnome-session-bin
+  Depends: gnome-session-bin
+  Depends: gnome-session-common
+  Depends: gnome-settings-daemon
+  Depends: gnome-shell
+  Depends: xdg-desktop-portal-gnome
+  Depends: xwayland
+  Suggests: desktop-base
+  Suggests: fonts-cantarell
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:02:32.776Z</sub>
+
+Yes, two ways, depending on how real you want it.
+
+**A. GNOME in a window on your KDE desktop (quickest; you stay logged in)**
+- GNOME 50 can show a GNOME Shell in a normal window ("devkit" mode). It needs one package: `sudo apt install --no-install-recommends mutter-dev-bin`.
+- I'd add a script, `scripts/try-gnome.sh`, that:
+  - starts that GNOME in its own D-Bus session, temporary home and systemd scope, like the test, with brain's extension enabled and the layouts us + il;
+  - opens Kate inside it;
+  - runs `brain run` against it, printing its log live.
+- You type into the window for real: brain reads your actual keyboard, gets focus from the extension in that GNOME, and you can open apps in it, paste, and switch layouts with Super+Space.
+- Close the window or press Ctrl+C, and everything stops.
+
+Caveats:
+- **Everything you type is recorded,** including in your KDE apps outside the window, and it's filed under whatever has focus inside the GNOME window. So type only in the window while it runs.
+- **KDE shortcuts may get there first:** shortcuts KDE has taken itself (some Meta combinations) may never reach the window.
+- **No lock test:** that GNOME has no login session, on purpose, so it can't lock.
+- **Untested here:** I haven't run devkit mode on this machine yet; I'd test the script before handing it to you.
+
+**B. A real GNOME login (closest to stock Ubuntu)**
+1. Install the session: `sudo apt install --no-install-recommends gnome-session`. That adds a "GNOME" entry to SDDM's session menu, and SDDM stays your login screen.
+2. Run `make install`, which installs the extension for your user.
+3. Log out, pick "GNOME" in SDDM, and log in. The extension loads at that login.
+4. In a terminal there (Konsole works), run `brain run --data-dir /tmp/brain-gnome`, then type in apps, switch with Super+Space, paste, and check the log with `brain query text`.
+
+Caveats:
+- **The lock screen may not work under SDDM.** GNOME's lock screen authenticates through GDM, Ubuntu's normal login manager, and I haven't verified whether it locks at all without it. The lock step may not be possible here; on real stock Ubuntu (with GDM) it would be.
+- **A minimal GNOME:** the `--no-install-recommends` session comes without GNOME's usual apps (Files, Settings), so you'd use your KDE apps inside it.
+
+I'd suggest **A** for a quick check of keys, focus, paste and layouts without logging out, and **B** if you want the real login experience. Which one? For A, please install `mutter-dev-bin` and I'll write and test the script.
+
+## User  <sub>2026-11-18T11:41:23.625Z</sub>
+
+ok it looks good :) let's run our final review, checklist, tests, make it ready for submission
+
+## Assistant  <sub>2026-11-18T11:41:53.932Z</sub>
+
+I'll start by checking whether anything changed since my last commit, since several files are reported as changed on disk.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git status --short; git log --oneline -3; git diff --stat",
+  "description": "Check for uncommitted changes since the last commit"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+23af179 Refresh AI logs
+2a07cc7 Support stock Ubuntu's GNOME desktop
+ca94e97 Put capture behind platform interfaces
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:42:02.190Z</sub>
+
+The tree is clean; those notices were from my own formatting runs. Starting the review with the mechanical checks:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt --check && echo fmt-ok; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -cE '^warning'; grep -rn 'TODO\\|FIXME\\|XXX\\|dbg!' src tests packaging scripts --include=*.rs --include=*.js --include=*.sh --include=*.py | grep -v 'TODO: call Dana' | head; git ls-files | grep -vE '^(ai-logs|src|tests)/' ; wc -l README.md PLAN.md CLAUDE.md",
+  "description": "Lint, docs, markers and tracked files",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fmt-ok
+0
+0
+(eval):1: no matches found: --include=*.rs
+.gitignore
+CLAUDE.md
+Cargo.lock
+Cargo.toml
+Makefile
+PLAN.md
+README.md
+packaging/brain.service
+packaging/gnome-extension/brain@shadowassistant/extension.js
+packaging/gnome-extension/brain@shadowassistant/metadata.json
+scripts/export-ai-logs.py
+scripts/gnome-extension.sh
+scripts/setup-test-permissions.sh
+  609 README.md
+  687 PLAN.md
+  157 CLAUDE.md
+ 1453 total
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'TODO\\|FIXME\\|XXX\\|dbg!' src tests packaging scripts | grep -v 'TODO: call Dana\\|todo_text' | head",
+  "description": "Search for leftover markers"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:42:12.888Z</sub>
+
+Clean. Now reading the README in full against the code:
+
+**Tool call: `Read`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/README.md",
+  "limit": 140
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+1	# brain — a shadow assistant for Linux
+2	
+3	`brain` runs on your computer, follows what you type in each application and
+4	lets you search it later.
+5	
+6	```
+7	brain run                      # capture keystrokes + focus changes, store them
+8	brain query search "<words>"   # full-text search over writing sessions
+9	brain query text --app A       # what was typed into an app, reconstructed
+10	```
+11	
+12	> **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
+13	> the AI transcripts are in [ai-logs/](ai-logs/).
+14	
+15	## Supported OS
+16	
+17	Ubuntu (tested on 26.04), on Wayland, with either desktop:
+18	
+19	| Desktop | Focus tracking | Paste text | Screen lock | Layouts |
+20	|---|---|---|---|---|
+21	| **KDE Plasma 6** (Kubuntu, or Ubuntu with Plasma) | KWin script, loaded by brain itself | Klipper | `org.freedesktop.ScreenSaver` | kxkbrc, Alt+Shift and tray switches |
+22	| **GNOME** (stock Ubuntu) | brain's GNOME Shell extension (`make install`, then log out and in once) | the extension | `org.gnome.ScreenSaver` | GNOME's input sources, Super+Space switches |
+23	
+24	Key capture itself works on any Linux. On another desktop, `brain run`
+25	warns and still captures keys, attributed to the app `unknown`, without
+26	paste text, and detects the lock screen only if the desktop implements
+27	`org.freedesktop.ScreenSaver`, so **an unlock password may be recorded
+28	there**. The optional VS Code tier 2 (`--vscode-replay`) works on both
+29	desktops; it replays into VS Code when a file was not saved, which needs
+30	VS Code installed (`/usr/bin/code`, or the snap).
+31	
+32	## Build
+33	
+34	```sh
+35	# Rust toolchain (https://rustup.rs), then:
+36	cargo build --release
+37	# binary: target/release/brain
+38	
+39	# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+40	make
+41	```
+42	
+43	SQLite is bundled. libxkbcommon is loaded from the runtime library
+44	`libxkbcommon.so.0` that every Wayland desktop ships, so no `-dev`
+45	packages are needed.
+46	
+47	## Permissions
+48	
+49	`brain` reads keyboards directly from `/dev/input/event*` (read-only,
+50	never grabbed, so it cannot add input lag). Your user must be in the `input`
+51	group:
+52	
+53	```sh
+54	sudo usermod -aG input "$USER"   # then log out and back in
+55	```
+56	
+57	Note that the `input` group can read every input device. That is the price of
+58	display-server-independent capture (see PLAN.md for the alternatives).
+59	
+60	**On GNOME**, brain also needs its GNOME Shell extension: Wayland gives
+61	programs no way to see the focused window, and on KDE brain loads a KWin
+62	script for that by itself, but GNOME only loads extensions at login.
+63	`make install` installs and enables it for your user when GNOME is
+64	installed (or `make install-gnome-extension` alone); log out and back in
+65	once. Until then brain warns and files keys under `unknown`. The extension
+66	answers brain's clipboard reads at a paste, and any program in your session
+67	could ask it the same, as with KDE's 
+… [3764 more characters in the raw transcript]
+````
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:42:19.358Z</sub>
+
+Two fixes so far: `make` now also installs the GNOME extension, which the Build section doesn't say, and a paragraph in the service section wraps oddly. Continuing:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 318,345p README.md; echo ......; sed -n 395,470p README.md",
+  "description": "Read README decisions and running sections"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+  For an instant, exact match, put the full path in the title (VS Code
+  setting `"window.title": "${dirty}${activeEditorLong}${separator}${rootName}${separator}${appName}"`).
+
+Inspect the result:
+
+```sh
+sqlite3 -readonly ~/brain-data/brain.db \
+  "SELECT id, app, started_at, ended_at, status, end_reason, tier_used, tier2_status, reconstructed_text FROM sessions"
+```
+
+A GUI such as DB Browser for SQLite keeps a read transaction open and shows
+the database as of when it started: sessions that have closed since still
+look `open`, and SQLite cannot shrink its WAL file meanwhile. Open the
+database read-only and reopen it to see the current state.
+
+## Decisions and edge cases
+
+**Platform and capture**
+* **Linux, KDE Plasma 6 and GNOME on Wayland.** Wayland gives applications
+  no way to observe other apps' keystrokes, so `brain` reads the kernel's
+  input devices (evdev) passively: read-only, never grabbed, so it cannot
+  add input lag. Focus (app + window title) comes from inside the
+  compositor: a small KWin script on KDE, a GNOME Shell extension on GNOME,
+  both reporting over D-Bus, and brain trusts only reports sent from the
+  compositor's own bus connection. PLAN.md compares the alternatives.
+* **Platform layer.** Capture sits behind interfaces
+  (`src/capture/platform.rs`): keys from evdev work on any Linux desktop;
+  focus, clipboard, lock and keyboard settings come from a backend per
+......
+  same window with the mouse (invisible to brain) within 1 s of the last
+  keystroke would wrongly count as one.
+* **30 s idle per window; focus loss alone never ends a session.** Enter
+  ends a session only in single-line fields (shell prompts, chat boxes,
+  browser address/search bars, launchers such as KRunner, by app class);
+  elsewhere it is a newline. In browsers and chat apps, Shift+Enter is a
+  newline.
+* **Single-line fields start each session empty**; editors keep their
+  document across sessions. Window titles of single-line fields are
+  reused by unrelated fields ("New tab", "~"), so carrying text over would
+  mix them.
+* **Reconstruction is incremental**: each key is applied once to the open
+  session's in-memory buffer, and open sessions' text is refreshed in the
+  index every second, so search sees what is being typed now. (The design
+  reconstructed at close and rebuilt open sessions at query time; the
+  result is the same, the cost is not.) VS Code tier 2 runs at close.
+* **Unknown cursor = end of the text**: after `brain run` restarts, and at
+  the start of a VS Code replay.
+* **Shell history recall** (Up) uses only the commands `brain` saw being
+  run in that terminal app; history from before, tab completion and shell
+  autosuggestions (zsh) are not visible, so those lines can be wrong.
+* **Sessions that changed nothing leave no row** (cursor movement only, a
+  typo typed and deleted, whitespace). With VS Code tier 2, the saved file
+  decides: a session whose diff is empty is removed once the worker has
+  checked it.
+* **VS Code tier 2 
+… [3052 more characters in the raw transcript]
+````
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The README needs a decisions bullet on how far GNOME was verified, and I'm checking the code docs for stale "KDE only" wording before reviewing the new GNOME code.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'KDE Plasma today\\|KDE Plasma is\\b\\|(KDE Plasma is)\\|needs KDE\\|only KDE\\|KDE only' src packaging scripts Makefile | head; grep -rn 'Kate\\b' src/capture | head -3; sed -n 1,12p src/capture/linux/desktop.rs",
+  "description": "Search code docs for stale KDE-only wording"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/linux/kde.rs:72:                     'unknown' (needs KDE Plasma/KWin): {e:#}"
+//! Desktop environments: what `brain` needs from the desktop besides the
+//! keys, behind one interface per environment.
+//!
+//! | Backend          | Focus      | Clipboard | Screen lock                   | Keyboard settings          |
+//! |------------------|------------|-----------|-------------------------------|----------------------------|
+//! | KDE Plasma       | KWin script| Klipper   | `org.freedesktop.ScreenSaver` | kxkbrc, kcminputrc, layout switch signals |
+//! | GNOME            | brain's GNOME Shell extension | the extension | `org.gnome.ScreenSaver` | GSettings, layout switch signals from the extension |
+//! | anything else    | none (`unknown`) | none | `org.freedesktop.ScreenSaver` if the desktop has it | `XKB_DEFAULT_*`, systemd-localed |
+//!
+//! A new desktop is one more [`Desktop`] implementation and a line in
+//! [`detect`]; the key capture does not change.
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:42:42.776Z</sub>
+
+Fine: the one hit is inside the KDE backend's own message. Reviewing `gnome.rs` as it stands now:
+
+**Tool call: `Read`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/gnome.rs",
+  "offset": 60,
+  "limit": 180
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+60	        }
+61	    }
+62	
+63	    fn keyboard(&self, system: Option<&Connection>) -> (LayoutSpec, RepeatConfig) {
+64	        let sources = input_sources();
+65	        let spec = layouts_for(&sources, 0, &xkb_options())
+66	            .map(|(spec, _)| spec)
+67	            .unwrap_or_else(|| system_layout(system));
+68	        (spec, repeat_settings())
+69	    }
+70	
+71	    fn start(&self, ctx: DesktopContext<'_>) -> Box<dyn DesktopSession> {
+72	        let conn = match Connection::session() {
+73	            Ok(c) => c,
+74	            Err(e) => {
+75	                eprintln!("brain: warning: no session bus, focus tracking unavailable: {e:#}");
+76	                return Box::new(GnomeSession { extension: false });
+77	            }
+78	        };
+79	        let extension = match call::<(String, String, String)>(&conn, "Current") {
+80	            Ok((desktop_file, class, title)) => {
+81	                ctx.recorder
+82	                    .set_focus(&app_id(&desktop_file, &class), &title, false);
+83	                true
+84	            }
+85	            Err(_) => {
+86	                eprintln!(
+87	                    "brain: warning: brain's GNOME Shell extension (brain@shadowassistant) is \
+88	                     not active, so keys are attributed to 'unknown', pastes are not resolved \
+89	                     and layout switches are not followed. Install it with `make install`, then \
+90	                     log out and back in once; brain picks it up as soon as it runs."
+91	                );
+92	                false
+93	            }
+94	        };
+95	        let recorder = ctx.recorder.clone();
+96	        spawn_signal_watch(&conn, SHELL, EXT_IFACE, "Focus", None, move |msg| {
+97	            if let Ok((desktop_file, class, title, renamed)) =
+98	                msg.body().deserialize::<(String, String, String, bool)>()
+99	            {
+100	                recorder.set_focus(&app_id(&desktop_file, &class), &title, renamed);
+101	            }
+102	        });
+103	        watch_lock(&conn, &GNOME_LOCK, ctx.recorder.clone());
+104	        watch_layouts(&conn, ctx.input.clone());
+105	        Box::new(GnomeSession { extension })
+106	    }
+107	}
+108	
+109	struct GnomeSession {
+110	    extension: bool,
+111	}
+112	
+113	impl DesktopSession for GnomeSession {
+114	    fn focus_tracking(&self) -> &'static str {
+115	        if self.extension {
+116	            "via the GNOME Shell extension"
+117	        } else {
+118	            "waiting for the GNOME Shell extension"
+119	        }
+120	    }
+121	
+122	    fn stop(&self) {}
+123	}
+124	
+125	/// Calls a method of brain's extension, on GNOME Shell's connection.
+126	fn call<T>(conn: &Connection, method: &str) -> Result<T>
+127	where
+128	    T: for<'d> serde::Deserialize<'d> + zbus::zvariant::Type,
+129	{
+130	    Ok(conn
+131	        .call_method(Some(SHELL), EXT_PATH, Some(EXT_IFACE), method, &())?
+132	        .body()
+133	        .deserialize()?)
+134	}
+135	
+136	/// Reads the clipboard through the extension. Uses its own connection with 
+… [3814 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two edge cases when `brain run` starts before GNOME Shell loads the extension: the active layout won't be known until the next switch, and the warning wrongly implies a reinstall. I'll have the extension announce the current layout on enable and reword the warning to say the extension isn't active yet.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('packaging/gnome-extension/brain@shadowassistant/extension.js',[\n(\"\"\"        this._sourcesId = this._sources.connect('sources-changed', () =>\n            this._dbus.emit_signal('InputSourcesChanged', null));\n\n        this._onFocus();\n    }\"\"\",\"\"\"        this._sourcesId = this._sources.connect('sources-changed', () =>\n            this._dbus.emit_signal('InputSourcesChanged', null));\n\n        // A brain already running (started before GNOME loaded this) learns\n        // the current window and layout now.\n        this._onFocus();\n        this._dbus.emit_signal('InputSourceChanged',\n            new GLib.Variant('(s)', [this.InputSource()]));\n    }\"\"\"),\n])\nedit('src/capture/linux/gnome.rs',[\n(\"\"\"                    \"brain: warning: brain's GNOME Shell extension (brain@shadowassistant) is \\\\\n                     not active, so keys are attributed to 'unknown', pastes are not resolved \\\\\n                     and layout switches are not followed. Install it with `make install`, then \\\\\n                     log out and back in once; brain picks it up as soon as it runs.\\\"\"\"\",\"\"\"                    \"brain: warning: brain's GNOME Shell extension (brain@shadowassistant) is \\\\\n                     not active (yet): until it is, keys are attributed to 'unknown', pastes \\\\\n                     are not resolved and layout switches are not followed. If it is not \\\\\n                     installed, run `make install` and log out and back in once; brain picks \\\\\n                     it up as soon as it runs.\\\"\"\"\"),\n])\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'",
+  "description": "Announce the layout on extension enable; soften the warning",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+[This command modified 2 files you've previously read: src/capture/linux/gnome.rs, packaging/gnome-extension/brain@shadowassistant/extension.js. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'll extend the GNOME test to cover a disable-and-re-enable cycle through Shell's extensions interface, then check that brain re-reads the window and layout afterward.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'keyboard layout switched to il (#1)' -B3 -A3 tests/gnome_e2e.rs",
+  "description": "Find the layout-switch step in the GNOME test"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+451-    wait_until(
+452-        "brain to follow the layout switch",
+453-        Duration::from_secs(10),
+454:        || brain_log().contains("keyboard layout switched to il (#1)"),
+455-    );
+456-
+457-    // The extension hands out the clipboard (what brain reads at a paste).
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/gnome_e2e.rs'; s=open(p).read()\nold=\"\"\"        || brain_log().contains(\"keyboard layout switched to il (#1)\"),\n    );\n\n    // The extension hands out the clipboard (what brain reads at a paste).\"\"\"\nnew=\"\"\"        || brain_log().contains(\"keyboard layout switched to il (#1)\"),\n    );\n\n    // GNOME disables extensions while the screen is locked and enables them\n    // again after (and loads them after a brain started early at login):\n    // once re-enabled, the extension re-reports the window and layout.\n    let switches = || brain_log().matches(\"keyboard layout switched to il\").count();\n    let focus_events = events(&data).len();\n    for method in [\"DisableExtension\", \"EnableExtension\"] {\n        gnome\n            .call(\n                \"/org/gnome/Shell\",\n                &format!(\"org.gnome.Shell.Extensions.{method}\"),\n                &[EXTENSION],\n            )\n            .unwrap();\n    }\n    wait_until(\"the re-enabled extension's reports\", Duration::from_secs(10), || {\n        switches() == 2\n            && events(&data)[focus_events..]\n                .iter()\n                .any(|e| e[\"type\"] == \"focus\" && e[\"app\"] == \"org.shadowassistant.TestWindow\")\n    });\n\n    // The extension hands out the clipboard (what brain reads at a paste).\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\ns=open(p).read()\ns=s.replace(\"\"\"//! * a layout switch to Hebrew, which brain applies to key resolution;\"\"\",\"\"\"//! * a layout switch to Hebrew, which brain applies to key resolution;\n//! * the window and layout again after the extension is disabled and\n//!   re-enabled (GNOME does that around the lock screen);\"\"\")\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; for i in 1 2 3; do timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -E 'test result|panicked|timed out|left running'; done; echo \"leftover gnome: $(ps -eo args | grep -c '[g]nome-shell --headless') scopes: $(systemctl --user list-units --type=scope --no-pager | grep -c brain-gnome-test)\"",
+  "description": "Test extension re-enable in the GNOME test; run three times",
+  "timeout": 700000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+thread 'brain_follows_a_real_gnome_shell' (870884) panicked at tests/gnome_e2e.rs:54:9:
+timed out waiting for the re-enabled extension's reports
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.29s
+thread 'brain_follows_a_real_gnome_shell' (871637) panicked at tests/gnome_e2e.rs:54:9:
+timed out waiting for the re-enabled extension's reports
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.07s
+thread 'brain_follows_a_real_gnome_shell' (872350) panicked at tests/gnome_e2e.rs:54:9:
+timed out waiting for the re-enabled extension's reports
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.09s
+leftover gnome: 0 scopes: 0
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:44:34.478Z</sub>
+
+Failing every time, so it's systematic. I'll look at the details:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -vE 'dbus-daemon|Activat|^\\s*$' | sed -n '/panicked/,$p' | grep -vE 'CalendarServer|Stack trace|asyncCallback|init.js|NM.Object|camera|AuthenticationAgent|GDM|Gjs-WARNING|DeprecationWarning|register_object' | head -40",
+  "description": "Rerun once with failure details",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+thread 'brain_follows_a_real_gnome_shell' (873079) panicked at tests/gnome_e2e.rs:54:9:
+timed out waiting for the re-enabled extension's reports
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--- brain.log (last lines):
+brain: capturing from 1 keyboard(s), desktop GNOME, focus tracking via the GNOME Shell extension, layout us,il; data in /tmp/.tmp0ez7Ja/data
+brain: keyboard layout switched to il (#1)
+brain: keyboard layout switched to il (#1)
+brain: received signal 15, stopping
+--- shell.log (last lines):
+invoking IsSupported() failed for remote volume monitor with dbus name org.gtk.vfs.UDisks2VolumeMonitor:: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gtk.vfs.UDisks2VolumeMonitor was not provided by any .service files (g-dbus-error-quark, 2)
+invoking IsSupported() failed for remote volume monitor with dbus name org.gtk.vfs.MTPVolumeMonitor:: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gtk.vfs.MTPVolumeMonitor was not provided by any .service files (g-dbus-error-quark, 2)
+invoking IsSupported() failed for remote volume monitor with dbus name org.gtk.vfs.GPhoto2VolumeMonitor:: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gtk.vfs.GPhoto2VolumeMonitor was not provided by any .service files (g-dbus-error-quark, 2)
+invoking IsSupported() failed for remote volume monitor with dbus name org.gtk.vfs.AfcVolumeMonitor:: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gtk.vfs.AfcVolumeMonitor was not provided by any .service files (g-dbus-error-quark, 2)
+invoking IsSupported() failed for remote volume monitor with dbus name org.gtk.vfs.GoaVolumeMonitor:: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gtk.vfs.GoaVolumeMonitor was not provided by any .service files (g-dbus-error-quark, 2)
+GNOME Shell-Message: 13:44:39.843: GNOME Shell started at Wed Nov 18 2026 13:44:38 GMT+0200 (Israel Standard Time)
+--- window.log (last lines):
+--- app.log (last lines):
+--- screensaver.log (last lines):
+--- brain's focus events:
+{"app":"org.shadowassistant.TestWindow","ts":"2026-11-18T11:44:41.111Z","type":"focus","window":"brain gnome test"}
+{"app":"org.shadowassistant.TestWindow","renamed":true,"ts":"2026-11-18T11:44:42.097Z","type":"focus","window":"brain gnome test renamed"}
+{"app":"org.shadowassistant.TestApp","ts":"2026-11-18T11:44:42.332Z","type":"focus","window":"brain test app"}
+{"app":"org.shadowassistant.TestWindow","ts":"2026-11-18T11:44:42.365Z","type":"focus","window":"brain gnome test renamed"}
+{"app":"unknown","ts":"2026-11-18T11:44:53.744Z","type":"focus","window":""}
+test brain_follows_a_real_gnome_shell ... FAILED
+failures:
+failures:
+    brain_follows_a_real_gnome_shell
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 17.30s
+error: test failed, to rerun pass `--test gnome_e2e`
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The layout check passes now, since brain heard "il" again after re-enabling. The focus failure was my test's fault: the recorder correctly wrote nothing because the window was unchanged, so I'm rewriting the test to switch windows while the extension is disabled and expect the new one on re-enable.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/gnome_e2e.rs'; s=open(p).read()\ni=s.index(\"    // GNOME disables extensions while the screen is locked\")\nj=s.index(\"    // The extension hands out the clipboard\")\nnew='''    // GNOME disables extensions while the screen is locked and enables them\n    // again after (and may load them after a brain started early at login).\n    // Focus that moved meanwhile, and the layout, arrive on re-enable.\n    let extensions = |method: &str| {\n        gnome\n            .call(\n                \"/org/gnome/Shell\",\n                &format!(\"org.gnome.Shell.Extensions.{method}\"),\n                &[EXTENSION],\n            )\n            .unwrap();\n    };\n    let switches = || brain_log().matches(\"keyboard layout switched to il\").count();\n    let before = events(&data).len();\n    extensions(\"DisableExtension\");\n    gnome\n        .call(\n            \"/org/shadowassistant/TestHelper\",\n            \"org.shadowassistant.TestHelper.ActivateWindow\",\n            &[\"brain test app\"],\n        )\n        .unwrap();\n    extensions(\"EnableExtension\");\n    wait_until(\"the re-enabled extension's reports\", Duration::from_secs(10), || {\n        switches() == 2\n            && events(&data)[before..]\n                .iter()\n                .any(|e| e[\"type\"] == \"focus\" && e[\"app\"] == \"org.shadowassistant.TestApp\")\n    });\n\n'''\ns=s[:i]+new+s[j:]\ns=s.replace(\"\"\"//! * the window and layout again after the extension is disabled and\n//!   re-enabled (GNOME does that around the lock screen);\"\"\",\"\"\"//! * focus that moved while the extension was disabled, and the layout,\n//!   once it is enabled again (GNOME does that around the lock screen);\"\"\")\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; for i in 1 2 3 4 5; do timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -E 'test result|panicked|timed out|left running'; done; echo \"leftover gnome: $(ps -eo args | grep -c '[g]nome-shell --headless') scopes: $(systemctl --user list-units --type=scope --no-pager | grep -c brain-gnome-test)\"",
+  "description": "Change focus while the extension is off; run five times",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.30s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.12s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.24s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.37s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.42s
+leftover gnome: 0 scopes: 0
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:45:49.791Z</sub>
+
+5 out of 5 pass, nothing left behind. Now the README fixes from the review, and PLAN's test description:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"# or build and install to /usr/bin/brain (asks for sudo for the copy only):\nmake\"\"\",\"\"\"# or build and install to /usr/bin/brain (asks for sudo for the copy only),\n# plus brain's GNOME Shell extension for your user when GNOME is installed:\nmake\"\"\"),\n(\"\"\"Only one `brain run` can use a data directory at a time; runs on separate\ndirectories work side by side (a test run next to the service, say), and\neach records everything you type. The service runs\nwithout `--vscode-replay`; add it to `ExecStart` in\n`~/.config/systemd/user/brain.service` to turn it on.\"\"\",\"\"\"Only one `brain run` can use a data directory at a time; runs on separate\ndirectories work side by side (a test run next to the service, say), and\neach records everything you type. The service runs without\n`--vscode-replay`; add it to `ExecStart` in\n`~/.config/systemd/user/brain.service` to turn it on.\"\"\"),\n(\"\"\"* **Platform layer.** Capture sits behind interfaces\"\"\",\"\"\"* **GNOME is verified against a real GNOME Shell, run headless** by\n  `tests/gnome_e2e.rs`: focus, renames, layout switches, the clipboard,\n  and the extension being disabled and re-enabled, as GNOME does around\n  the lock screen. Its lock screen is checked only through a stand-in for\n  GNOME's lock service, and a real stock-Ubuntu login has not been tried\n  yet.\n* **Platform layer.** Capture sits behind interfaces\"\"\"),\n])\nedit('PLAN.md',[\n(\"\"\"  installed: focus to a window without and with a desktop file, focus\n  back, a rename, a switch to Hebrew, the clipboard, and the lock (from a\"\"\",\"\"\"  installed: focus to a window without and with a desktop file, focus\n  back, a rename, a switch to Hebrew, focus and layout re-reported when the\n  extension is re-enabled (as around the lock screen), the clipboard, and\n  the lock (from a\"\"\"),\n])\nEOF\ngrep -n 'gnome_e2e' README.md PLAN.md CLAUDE.md | cut -c1-110",
+  "description": "Apply README and PLAN review fixes"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+CLAUDE.md:141:- `tests/gnome_e2e.rs` (`#[ignore]`) starts a private headless GNOME Shell
+PLAN.md:628:  `gnome_e2e` runs a real `brain run` against a private, headless GNOME
+README.md:345:  `tests/gnome_e2e.rs`: focus, renames, layout switches, the clipboard,
+README.md:500:cargo test --release --test gnome_e2e -- --ignored --nocapture
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:46:01.547Z</sub>
+
+Docs are consistent. Now the full test run, everything including the opt-in suites. Default suite and the headless VS Code tests first:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'; cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'Running|test result|FAILED|panicked' | sed 's/(target.*//'",
+  "description": "Run the default suite and the VS Code tests",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+     Running unittests src/lib.rs 
+test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.85s
+     Running tests/gnome_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.16s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 52.96s
+     Running tests/vscode_replay.rs 
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 251.85s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:52:46.756Z</sub>
+
+Now the real-desktop suites: the Kate tests, two instances, and GNOME.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "[ \"$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\" = \"false\" ] && echo unlocked && cargo test --release --test real_keyboard_e2e --test repeat_e2e --test two_instances --test gnome_e2e -- --ignored --nocapture --test-threads=1 2>&1 | grep -E 'Running|kate [AB]|^a: |test result|panicked|timed out' | sed 's/(target.*//'; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') gnome=$(ps -eo args | grep -c '[g]nome-shell --headless') vscode=$(ps -eo args | grep -cE '[c]ode .*remote-debugging-pipe') scopes=$(systemctl --user list-units --type=scope --no-pager | grep -cE 'brain-(gnome-test|vscode)') tmp=$(ls -d /tmp/.tmp* 2>/dev/null | wc -l) layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"",
+  "description": "Run all real-desktop suites; check for leftovers",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+unlocked
+     Running tests/gnome_e2e.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.23s
+     Running tests/real_keyboard_e2e.rs 
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.10s
+     Running tests/repeat_e2e.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.45s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.25s
+(eval):1: no matches found: /tmp/.tmp*
+leftover: brain=0 kate=0 gnome=0 vscode=0 scopes=0 tmp=0 layout=0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T11:53:45.658Z</sub>
+
+Every suite passes and nothing is left behind. Committing, then the fresh-clone check:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A && git commit -q -F - <<'EOF'\nRe-report focus and layout when GNOME loads us\n\nA final review found that a brain started before GNOME Shell loaded the\nextension (a service at login) would not learn the active layout until\nthe next switch, and that its warning told the user to install the\nextension when it might only be loading. The extension now announces\nthe current layout as well as the focused window when it is enabled,\nwhich also covers GNOME re-enabling extensions after the lock screen,\nand the warning says \"not active (yet)\".\n\ntests/gnome_e2e.rs now disables the extension, moves the focus,\nre-enables it, and expects the new window and the layout in brain's\nlog (5 runs of 5). The README says how far GNOME is verified (a real\nbut headless GNOME Shell; the lock screen only through a stand-in; no\nreal stock-Ubuntu login yet), that `make` also installs the extension,\nand PLAN.md lists the new check.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\nC=/tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/clone; rm -rf $C; git clone -q . $C && cd $C && echo \"untracked in clone: $(git status --short | wc -l)\" && CARGO_TARGET_DIR=$C-target cargo test --release 2>&1 | grep -E 'test result|^error' | awk '{print $1,$2,$3,$4,$5,$6}' | sort | uniq -c; cd /; rm -rf $C $C-target",
+  "description": "Commit, then build and test a fresh clone",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+untracked in clone: 0
+      6 test result: ok. 0 passed; 0
+      3 test result: ok. 1 passed; 0
+      1 test result: ok. 133 passed; 0
+      1 test result: ok. 5 passed; 0
+      1 test result: ok. 6 passed; 0
+Shell cwd was reset to /home/juan/Documents/shadow-assistant
+```
+
+</details>
+
