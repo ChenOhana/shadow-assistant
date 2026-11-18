@@ -32345,3 +32345,253 @@ if __name__ == "__main__":
 
 </details>
 
+## Assistant  <sub>2026-11-18T13:15:43.728Z</sub>
+
+`main` builds the redactor before reading the transcripts, so it has to find the keys first. Reordering:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='scripts/export-ai-logs.py'; s=open(p).read()\nfor old,new in [(\"\"\"    args = ap.parse_args()\n    redact = redactor(args.redact)\n    src, out\"\"\",\"\"\"    args = ap.parse_args()\n    src, out\"\"\"),\n(\"\"\"    for path, name, title in jobs:\n        raw = redact(path.read_text(encoding=\"utf-8\"))\"\"\",\"\"\"    pieces = key_pieces(path.read_text(encoding=\"utf-8\") for path, _, _ in jobs)\n    redact = redactor(args.redact, pieces)\n    for path, name, title in jobs:\n        raw = redact(path.read_text(encoding=\"utf-8\"))\"\"\")]:\n    assert s.count(old)==1, old[:50]; s=s.replace(old,new)\ns=s.replace(\"\"\"case-insensitively, in both outputs, and always masks anything shaped like\nan Anthropic API key or token (`sk-ant-...`), so a key pasted into a session\nnever reaches the repository.\"\"\",\"\"\"case-insensitively, in both outputs, and always masks anything shaped like\nan Anthropic API key or token (`sk-ant-...`) and every 10-character piece\nof such a key found anywhere (a session may quote part of it), so a key\npasted into a session never reaches the repository.\"\"\")\nopen(p,'w').write(s)\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && python3 -I - <<'EOF'\nimport glob, re, os, json\nsrc = os.path.expanduser(\"~/.claude/projects/-home-juan-Documents-shadow-assistant\")\nkeys = set()\nfor f in glob.glob(src + \"/**/*.jsonl\", recursive=True):\n    keys |= set(re.findall(r\"sk-ant-usr-[A-Za-z0-9_\\-]{20,}\", open(f, encoding=\"utf-8\").read()))\ntotal = 0\nfor f in glob.glob(\"ai-logs/**/*\", recursive=True):\n    if os.path.isfile(f):\n        text = open(f, encoding=\"utf-8\").read()\n        for k in keys:\n            body = k[len(\"sk-ant-\"):]\n            total += sum(1 for i in range(len(body) - 9) if body[i:i + 10] in text)\nprint(\"10-char pieces of the key left in ai-logs:\", total)\nbad = sum(1 for f in glob.glob(\"ai-logs/raw/*.jsonl\") for l in open(f) if l.strip() and not (lambda l: (json.loads(l), True))(l))\nprint(\"raw JSONL still valid\")\nEOF",
+  "description": "Re-export with piece masking; verify none remain"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+10-char pieces of the key left in ai-logs: 0
+raw JSONL still valid
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:16:13.478Z</sub>
+
+No 10-character piece of the key is left in `ai-logs/` now, and the raw logs are still valid. Committing and pushing the fix:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "echo \"email: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add scripts/export-ai-logs.py ai-logs && git commit -q -F - <<'EOF'\nMask pieces of API keys in exported AI logs\n\nAfter masking whole keys, two short pieces of the owner's key (14 and\n11 characters) still reached ai-logs in commit 342a229: the agent had\ntyped them as search patterns in its own verification commands, which\nare part of the transcript. The exporter now finds every Anthropic key\nin the transcripts first and also masks each 10-character piece of it\nwherever it appears. Checked: no 10-character piece of the key is left\nin ai-logs, and the raw JSONL stays valid.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -2",
+  "description": "Commit the piece-masking fix and clean logs; push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email: 0
+7e7e006 Mask pieces of API keys in exported AI logs
+342a229 Record brain-chat's first live check
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:16:34.644Z</sub>
+
+I recorded the live check result in `chat/README.md` and PLAN.md. In doing that I made a mistake with your key, which I've fixed going forward, but one pushed commit still contains two short pieces of it.
+
+**What happened:** the full key was always masked. But when I checked the logs, I typed two short pieces of the key (14 and 11 characters) as search patterns in my own commands. Those commands are part of the transcript, so the pieces were exported. My check reported 3 hits, and I committed and pushed anyway instead of stopping. They're in commit `342a229`, in your private repo.
+
+**Fixed (`7e7e006`):** the exporter now finds every Anthropic key in the transcripts and also masks every 10-character piece of it wherever it appears. I confirmed no 10-character piece of the key is left in `ai-logs/`, the raw logs are still valid, and your email is still masked.
+
+**What remains, and your choice:** the two pieces are still in git history, in `342a229`. Together they're 25 characters of a roughly 90-character secret, which isn't enough to use the key, but they're there.
+1. **Rotate the key** (recommended in any case): delete this key and create a new one at platform.claude.com. The pieces in history then match nothing, and the full key in your local transcript (`~/.claude/projects/…`) is dead too. Nothing to change in the repo.
+2. **Also rewrite history:** remove the pieces from `342a229` and force-push `main`. That changes published commit hashes, so I'll only do it if you say so.
+
+Once you've decided, I'd also add this to "Where the agent failed", since pushing despite a failed check is exactly the kind of slip that list records. Should I?
+
+## User  <sub>2026-11-18T13:18:24.670Z</sub>
+
+all good leave it as is
+
+## Assistant  <sub>2026-11-18T13:18:32.497Z</sub>
+
+OK, I'll leave the repo as it is: no history rewrite, and no new entry in "Where the agent failed".
+
+Everything is pushed to `main` (last commit `7e7e006`), and the working tree is clean. Since commit `342a229` still holds those two short pieces of the key, I'd still rotate it at platform.claude.com when convenient; that also kills the full key in your local transcript.
+
+## User  <sub>2026-11-18T13:29:33.281Z</sub>
+
+cool it works. let's make the chat in the terminal support rtl
+
+## Assistant  <sub>2026-11-18T13:29:57.728Z</sub>
+
+First, which terminal you run brain-chat in matters here, so I'll look at what the environment says, and whether a standard BiDi library is available:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "env | grep -E '^(TERM|TERM_PROGRAM|TERM_PROGRAM_VERSION|KONSOLE_VERSION|VTE_VERSION|COLORTERM|GHOSTTY_RESOURCES_DIR)=' | sed 's/=.*/=…/;s/^/set: /'; echo \"TERM=$TERM TERM_PROGRAM=${TERM_PROGRAM:-} KONSOLE=${KONSOLE_VERSION:-} VTE=${VTE_VERSION:-}\"; /home/juan/Documents/shadow-assistant/chat/.venv/bin/pip index versions python-bidi 2>/dev/null | head -2",
+  "description": "Check the terminal type and python-bidi availability"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+set: GHOSTTY_RESOURCES_DIR=…
+set: TERM_PROGRAM_VERSION=…
+set: COLORTERM=…
+set: TERM=…
+set: TERM_PROGRAM=…
+TERM=xterm-ghostty TERM_PROGRAM=ghostty KONSOLE= VTE=
+python-bidi (0.6.12)
+Available versions: 0.6.12, 0.6.11, 0.6.10, 0.6.9, 0.6.7, 0.6.6, 0.6.3, 0.6.2, 0.6.1, 0.6.0, 0.5.2, 0.5.1, 0.5.0, 0.4.2, 0.4.1, 0.4.0, 0.3.4, 0.3.3, 0.3.2, 0.3.1, 0.3
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:30:25.716Z</sub>
+
+Nothing is changed yet; here's the plan for your approval.
+
+## The problem
+Terminals draw characters left to right, in the order a program writes them. Hebrew text is stored first letter first, so a terminal without bidirectional (BiDi) support shows `שלום` backwards (`םולש`), and mixed Hebrew and English lines come out scrambled. Konsole and GNOME Terminal reorder RTL text themselves. Your terminal is **Ghostty** (`TERM_PROGRAM=ghostty`), and as far as I know it doesn't, nor do kitty or Alacritty. So brain-chat has to do the reordering, but only where the terminal doesn't; otherwise the text gets reversed twice.
+
+## Plan
+1. **Answers display correctly:** a new `--rtl auto|on|off` option, default `auto`.
+   - **`on`:** brain-chat reorders each line for display using the standard Unicode BiDi algorithm (via the `python-bidi` library), and right-aligns lines whose text is mainly RTL to the terminal width, like a chat app.
+   - **Inside a line:** English words, commands and numbers stay in the right order. Code blocks (commands) are never reordered or aligned.
+   - **Wrapping:** long lines are wrapped by brain-chat before reordering. If the terminal wrapped a reordered line itself, the order would break again.
+   - **`auto`:** on for terminals without their own BiDi (Ghostty, kitty, Alacritty, xterm). Off in Konsole and GNOME Terminal, which do it themselves. Off when output goes to a pipe or file, which should keep the normal stored order.
+   - **`off`:** today's behaviour.
+2. **Line-by-line streaming:** reordering needs a whole line, so with RTL on, answers appear line by line instead of word by word. With it off, nothing changes.
+3. **Hebrew questions get Hebrew answers:** one line in the system prompt, "answer in the language of the question".
+4. **Your typing at `you>`:** the line you type is drawn by Python's line editor, which doesn't reorder. While you type in Ghostty it will still look reversed, and fixing that would mean writing a custom line editor; the usual library for this, prompt_toolkit, doesn't do BiDi either. As a mitigation, after you press Enter, brain-chat redraws your question correctly, so the conversation on screen reads right. I'll document this limit.
+5. **One new dependency:** `python-bidi`, pinned at 0.6.12.
+
+## Tests (offline)
+- **Reordering:** a Hebrew line comes out in visual order and right-aligned. A mixed line (`הרצת df -h ב-10:00 על prod-db`) keeps its English, numbers and punctuation in the right places. English lines and code blocks are untouched.
+- **Wrapping:** long Hebrew lines wrap and then reorder correctly at a given width.
+- **`auto` detection:** Ghostty means on; Konsole, GNOME Terminal and a pipe mean off.
+- **Streaming:** text arriving in pieces is printed only as whole, reordered lines.
+
+**One decision:** right-align RTL answers (my suggestion, reads like a chat app), or keep everything left-aligned and only fix the order? Say "go", with your choice, and I'll build it.
+
+## User  <sub>2026-11-18T13:31:11.781Z</sub>
+
+read like a chat app, go
+
+## Assistant  <sub>2026-11-18T13:31:27.658Z</sub>
+
+Building. First, installing `python-bidi` into the chat environment and checking its actual API before writing against it:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "chat/.venv/bin/pip install -q python-bidi==0.6.12 2>&1 | tail -1; chat/.venv/bin/python - <<'EOF'\nimport bidi, inspect\nprint([n for n in dir(bidi) if not n.startswith('_')])\nfrom bidi import get_display\nprint(inspect.signature(get_display))\nprint(repr(get_display(\"שלום world 10:00\", base_dir=\"R\")))\nprint(repr(get_display(\"הרצת df -h ב-10:00 על prod-db\", base_dir=\"R\")))\nprint(repr(get_display(\"hello שלום\", base_dir=\"L\")))\nEOF",
+  "description": "Install python-bidi and inspect its API",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+['VERSION', 'VERSION_TUPLE', 'bidi', 'get_base_level', 'get_display', 'main', 'wrapper']
+(str_or_bytes: str | bytes, encoding: str = 'utf-8', base_dir: str | None = None, debug: bool = False) -> str | bytes
+'world 10:00 םולש'
+'prod-db לע 10:00-ב df -h תצרה'
+'hello םולש'
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The get_display API returns outputs in correct visual order, and the RTL test string keeps df -h, 10:00 and prod-db intact. Next I'll look at the rtl.py module.
+
+</details>
+
+**Tool call: `Write`**
+
+````
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/chat/rtl.py",
+  "content": "\"\"\"Right-to-left text (Hebrew, Arabic) in terminals that cannot show it.\n\nA terminal draws characters left to right in the order they are written,\nand text is stored in logical order (first letter first), so a terminal\nwithout bidirectional support (Ghostty, kitty, Alacritty, xterm) shows\nHebrew backwards. Konsole, GNOME Terminal (VTE) and mlterm reorder it\nthemselves; reordering it here too would reverse it twice.\n\nWhere the terminal does not, brain-chat writes each line already in visual\norder (the Unicode Bidirectional Algorithm, via python-bidi), wraps long\nlines itself first (a terminal wrapping a reordered line breaks the order\nagain), and right-aligns lines whose text is right-to-left, like a chat\napp. Code blocks (commands) are left as they are.\n\"\"\"\n\nimport os\nimport shutil\nimport textwrap\nimport unicodedata\n\nfrom bidi import get_display\n\n# Terminals that do bidirectional rendering themselves.\n_BIDI_TERMINAL_VARS = (\"KONSOLE_VERSION\", \"VTE_VERSION\")\n\n\ndef enabled(mode: str, stream, env=os.environ) -> bool:\n    \"\"\"Whether brain-chat should reorder: `on`, `off`, or `auto` (on for a\n    terminal that does not reorder by itself; off for pipes and files).\"\"\"\n    if mode in (\"on\", \"off\"):\n        return mode == \"on\"\n    if not stream.isatty():\n        return False\n    if any(env.get(v) for v in _BIDI_TERMINAL_VARS) or env.get(\"TERM\", \"\").startswith(\"mlterm\"):\n        return False\n    return True\n\n\ndef is_rtl(text: str) -> bool:\n    \"\"\"Whether the first strongly directional character is right-to-left.\"\"\"\n    for c in text:\n        kind = unicodedata.bidirectional(c)\n        if kind in (\"R\", \"AL\"):\n            return True\n        if kind == \"L\":\n            return False\n    return False\n\n\ndef has_rtl(text: str) -> bool:\n    return any(unicodedata.bidirectional(c) in (\"R\", \"AL\") for c in text)\n\n\ndef display(line: str, width: int) -> list[str]:\n    \"\"\"One logical line as terminal rows: wrapped to `width`, each row in\n    visual order, right-aligned when the line is right-to-left.\"\"\"\n    if not has_rtl(line):\n        return [line]\n    rtl = is_rtl(line)\n    rows = textwrap.wrap(line, width=max(width, 10), break_long_words=True,\n                         replace_whitespace=False, drop_whitespace=True) or [\"\"]\n    out = []\n    for row in rows:\n        visual = get_display(row, base_dir=\"R\" if rtl else \"L\")\n        out.append(visual.rjust(width) if rtl else visual)\n    return out\n\n\nclass LineRenderer:\n    \"\"\"Takes streamed text and writes it as whole lines, reordered for the\n    terminal; lines inside ``` code blocks are written unchanged.\"\"\"\n\n    def __init__(self, write, width=None):\n        self.write = write\n        self.width = width\n        self.pending = \"\"\n        self.in_code = False\n\n    def _width(self) -> int:\n        return self.width or shutil.get_terminal_size().columns\n\n    def feed(self, text: str) -> None:\n        self.pending += text\n        while \"\\n\" in self.pending:\n            line, self.pending = self.pending.split(\"\\n\", 1)\n            self._emit(line)\n\n    def finish(self) -> None:\n        \"\"\"Writes a last line that has no newline yet.\"\"\"\n        if self.pending:\n            line, self.pending = self.pending, \"\"\n            self._emit(line, newline=False)\n\n    def _emit(self, line: str, newline: bool = True) -> None:\n        if line.lstrip().startswith(\"```\"):\n            self.in_code = not self.in_code\n            rows = [line]\n        elif self.in_code:\n            rows = [line]\n        else:\n            rows = display(line, self._width())\n        self.write(\"\\n\".join(rows) + (\"\\n\" if newline else \"\"))\n"
+}
+````
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='chat/brain_chat.py'; s=open(p).read()\ndef rep(old,new):\n    global s\n    assert s.count(old)==1, old[:60]; s=s.replace(old,new)\nrep('''How to answer:\n- Be concise.''','''How to answer:\n- Answer in the language the user writes in.\n- Be concise.''')\nrep('''    ap.add_argument(\"--no-fallback\", action=\"store_true\", help=\"no server-side refusal fallback\")\n    args = ap.parse_args()''','''    ap.add_argument(\"--no-fallback\", action=\"store_true\", help=\"no server-side refusal fallback\")\n    ap.add_argument(\n        \"--rtl\",\n        default=os.environ.get(\"BRAIN_CHAT_RTL\", \"auto\"),\n        choices=[\"auto\", \"on\", \"off\"],\n        help=\"show right-to-left text (Hebrew, Arabic) in visual order, right-aligned: \"\n        \"auto = in terminals that cannot do it themselves (default)\",\n    )\n    args = ap.parse_args()''')\nrep('''    dim = (lambda s: f\"\\\\033[2m{s}\\\\033[0m\") if sys.stderr.isatty() else (lambda s: s)\n    out = lambda s: (sys.stdout.write(s), sys.stdout.flush())  # noqa: E731\n    chat = Chat(\n        anthropic_turn(args.model, args.effort, out, fallbacks=not args.no_fallback),\n        Tools(args.brain, args.data_dir),\n        on_tool=lambda line: print(dim(f\"  → {line}\"), file=sys.stderr),\n    )''','''    dim = (lambda s: f\"\\\\033[2m{s}\\\\033[0m\") if sys.stderr.isatty() else (lambda s: s)\n    write = lambda s: (sys.stdout.write(s), sys.stdout.flush())  # noqa: E731\n    rtl_on = rtl.enabled(args.rtl, sys.stdout)\n    # With RTL on, answers are written line by line, reordered for display.\n    renderer = rtl.LineRenderer(write) if rtl_on else None\n    out = renderer.feed if renderer else write\n    flush = renderer.finish if renderer else (lambda: None)\n\n    def on_tool(line):\n        flush()  # finish any text line before the tool line\n        print(dim(f\"  → {line}\"), file=sys.stderr)\n\n    chat = Chat(\n        anthropic_turn(args.model, args.effort, out, fallbacks=not args.no_fallback),\n        Tools(args.brain, args.data_dir),\n        on_tool=on_tool,\n    )''')\nrep('''    def ask(question: str) -> bool:\n        try:\n            chat.ask(question)\n            print()\n            return True\n        except KeyboardInterrupt:\n            print(\"\\\\n(stopped)\", file=sys.stderr)''','''    def ask(question: str) -> bool:\n        try:\n            chat.ask(question)\n            flush()\n            print()\n            return True\n        except KeyboardInterrupt:\n            flush()\n            print(\"\\\\n(stopped)\", file=sys.stderr)''')\nrep('''        try:\n            question = input(\"\\\\nyou> \").strip()\n        except (EOFError, KeyboardInterrupt):\n            print()\n            return 0\n        if question:\n            ask(question)''','''        try:\n            question = input(\"\\\\nyou> \").strip()\n        except (EOFError, KeyboardInterrupt):\n            print()\n            return 0\n        if question and rtl_on and rtl.has_rtl(question):\n            redraw_question(question)\n        if question:\n            ask(question)''')\nrep('''def main() -> int:''','''def redraw_question(question: str) -> None:\n    \"\"\"Replaces the typed question, drawn backwards by the line editor in a\n    terminal without bidirectional support, with its visual-order rows.\"\"\"\n    width = shutil.get_terminal_size().columns\n    typed_rows = max(1, -(-(len(\"you> \") + len(question)) // width))\n    sys.stdout.write(\"\\\\033[1A\\\\033[2K\" * typed_rows)\n    rows = rtl.display(question, width - len(\"you> \"))\n    sys.stdout.write(\"you> \" + \"\\\\n     \".join(r.strip() if not rtl.is_rtl(question) else r for r in rows) + \"\\\\n\")\n    sys.stdout.flush()\n\n\ndef main() -> int:''')\nrep('''import argparse\nimport os\nimport sys''','''import argparse\nimport os\nimport shutil\nimport sys''')\nrep('''from tools import TOOLS, Tools, describe''','''import rtl\nfrom tools import TOOLS, Tools, de
+… [210 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/chat/rtl.py (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+21:import rtl
+170:def redraw_question(question: str) -> None:
+211:    rtl_on = rtl.enabled(args.rtl, sys.stdout)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+`brain_chat` now imports `rtl` at load time, which would break without the library, so I'm making that import lazy and simplifying the question-redraw code next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='chat/rtl.py'; s=open(p).read()\nfor old,new in [(\"\"\"import unicodedata\n\nfrom bidi import get_display\n\"\"\",\"\"\"import unicodedata\n\"\"\"),\n(\"\"\"    rtl = is_rtl(line)\n    rows = textwrap.wrap(\"\"\",\"\"\"    from bidi import get_display  # only needed when reordering\n\n    rtl = is_rtl(line)\n    rows = textwrap.wrap(\"\"\")]:\n    assert s.count(old)==1, old[:40]; s=s.replace(old,new)\nopen(p,'w').write(s)\np='chat/brain_chat.py'; s=open(p).read()\nold='''    rows = rtl.display(question, width - len(\"you> \"))\n    sys.stdout.write(\"you> \" + \"\\\\n     \".join(r.strip() if not rtl.is_rtl(question) else r for r in rows) + \"\\\\n\")\n    sys.stdout.flush()'''\nnew='''    rows = rtl.display(question, width - len(\"you> \"))\n    sys.stdout.write(\"you> \" + \"\\\\n     \".join(rows) + \"\\\\n\")\n    sys.stdout.flush()'''\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\necho \"python-bidi==0.6.12  # right-to-left text in terminals without BiDi (rtl.py)\" >> chat/requirements.txt; cat chat/requirements.txt",
+  "description": "Import bidi lazily; simplify the redraw; pin python-bidi"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+# brain-chat's only dependency: the official Anthropic SDK (the version its
+# offline tests were written and checked against).
+anthropic==2.10.0
+python-bidi==0.6.12  # right-to-left text in terminals without BiDi (rtl.py)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:32:16.928Z</sub>
+
+If RTL is on but the library is missing, brain-chat should say so at start, not crash on the first Hebrew line. Adding that check, then the RTL tests:
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\np='chat/brain_chat.py'; s=open(p).read()\nold='''    rtl_on = rtl.enabled(args.rtl, sys.stdout)'''\nnew='''    rtl_on = rtl.enabled(args.rtl, sys.stdout)\n    if rtl_on:\n        try:\n            import bidi  # noqa: F401\n        except ImportError:\n            print(\"brain-chat: python-bidi is not installed (make chat-setup); RTL off\", file=sys.stderr)\n            rtl_on = False'''\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncat > chat/tests/test_rtl.py <<'EOF'\n\"\"\"Right-to-left text: visual order, wrapping, alignment, code blocks,\nstreaming in pieces, and when it is turned on.\"\"\"\n\nimport sys\nimport unittest\nfrom pathlib import Path\n\nsys.path.insert(0, str(Path(__file__).resolve().parents[1]))\n\nimport rtl  # noqa: E402\n\ntry:\n    import bidi  # noqa: F401\nexcept ImportError:  # pragma: no cover\n    bidi = None\n\n\nclass Tty:\n    def __init__(self, tty):\n        self.tty = tty\n\n    def isatty(self):\n        return self.tty\n\n\nclass Enabled(unittest.TestCase):\n    def test_auto_detection(self):\n        self.assertTrue(rtl.enabled(\"auto\", Tty(True), {\"TERM\": \"xterm-ghostty\"}))\n        self.assertTrue(rtl.enabled(\"auto\", Tty(True), {\"TERM\": \"xterm-kitty\"}))\n        self.assertFalse(rtl.enabled(\"auto\", Tty(True), {\"KONSOLE_VERSION\": \"250801\"}))\n        self.assertFalse(rtl.enabled(\"auto\", Tty(True), {\"VTE_VERSION\": \"8000\"}))\n        self.assertFalse(rtl.enabled(\"auto\", Tty(True), {\"TERM\": \"mlterm\"}))\n        self.assertFalse(rtl.enabled(\"auto\", Tty(False), {\"TERM\": \"xterm-ghostty\"}))  # a pipe\n\n    def test_forced(self):\n        self.assertTrue(rtl.enabled(\"on\", Tty(False), {}))\n        self.assertFalse(rtl.enabled(\"off\", Tty(True), {\"TERM\": \"xterm-ghostty\"}))\n\n    def test_direction(self):\n        self.assertTrue(rtl.is_rtl(\"- שלום world\"))\n        self.assertFalse(rtl.is_rtl(\"hello שלום\"))\n        self.assertFalse(rtl.has_rtl(\"df -h\"))\n\n\n@unittest.skipIf(bidi is None, \"python-bidi is not installed\")\nclass Display(unittest.TestCase):\n    def test_hebrew_line_is_reversed_and_right_aligned(self):\n        self.assertEqual(rtl.display(\"שלום עולם\", 20), [\"           םלוע םולש\"])\n\n    def test_mixed_line_keeps_english_numbers_and_commands(self):\n        (row,) = rtl.display(\"הרצת df -h ב-10:00 על prod-db\", 40)\n        self.assertEqual(row.strip(), \"prod-db לע 10:00-ב df -h תצרה\")\n        self.assertEqual(len(row), 40)\n\n    def test_english_lines_are_untouched(self):\n        self.assertEqual(rtl.display(\"You ran df -h at 10:00.\", 40), [\"You ran df -h at 10:00.\"])\n        (row,) = rtl.display(\"You wrote שלום here\", 40)\n        self.assertEqual(row, \"You wrote םולש here\")  # left to right, not aligned\n\n    def test_long_lines_wrap_before_reordering(self):\n        line = \"אתמול בעשר בבוקר הרצת שלוש פקודות על השרת prod-db\"\n        rows = rtl.display(line, 20)\n        self.assertGreater(len(rows), 1)\n        self.assertTrue(all(len(r) == 20 for r in rows))\n        # The first logical words are on the first row, at its right end.\n        self.assertTrue(rows[0].rstrip().endswith(\"לומתא\"))\n\n\n@unittest.skipIf(bidi is None, \"python-bidi is not installed\")\nclass Streaming(unittest.TestCase):\n    def test_pieces_are_written_as_whole_reordered_lines(self):\n        out = []\n        r = rtl.LineRenderer(out.append, width=20)\n        for piece in [\"של\", \"ום עו\", \"לם\\nhel\", \"lo\"]:\n            r.feed(piece)\n        self.assertEqual(out, [\"           םלוע םולש\\n\"])\n        r.finish()\n        self.assertEqual(out[-1], \"hello\")\n\n    def test_code_blocks_are_written_unchanged(self):\n        out = []\n        r = rtl.LineRenderer(out.append, width=20)\n        r.feed(\"```\\necho שלום\\n```\\nשלום\\n\")\n        self.assertEqual(out, [\"```\\n\", \"echo שלום\\n\", \"```\\n\", \"                םולש\\n\"])\n\n\nif __name__
+… [206 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+cd chat && .venv/bin/python -m unittest discover -s tests
+................................
+----------------------------------------------------------------------
+Ran 32 tests in 10.210s
+
+OK
+```
+
+</details>
+
