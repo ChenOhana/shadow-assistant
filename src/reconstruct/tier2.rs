@@ -89,6 +89,7 @@ pub struct VsCodeSnapshots {
 }
 
 impl VsCodeSnapshots {
+    /// Snapshots stored in `dir` (created if missing).
     pub fn new(dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         Ok(Self {
@@ -278,7 +279,9 @@ pub const STATUS_REPLAYED: &str = "done: replayed (best effort, unverified)";
 /// A finished tier 2 job's text, and the status saying where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tier2Text {
+    /// The session's new text (a diff of the saved file, or the replay's changed lines).
     pub text: String,
+    /// `done: saved file` or `done: replayed (best effort, unverified)`.
     pub status: &'static str,
 }
 
@@ -325,6 +328,7 @@ impl Tier2Worker {
         })
     }
 
+    /// Queues session `id` (pending) for the worker.
     pub fn submit(&self, id: i64) {
         if let Some(tx) = &self.jobs {
             let _ = tx.send(id);
@@ -405,6 +409,21 @@ fn pending_jobs(db_path: &Path) -> Result<Vec<i64>> {
     Ok(ids)
 }
 
+/// A pending tier 2 job: the session's row, as the worker needs it.
+struct Job {
+    app: String,
+    window: String,
+    /// The session's events in the log: `[start, end)`.
+    start: u64,
+    end: u64,
+    /// The edited file.
+    file: String,
+    /// The session's last keystroke.
+    last_key: Millis,
+    /// Shortcuts only ([`Tier2Status::PendingSavedOnly`]): never replayed.
+    saved_only: bool,
+}
+
 fn run_job(
     replayer: &mut VsCodeReplayer,
     db_path: &Path,
@@ -412,6 +431,23 @@ fn run_job(
     snapshots: &Path,
     id: i64,
 ) -> Result<Tier2Outcome> {
+    let job = load_job(db_path, id)?;
+    let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
+    let initial_text = String::from_utf8_lossy(&initial);
+    // 1. The file as VS Code saved it after the last keystroke, if it was.
+    if let Some(outcome) = saved_file_outcome(&job, &initial_text) {
+        return Ok(outcome);
+    }
+    // Only shortcuts and no save: nothing shows that the file changed.
+    if job.saved_only {
+        return Ok(Tier2Outcome::Unchanged);
+    }
+    // 2. Otherwise, a best-effort replay.
+    replay_outcome(replayer, log_path, &job, &initial, &initial_text)
+}
+
+/// Reads session `id`, which must still be waiting for its tier 2 result.
+fn load_job(db_path: &Path, id: i64) -> Result<Job> {
     let conn = store::open_reader(db_path)?;
     type Row = (
         String,
@@ -444,35 +480,51 @@ fn run_job(
             },
         )
         .context("session is no longer pending")?;
-    drop(conn);
     let (Some(end), Some(file), Some(ended_at)) = (end, file, ended_at) else {
         bail!("session has no end offset, file or end time");
     };
-    let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
-    let initial_text = String::from_utf8_lossy(&initial);
-    // 1. The file as VS Code saved it after the last keystroke, if it was.
-    let last_key = crate::timefmt::parse_rfc3339_ms(&ended_at)?;
-    if let Some(saved) = saved_after(Path::new(&file), last_key) {
-        let name = Path::new(&file)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let diff = vscode::unified_diff(&initial_text, &saved, &name, 3);
-        if diff.is_empty() {
-            return Ok(Tier2Outcome::Unchanged);
-        }
-        return Ok(Tier2Outcome::Text(Tier2Text {
+    Ok(Job {
+        app,
+        window,
+        start: start as u64,
+        end: end as u64,
+        file,
+        last_key: crate::timefmt::parse_rfc3339_ms(&ended_at)?,
+        saved_only: status == Tier2Status::PendingSavedOnly.as_str(),
+    })
+}
+
+/// The diff of the file VS Code saved after the session's last keystroke
+/// against its initial content (`Unchanged` if it is the same); `None` if
+/// the file was not saved after the session.
+fn saved_file_outcome(job: &Job, initial_text: &str) -> Option<Tier2Outcome> {
+    let saved = saved_after(Path::new(&job.file), job.last_key)?;
+    let name = Path::new(&job.file)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let diff = vscode::unified_diff(initial_text, &saved, &name, 3);
+    Some(if diff.is_empty() {
+        Tier2Outcome::Unchanged
+    } else {
+        Tier2Outcome::Text(Tier2Text {
             text: diff,
             status: STATUS_SAVED_FILE,
-        }));
-    }
-    // Only shortcuts and no save: nothing shows that the file changed.
-    if status == Tier2Status::PendingSavedOnly.as_str() {
-        return Ok(Tier2Outcome::Unchanged);
-    }
-    // 2. Otherwise, a best-effort replay.
-    let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
-    let file_name = Path::new(&file)
+        })
+    })
+}
+
+/// Replays the session's keystrokes from the log into VS Code and takes the
+/// lines they changed (best effort, see [`super::vscode`]).
+fn replay_outcome(
+    replayer: &mut VsCodeReplayer,
+    log_path: &Path,
+    job: &Job,
+    initial: &[u8],
+    initial_text: &str,
+) -> Result<Tier2Outcome> {
+    let events = session_events(log_path, &job.app, &job.window, job.start, job.end)?;
+    let file_name = Path::new(&job.file)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "file.txt".into());
@@ -481,13 +533,13 @@ fn run_job(
     let saved = replayer.replay(
         &ReplayInput {
             file_name: &file_name,
-            initial: &initial,
+            initial,
             events: &events,
         },
         timeout,
     )?;
     Ok(Tier2Outcome::Text(Tier2Text {
-        text: vscode::changed_lines(&initial_text, &saved),
+        text: vscode::changed_lines(initial_text, &saved),
         status: STATUS_REPLAYED,
     }))
 }

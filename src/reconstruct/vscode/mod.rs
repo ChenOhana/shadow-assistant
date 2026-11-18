@@ -91,15 +91,27 @@ use std::time::{Duration, Instant, SystemTime};
 /// One captured event of a VS Code session, in log order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplayEvent {
-    Key { key: String, mods: Vec<Mod> },
-    Paste { text: String },
+    /// A key, as captured.
+    Key {
+        /// The character or key name.
+        key: String,
+        /// Modifiers held.
+        mods: Vec<Mod>,
+    },
+    /// A paste, with the clipboard text brain recorded.
+    Paste {
+        /// The pasted text.
+        text: String,
+    },
 }
 
+/// What one replay needs: the file's initial content and the session's events.
 pub struct ReplayInput<'a> {
     /// Basename of the edited file (picks VS Code's language mode).
     pub file_name: &'a str,
     /// File content at session start.
     pub initial: &'a [u8],
+    /// The session's keys and pastes, in log order.
     pub events: &'a [ReplayEvent],
 }
 
@@ -191,6 +203,7 @@ impl Ids {
 pub struct KillHandle(Arc<Mutex<Option<Ids>>>);
 
 impl KillHandle {
+    /// Kills the instance now (see [`KillHandle`]).
     pub fn kill(&self) {
         if let Ok(guard) = self.0.lock()
             && let Some(ids) = guard.as_ref()
@@ -209,6 +222,7 @@ struct Instance {
 /// tests or replays) instead of running it headless.
 pub const VISIBLE_ENV: &str = "BRAIN_VSCODE_VISIBLE";
 
+/// Replays sessions into one warm, sandboxed VS Code (see the module docs).
 pub struct VsCodeReplayer {
     work_dir: PathBuf,
     inst: Option<Instance>,
@@ -233,6 +247,7 @@ impl VsCodeReplayer {
         }
     }
 
+    /// A handle that kills the running instance from another thread.
     pub fn kill_handle(&self) -> KillHandle {
         KillHandle(self.ids.clone())
     }
@@ -287,6 +302,7 @@ impl VsCodeReplayer {
         }
     }
 
+    /// Stops the instance and everything it started, and forgets it.
     pub fn shutdown(&mut self) {
         let ids = self.ids.lock().ok().and_then(|mut g| g.take());
         if let Some(ids) = &ids {
@@ -376,7 +392,45 @@ impl VsCodeReplayer {
         std::fs::create_dir_all(&home)?;
         prepare_user_config(&user_data.join("User"))?;
         let extensions = prepare_extensions(&self.work_dir, deadline);
+        let capped = self.systemd_available();
+        let unit = scope_unit_name();
 
+        let cmd = self.command(
+            &bin,
+            &unshare,
+            capped.then_some(unit.as_str()),
+            &user_data,
+            &home,
+            extensions.as_deref(),
+        )?;
+        let (child, to_child_w, from_child_r) = spawn_with_cdp_pipes(cmd, &bin)?;
+        let pid = child.id() as i32;
+        let killed = self.register(pid, &user_data);
+        let cdp = match Cdp::new(to_child_w, from_child_r, killed) {
+            Ok(c) => c,
+            Err(e) => {
+                let mut child = child;
+                if let Some(ids) = self.ids.lock().ok().and_then(|mut g| g.take()) {
+                    ids.kill();
+                }
+                let _ = child.wait();
+                return Err(e);
+            }
+        };
+        self.inst = Some(Instance { child, cdp });
+        if capped {
+            self.record_scope(pid, &unit, deadline);
+        }
+        trace("spawned");
+        let inst = self.inst.as_mut().ok_or_else(|| anyhow!("no instance"))?;
+        attach_workbench(&mut inst.cdp, deadline)?;
+        trace("workbench ready");
+        Ok(())
+    }
+
+    /// Whether `systemd-run --user --scope` works here, probed once; without
+    /// it the instance runs without CPU/memory caps (warned once).
+    fn systemd_available(&mut self) -> bool {
         if self.systemd.is_none() {
             let ok = Command::new("systemd-run")
                 .args(["--user", "--scope", "-q", "--collect", "--", "true"])
@@ -393,35 +447,44 @@ impl VsCodeReplayer {
             }
             self.systemd = Some(ok);
         }
-        let unit = format!(
-            "brain-vscode-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0)
-        );
-        let mut cmd = if self.systemd == Some(true) {
-            let mut c = Command::new("systemd-run");
-            c.args([
-                "--user",
-                "--scope",
-                "-q",
-                "--collect",
-                "-p",
-                "CPUQuota=50%",
-                "-p",
-                "MemoryMax=1500M",
-                "--unit",
-                &unit,
-                "--",
-            ]);
-            c.arg(&unshare);
-            c
-        } else {
-            Command::new(&unshare)
+        self.systemd == Some(true)
+    }
+
+    /// The sandboxed VS Code command: in the capped systemd scope `unit`
+    /// (when given), in its own network namespace, headless (or visible with
+    /// [`VISIBLE_ENV`]), with its own state, cut off from the session bus,
+    /// logging to `vscode.log`.
+    fn command(
+        &self,
+        bin: &Path,
+        unshare: &Path,
+        unit: Option<&str>,
+        user_data: &Path,
+        home: &Path,
+        extensions: Option<&Path>,
+    ) -> Result<Command> {
+        let mut cmd = match unit {
+            Some(unit) => {
+                let mut c = Command::new("systemd-run");
+                c.args([
+                    "--user",
+                    "--scope",
+                    "-q",
+                    "--collect",
+                    "-p",
+                    "CPUQuota=50%",
+                    "-p",
+                    "MemoryMax=1500M",
+                    "--unit",
+                    unit,
+                    "--",
+                ]);
+                c.arg(unshare);
+                c
+            }
+            None => Command::new(unshare),
         };
-        cmd.args(["--map-current-user", "-n"]).arg(&bin);
+        cmd.args(["--map-current-user", "-n"]).arg(bin);
         let visible = std::env::var_os(VISIBLE_ENV).is_some_and(|v| v == "1");
         cmd.arg(if visible {
             "--ozone-platform=wayland"
@@ -430,7 +493,7 @@ impl VsCodeReplayer {
         })
         .arg("--remote-debugging-pipe")
         .arg(format!("--user-data-dir={}", user_data.display()));
-        match &extensions {
+        match extensions {
             Some(dir) => cmd.arg(format!("--extensions-dir={}", dir.display())),
             None => cmd
                 .arg(format!(
@@ -465,7 +528,7 @@ impl VsCodeReplayer {
             cmd.env_remove("WAYLAND_DISPLAY");
         }
         cmd.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
-            .env("HOME", &home)
+            .env("HOME", home)
             .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .env("XDG_CACHE_HOME", home.join(".cache"));
@@ -473,33 +536,13 @@ impl VsCodeReplayer {
         cmd.stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log);
+        Ok(cmd)
+    }
 
-        // CDP pipes: the child gets `to_child_r` as fd 3 and `from_child_w` as
-        // fd 4. Both are moved above fd 10 first so the dup2s cannot collide.
-        let (to_child_r, to_child_w) = pipe_cloexec()?;
-        let (from_child_r, from_child_w) = pipe_cloexec()?;
-        let to_child_r = dup_above(&to_child_r, 10)?;
-        let from_child_w = dup_above(&from_child_w, 10)?;
-        let (rfd, wfd) = (to_child_r.as_raw_fd(), from_child_w.as_raw_fd());
-        // SAFETY: only async-signal-safe calls between fork and exec.
-        unsafe {
-            cmd.pre_exec(move || {
-                if libc::dup2(rfd, 3) < 0 || libc::dup2(wfd, 4) < 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                libc::setsid();
-                // The instance dies with the thread that started it, even
-                // on `kill -9` of brain.
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                Ok(())
-            });
-        }
-        let child = cmd
-            .spawn()
-            .with_context(|| format!("starting {}", bin.display()))?;
-        drop(to_child_r);
-        drop(from_child_w);
-        let pid = child.id() as i32;
+    /// Records what a kill needs (the process group; the scope is added by
+    /// [`Self::record_scope`]) and `instance.json`, so a later brain can
+    /// clean up after this one. Returns the flag a kill sets.
+    fn register(&self, pid: i32, user_data: &Path) -> Arc<AtomicBool> {
         let killed = Arc::new(AtomicBool::new(false));
         if let Ok(mut g) = self.ids.lock() {
             *g = Some(Ids {
@@ -512,45 +555,71 @@ impl VsCodeReplayer {
             self.work_dir.join("instance.json"),
             json!({ "pid": pid, "user_data_dir": user_data }).to_string(),
         );
-        let cdp = match Cdp::new(to_child_w, from_child_r, killed) {
-            Ok(c) => c,
-            Err(e) => {
-                let mut child = child;
-                if let Some(ids) = self.ids.lock().ok().and_then(|mut g| g.take()) {
-                    ids.kill();
-                }
-                let _ = child.wait();
-                return Err(e);
-            }
-        };
-        self.inst = Some(Instance { child, cdp });
-
-        // systemd-run moves itself into the scope before exec'ing the
-        // instance; record the scope as soon as it exists so a kill during
-        // startup takes every process with it.
-        if self.systemd == Some(true) {
-            let until = Instant::now() + Duration::from_secs(2);
-            loop {
-                if let Some(cg) = scope_cgroup(pid as u32, &unit) {
-                    if let Ok(mut g) = self.ids.lock()
-                        && let Some(ids) = g.as_mut()
-                    {
-                        ids.cgroup = Some(cg);
-                    }
-                    break;
-                }
-                if Instant::now() >= until.min(deadline) {
-                    break; // killpg still covers the process group
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        }
-        trace("spawned");
-        let inst = self.inst.as_mut().ok_or_else(|| anyhow!("no instance"))?;
-        attach_workbench(&mut inst.cdp, deadline)?;
-        trace("workbench ready");
-        Ok(())
+        killed
     }
+
+    /// systemd-run moves itself into the scope before exec'ing the instance;
+    /// records the scope's cgroup as soon as it exists, so a kill during
+    /// startup takes every process with it.
+    fn record_scope(&self, pid: i32, unit: &str, deadline: Instant) {
+        let until = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(cg) = scope_cgroup(pid as u32, unit) {
+                if let Ok(mut g) = self.ids.lock()
+                    && let Some(ids) = g.as_mut()
+                {
+                    ids.cgroup = Some(cg);
+                }
+                break;
+            }
+            if Instant::now() >= until.min(deadline) {
+                break; // killpg still covers the process group
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+}
+
+/// A systemd unit name unique to this process and moment.
+fn scope_unit_name() -> String {
+    format!(
+        "brain-vscode-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    )
+}
+
+/// Spawns `cmd` with the DevTools pipe: the child reads commands on fd 3 and
+/// writes replies on fd 4, starts its own session, and dies with the thread
+/// that started it (even on `kill -9` of brain). Returns the child and the
+/// parent's ends (write to the child, read from it).
+fn spawn_with_cdp_pipes(mut cmd: Command, bin: &Path) -> Result<(Child, OwnedFd, OwnedFd)> {
+    // Both child ends are moved above fd 10 first so the dup2s cannot collide.
+    let (to_child_r, to_child_w) = pipe_cloexec()?;
+    let (from_child_r, from_child_w) = pipe_cloexec()?;
+    let to_child_r = dup_above(&to_child_r, 10)?;
+    let from_child_w = dup_above(&from_child_w, 10)?;
+    let (rfd, wfd) = (to_child_r.as_raw_fd(), from_child_w.as_raw_fd());
+    // SAFETY: only async-signal-safe calls between fork and exec.
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::dup2(rfd, 3) < 0 || libc::dup2(wfd, 4) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            libc::setsid();
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("starting {}", bin.display()))?;
+    drop(to_child_r);
+    drop(from_child_w);
+    Ok((child, to_child_w, from_child_r))
 }
 
 impl Drop for VsCodeReplayer {
@@ -601,6 +670,7 @@ fn kill_stale(work_dir: &Path) {
         }
         // SAFETY: plain syscall on a process verified above to be ours.
         unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+        // SAFETY: as above, the process itself.
         unsafe { libc::kill(pid as i32, libc::SIGKILL) };
     }
 }
