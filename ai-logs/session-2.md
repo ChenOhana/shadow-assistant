@@ -32595,3 +32595,147 @@ OK
 
 </details>
 
+<details><summary>Assistant thinking</summary>
+
+All 32 chat tests pass, including the 9 new RTL ones. I can't see how Ghostty draws the output from here, so I'm looking up the docs and will offer a demo command to check it by eye.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('chat/README.md',[\n(\"\"\"## How it answers\"\"\",\"\"\"## Right-to-left text (Hebrew, Arabic)\n\nAsk in Hebrew and Claude answers in Hebrew. A terminal draws characters\nleft to right in the order they are written, so one without bidirectional\nsupport (Ghostty, kitty, Alacritty, xterm) would show Hebrew backwards.\nThere brain-chat writes each line in visual order (the Unicode\nBidirectional Algorithm, via python-bidi) and right-aligns right-to-left\nlines, like a chat app; English words, numbers and commands inside a line\nkeep their order, long lines are wrapped first so they stay readable, and\ncode blocks are left alone. Answers then appear line by line instead of\nword by word.\n\n`--rtl auto` (the default, or `$BRAIN_CHAT_RTL`) does this in terminals\nthat cannot themselves and leaves Konsole, GNOME Terminal and mlterm (which\nreorder by themselves) and pipes or files alone; `--rtl on`/`off` force it.\n\nOne limit: the question you are typing at `you>` is drawn by Python's line\neditor, which does not reorder, so in such a terminal it looks backwards\nwhile you type; when you press Enter, brain-chat redraws it the right way.\n\n## How it answers\"\"\"),\n(\"\"\"make chat-test                 # offline: 23 tests, no API calls\"\"\",\"\"\"make chat-test                 # offline: 32 tests, no API calls\"\"\"),\n(\"\"\"The offline tests cover the redaction, the tools against a real brain data\"\"\",\"\"\"The offline tests cover the redaction, right-to-left rendering, the tools\nagainst a real brain data\"\"\"),\n])\nedit('PLAN.md',[\n(\"\"\"- **Why Python**: there is no official Anthropic SDK for Rust,\"\"\",\"\"\"- **Right-to-left text**: answers come in the language of the question. In\n  terminals without bidirectional rendering (Ghostty, kitty, Alacritty)\n  brain-chat writes each line in visual order with the Unicode\n  Bidirectional Algorithm (python-bidi), wraps long lines first, and\n  right-aligns right-to-left lines; code blocks stay as they are. Konsole,\n  GNOME Terminal and pipes are left alone (auto-detected; `--rtl` forces\n  it). The question being typed is drawn by Python's line editor, which\n  cannot reorder; it is redrawn correctly after Enter.\n- **Why Python**: there is no official Anthropic SDK for Rust,\"\"\"),\n])\nedit('README.md',[\n(\"\"\"**Tool results go to Anthropic's API**: likely secrets\"\"\",\"\"\"Ask in Hebrew and it answers in Hebrew, drawn right to left even in\nterminals that cannot do that themselves, like Ghostty.\n**Tool results go to Anthropic's API**: likely secrets\"\"\"),\n])\nEOF\ngit add chat README.md PLAN.md && git status --short && git commit -q -F - <<'EOF'\nShow right-to-left text in brain-chat\n\nHebrew answers looked backwards in the owner's terminal, Ghostty,\nwhich (like kitty and Alacritty) draws text left to right without\nbidirectional reordering. With --rtl auto (default), brain-chat now\nwrites each line in visual order using the Unicode Bidirectional\nAlgorithm (python-bidi, pinned), wraps long lines before reordering so\nthe terminal does not break them, and right-aligns right-to-left lines\nlike a chat app, as the owner chose; English words, numbers and\ncommands keep their order and code blocks are untouched. Konsole, GNOME\nTerminal, mlterm and pipes are left alone, since reordering twice would\nreverse the text again. Answers then stream line by line.\n\nThe system prompt asks for answers in the user's language. A question\ntyped in Hebrew is redrawn in visual order after Enter, because Python's\nline editor cannot reorder while typing (documented as a limit).\nNine offline tests cover the reordering, wrapping, alignment, code\nblocks, streaming in pieces and the auto-detection.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClau
+… [663 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+M  PLAN.md
+M  README.md
+M  chat/README.md
+M  chat/brain_chat.py
+M  chat/requirements.txt
+A  chat/rtl.py
+A  chat/tests/test_rtl.py
+email: 0 key-shaped: 0
+5069712 Refresh AI logs
+d4c890f Show right-to-left text in brain-chat
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:33:31.625Z</sub>
+
+brain-chat now shows Hebrew right to left and right-aligned, like a chat app. It's pushed (`d4c890f`), and the logs were checked clean (no email, nothing key-shaped). All 32 offline tests pass, but I can't see how Ghostty draws the result, so please check it with the demo below.
+
+**How it behaves**
+- **Reordering:** with the new `--rtl auto` option (the default), each line is written in visual order using the Unicode BiDi algorithm (`python-bidi`, pinned at 0.6.12). Lines whose text is mainly RTL are right-aligned to the window width. English words, numbers and commands inside a Hebrew line keep their order (`df -h`, `10:00`, `prod-db`).
+- **Wrapping:** long lines are wrapped before reordering, so Ghostty's own wrapping can't scramble them.
+- **Code blocks** are never reordered or aligned.
+- **Where it applies:** on in terminals without their own BiDi (Ghostty, kitty, Alacritty, xterm). Off in Konsole, GNOME Terminal and mlterm, which reorder by themselves, and for pipes and files. `--rtl on` or `--rtl off` forces it either way.
+- **Language:** answers come in the language you ask in.
+- **Streaming:** with RTL on, answers appear line by line instead of word by word.
+- **Your question:** a Hebrew question still looks backwards while you type it, because Python's line editor can't reorder. When you press Enter it's redrawn correctly. The README states this limit.
+
+**Tests:** the 9 new tests cover reordering, mixed Hebrew/English lines, alignment, wrapping, code blocks, text arriving in pieces, and when RTL turns on.
+
+**To check it in Ghostty without an API call,** this prints a sample answer through the same renderer:
+```sh
+cd ~/Documents/shadow-assistant
+chat/.venv/bin/python -c 'import sys; sys.path.insert(0,"chat"); import rtl; r=rtl.LineRenderer(sys.stdout.write); r.feed("אתמול הרצת 3 פקודות על prod-db:\n```\ndf -h\nsudo systemctl restart nginx\n```\n- הפקודה הראשונה, df -h, רצה ב-10:00.\nThe rest of the day was in English.\n"); r.finish()'
+```
+Expected:
+- the Hebrew lines read correctly from the right edge, with `prod-db`, `df -h` and `10:00` readable inside them;
+- the code block stays at the left;
+- the English line is untouched.
+
+Then try a real question in Hebrew, for example `chat/brain-chat --data-dir ~/brain-data "אילו פקודות הרצתי היום?"`.
+
+## User  <sub>2026-11-18T13:35:32.016Z</sub>
+
+why is nginx needed?
+
+## Assistant  <sub>2026-11-18T13:35:40.394Z</sub>
+
+It isn't needed. Nothing in brain or brain-chat uses nginx, installs it, or runs it.
+
+`nginx` only appears as **made-up example text**:
+- **In the test fixture** (`chat/tests/fixture.py`): the tests write a fake capture log of an invented day, in which "you" ssh into a server called `prod-db` and type `df -h`, `sudo systemctl restart nginx`, a password, a `curl` and `exit`. I picked a realistic-looking server session so the tests look like your real question ("which commands did I run on <server>?"). The sudo line also gives the redaction a password prompt to catch.
+- **In the live check and the RTL demo:** the same invented commands, as text.
+
+These commands are never executed. They're only keystrokes in a fake log that brain indexes, the same as if you had typed them. The test checks that brain-chat finds them and masks the password, nothing more. Any other command would work just as well. If you'd rather not see nginx there, I can replace it with something neutral.
+
+## User  <sub>2026-11-18T13:42:03.154Z</sub>
+
+how can i choose a model for my brain-chat i want it to be configurable
+
+## Assistant  <sub>2026-11-18T13:42:20.379Z</sub>
+
+You can already choose a model, per run:
+
+```sh
+chat/brain-chat --model claude-sonnet-5-5 --data-dir ~/brain-data
+chat/brain-chat --model claude-haiku-5-5 --effort low "what did I write in Kate today?"
+```
+
+The default is `claude-opus-5-5` at effort `low`. It's a command-line flag only, though, and switching models is less safe than it looks: brain-chat always sends the server-side refusal fallback, which only some models accept (Opus 5.5, Opus 5, Sonnet 5.5, Fable 5.1 and 5.2). With Haiku, for example, the request could be rejected.
+
+**What I'd add to make it properly configurable:**
+1. **A default that sticks:** `BRAIN_CHAT_MODEL` and `BRAIN_CHAT_EFFORT` environment variables, so `export BRAIN_CHAT_MODEL=claude-sonnet-5-5` in your shell profile applies to every run. `--model` still overrides it.
+2. **Requests that fit the model:** send the refusal fallback only to models that accept it, and leave it out for others (Haiku, older models), so any current model works.
+3. **`brain-chat --list-models`:** lists the models your key can use, from Anthropic's Models API. That call costs no tokens.
+4. **Tests:** the request built for a model with fallback support and for one without (offline, with the mock transport), plus the environment variable and flag precedence.
+5. **Docs:** the brain-chat README and the root README section.
+
+On cost: Sonnet 5.5 is half Opus 5.5's price per token, and Haiku 5.5 much cheaper still. My guess is that Haiku is often enough for simple lookups, while Opus is better at multi-step questions ("what was I working on before the meeting?"). I haven't measured that.
+
+Should I go ahead with all of it?
+
+## User  <sub>2026-11-18T13:45:54.654Z</sub>
+
+no need, let's just add a nice print in the beginning of brain chat that shows its current running config
+
+## Assistant  <sub>2026-11-18T13:46:06.496Z</sub>
+
+A short block at startup, printed to stderr (so a piped answer stays clean), dimmed, showing the model and effort, data folder, brain binary, RTL state and why, the fallback, and the tool-round limit. The RTL decision needs to say why it was made, so `rtl.enabled` gets a sibling that returns the reason:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('chat/rtl.py',[\n(\"\"\"def enabled(mode: str, stream, env=os.environ) -> bool:\n    \\\"\\\"\\\"Whether brain-chat should reorder: `on`, `off`, or `auto` (on for a\n    terminal that does not reorder by itself; off for pipes and files).\\\"\\\"\\\"\n    if mode in (\"on\", \"off\"):\n        return mode == \"on\"\n    if not stream.isatty():\n        return False\n    if any(env.get(v) for v in _BIDI_TERMINAL_VARS) or env.get(\"TERM\", \"\").startswith(\"mlterm\"):\n        return False\n    return True\"\"\",\"\"\"def decide(mode: str, stream, env=os.environ) -> tuple[bool, str]:\n    \\\"\\\"\\\"Whether brain-chat should reorder, and why: `on`, `off`, or `auto`\n    (on for a terminal that does not reorder by itself; off for pipes and\n    files).\\\"\\\"\\\"\n    if mode in (\"on\", \"off\"):\n        return mode == \"on\", f\"--rtl {mode}\"\n    if not stream.isatty():\n        return False, \"output is not a terminal\"\n    if env.get(\"KONSOLE_VERSION\"):\n        return False, \"Konsole reorders by itself\"\n    if env.get(\"VTE_VERSION\"):\n        return False, \"GNOME Terminal (VTE) reorders by itself\"\n    if env.get(\"TERM\", \"\").startswith(\"mlterm\"):\n        return False, \"mlterm reorders by itself\"\n    terminal = env.get(\"TERM_PROGRAM\") or env.get(\"TERM\") or \"this terminal\"\n    return True, f\"{terminal} does not reorder\"\n\n\ndef enabled(mode: str, stream, env=os.environ) -> bool:\n    return decide(mode, stream, env)[0]\"\"\"),\n(\"\"\"# Terminals that do bidirectional rendering themselves.\n_BIDI_TERMINAL_VARS = (\"KONSOLE_VERSION\", \"VTE_VERSION\")\n\n\n\"\"\",\"\"\"\"\"\"),\n])\nedit('chat/brain_chat.py',[\n(\"\"\"def redraw_question(question: str) -> None:\"\"\",\"\"\"def banner(model, effort, fallback, data_dir, brain, rtl_state) -> str:\n    \\\"\\\"\\\"The running configuration, shown when brain-chat starts.\\\"\\\"\\\"\n    home = os.path.expanduser(\"~\")\n    short = lambda p: \"~\" + p[len(home):] if p.startswith(home + os.sep) else p  # noqa: E731\n    found = shutil.which(brain)\n    on, why = rtl_state\n    rows = [\n        (\"model\", f\"{model}, effort {effort}, refusal fallback {'on' if fallback else 'off'}\"),\n        (\"data\", short(os.path.abspath(data_dir))),\n        (\"brain\", short(found) if found else f\"{brain} (not found)\"),\n        (\"rtl\", f\"{'on' if on else 'off'} ({why})\"),\n        (\"limits\", f\"{MAX_TOOL_ROUNDS} tool rounds per question, results redacted before sending\"),\n    ]\n    return \"brain-chat\\\\n\" + \"\\\\n\".join(f\"  {k:<7} {v}\" for k, v in rows)\n\n\ndef redraw_question(question: str) -> None:\"\"\"),\n(\"\"\"    rtl_on = rtl.enabled(args.rtl, sys.stdout)\n    if rtl_on:\n        try:\n            import bidi  # noqa: F401\n        except ImportError:\n            print(\"brain-chat: python-bidi is not installed (make chat-setup); RTL off\", file=sys.stderr)\n            rtl_on = False\"\"\",\"\"\"    rtl_on, rtl_why = rtl.decide(args.rtl, sys.stdout)\n    if rtl_on:\n        try:\n            import bidi  # noqa: F401\n        except ImportError:\n            rtl_on, rtl_why = False, \"python-bidi is not installed (make chat-setup)\"\n    print(\n        dim(banner(args.model, args.effort, not args.no_fallback, args.data_dir, args.brain, (rtl_on, rtl_why))),\n        file=sys.stderr,\n    )\"\"\"),\n])\np='chat/tests/test_rtl.py'; s=open(p).read()\ns=s.replace(\"\"\"    def test_forced(self):\"\"\",\"\"\"    def test_reasons(self):\n        self.assertEqual(rtl.decide(\"auto\", Tty(True), {\"TERM_PROGRAM\": \"ghostty\"}), (True, \"ghostty does not reorder\"))\n        self.assertEqual(rtl.decide(\"auto\", Tty(True), {\"KONSOLE_VERSION\": \"1\"}), (False, \"Konsole reorders by itself\"))\n        self.assertEqual(rtl.de
+… [1804 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+Ran 34 tests in 10.207s
+
+OK
+brain-chat
+  model   claude-opus-5-5, effort low, refusal fallback on
+  data    ~/brain-data
+  brain   ../target/release/brain
+  rtl     on (ghostty does not reorder)
+  limits  10 tool rounds per question, results redacted before sending
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:46:40.275Z</sub>
+
+All 34 chat tests pass, and the preview looks right. One fix: when `--brain` is a relative path, it's shown as typed; it should be absolute:
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "cd /home/juan/Documents/shadow-assistant && python3 - <<'EOF'\np='chat/brain_chat.py'; s=open(p).read()\nold='''        (\"brain\", short(found) if found else f\"{brain} (not found)\"),'''\nnew='''        (\"brain\", short(os.path.abspath(found)) if found else f\"{brain} (not found)\"),'''\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\np='chat/README.md'; s=open(p).read()\nold='''Without a question it opens a chat; follow-up questions keep the context.\nCtrl+C stops an answer, Ctrl+D quits.'''\nnew='''Without a question it opens a chat; follow-up questions keep the context.\nCtrl+C stops an answer, Ctrl+D quits. It starts by showing its running\nconfiguration (on stderr, so a piped answer stays clean):\n\n```\nbrain-chat\n  model   claude-opus-5-5, effort low, refusal fallback on\n  data    ~/brain-data\n  brain   /usr/bin/brain\n  rtl     on (ghostty does not reorder)\n  limits  10 tool rounds per question, results redacted before sending\n```'''\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\np='chat/README.md'; s=open(p).read()\ns=s.replace(\"make chat-test                 # offline: 32 tests, no API calls\",\"make chat-test                 # offline: 34 tests, no API calls\")\nopen(p,'w').write(s)\nEOF\nmake chat-test 2>&1 | tail -2; rm -rf chat/__pycache__ chat/tests/__pycache__; git add chat && git commit -q -F - <<'EOF'\nShow brain-chat's running configuration at start\n\nThe owner wants to see how brain-chat is configured when it starts. It\nnow prints, on stderr and dimmed so a piped answer stays clean: the\nmodel, effort and refusal fallback, the data directory, the brain\nbinary it found (or that it found none), whether right-to-left\nrendering is on and why (rtl.decide now returns the reason: --rtl, a\npipe, a terminal that reorders by itself, or one that does not), and\nthe tool-round limit. Tests cover the banner and the reasons.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null; echo \"email: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}') key-shaped: $(grep -rcE 'sk-ant-usr-[A-Za-z0-9]' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2",
+  "description": "Show absolute brain path; document; commit and push",
+  "timeout": 300000
+}
+````
+
