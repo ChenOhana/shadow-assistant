@@ -680,10 +680,10 @@ a subprocess with an argument list.
   trade-off the owner accepted.
 - **Queries**: search words are quoted for FTS5 and all SQL uses bound
   parameters.
-- **Hardware checks that need privileges** get exactly two narrow ones
+- **Hardware checks that need privileges** get exactly one narrow one
   (`scripts/setup-test-permissions.sh`): `/dev/uinput` for the user at the
-  local seat (the Kate tests), and passwordless `rtcwake -m no -s 30` only
-  (the manual sleep/wake check).
+  local seat (the Kate tests). The manual sleep/wake check sets its wake
+  alarm with an ordinary `sudo rtcwake`.
 
 ## 9. Testing strategy
 
