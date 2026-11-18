@@ -1,8 +1,9 @@
-//! `brain query`: `search` over sessions and `text` over the log.
+//! `brain query`: `search`, `sessions` and `apps` over sessions, and `text`
+//! over the log.
 //!
-//! Both run while `brain run` writes. `search` is a single SELECT on a
-//! read-only connection, so it sees one consistent snapshot of the index
-//! (WAL). `text` reads the capture log, whose reader only returns complete
+//! All run while `brain run` writes. `search`, `sessions` and `apps` read
+//! the index on a read-only connection, inside one transaction, so each sees
+//! one consistent snapshot (WAL). `text` reads the capture log, whose reader only returns complete
 //! lines, starting at the checkpoint just before its time range, and runs
 //! the range's keys through the tier 0/1 reconstruction, one text per app
 //! window.
@@ -34,9 +35,12 @@ pub struct TimeFlags {
     pub to: Option<String>,
 }
 
+/// How a command reads an absent window: `Text` covers the last 10 minutes
+/// (and `--to` alone the 10 minutes ending there); `Sessions` (search,
+/// sessions, apps) covers all time (and `--to` alone everything up to it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Command {
-    Search,
+    Sessions,
     Text,
 }
 
@@ -85,7 +89,7 @@ fn resolve(flags: &TimeFlags, cmd: Command, now: Millis) -> Result<Window> {
             to: Some(t),
             at: None,
         },
-        (None, None, Some(t), Command::Search) => Window {
+        (None, None, Some(t), Command::Sessions) => Window {
             from: None,
             to: Some(t),
             at: None,
@@ -95,7 +99,7 @@ fn resolve(flags: &TimeFlags, cmd: Command, now: Millis) -> Result<Window> {
             to: Some(now),
             at: None,
         },
-        (None, None, None, Command::Search) => Window {
+        (None, None, None, Command::Sessions) => Window {
             from: None,
             to: None,
             at: None,
@@ -116,6 +120,53 @@ fn resolve(flags: &TimeFlags, cmd: Command, now: Millis) -> Result<Window> {
 /// Output times are local, with their offset (the database stores UTC).
 fn fmt_opt(t: Option<Millis>) -> Option<String> {
     t.map(timefmt::format_local)
+}
+
+/// SQL conditions on the `sessions` table with their bound parameters, built
+/// up by the commands that read it.
+#[derive(Default)]
+struct Filter {
+    sql: String,
+    params: Vec<Box<dyn rusqlite::ToSql>>,
+}
+
+impl Filter {
+    /// Binds `value` and returns its placeholder (`?3`).
+    fn bind(&mut self, value: impl rusqlite::ToSql + 'static) -> String {
+        self.params.push(Box::new(value));
+        format!("?{}", self.params.len())
+    }
+
+    /// Adds a condition; the one `?` in `cond` stands for `value`.
+    fn and(&mut self, cond: &str, value: impl rusqlite::ToSql + 'static) {
+        let p = self.bind(value);
+        self.sql += &format!(" AND {}", cond.replace('?', &p));
+    }
+
+    /// `column` contains `value` anywhere, ignoring case (ASCII).
+    fn contains(&mut self, column: &str, value: &str) {
+        self.and(
+            &format!("{column} LIKE ? ESCAPE '\\'"),
+            like_contains(value),
+        );
+    }
+
+    /// The session overlaps the window: it started before the window ends
+    /// and ended (or is still open, i.e. "ends now") after it starts.
+    fn overlaps(&mut self, w: &Window, now: Millis) {
+        if let Some(to) = w.to {
+            self.and("started_at <= ?", timefmt::format_ms(to));
+        }
+        if let Some(from) = w.from {
+            let now = self.bind(timefmt::format_ms(now));
+            let from = self.bind(timefmt::format_ms(from));
+            self.sql += &format!(" AND COALESCE(ended_at, {now}) >= {from}");
+        }
+    }
+
+    fn params(&self) -> impl rusqlite::Params + '_ {
+        rusqlite::params_from_iter(self.params.iter())
+    }
 }
 
 /// `LIKE` pattern matching `s` anywhere (case-insensitive for ASCII).
@@ -169,7 +220,7 @@ pub fn search(
     if limit == 0 {
         bail!("--limit must be at least 1");
     }
-    let w = resolve(flags, Command::Search, now)?;
+    let w = resolve(flags, Command::Sessions, now)?;
     let conn = store::open_reader(&dir.db_path())?;
 
     // Words of 3+ characters use the trigram index; shorter ones cannot, and
@@ -179,43 +230,29 @@ pub fn search(
         .filter(|w| w.chars().count() >= 3)
         .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
         .collect();
-    let mut sql = String::from(
-        "SELECT id, app, window, started_at, ended_at, reconstructed_text FROM sessions
-         WHERE reconstructed_text IS NOT NULL",
-    );
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut f = Filter::default();
     if !long.is_empty() {
-        params.push(Box::new(long.join(" AND ")));
-        sql += &format!(
-            " AND id IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?{})",
-            params.len()
+        f.and(
+            "id IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?)",
+            long.join(" AND "),
         );
     }
     for short in words.iter().filter(|w| w.chars().count() < 3) {
-        params.push(Box::new(like_contains(short)));
-        sql += &format!(" AND reconstructed_text LIKE ?{} ESCAPE '\\'", params.len());
+        f.contains("reconstructed_text", short);
     }
     if let Some(app) = app {
-        params.push(Box::new(like_contains(app)));
-        sql += &format!(" AND app LIKE ?{} ESCAPE '\\'", params.len());
+        f.contains("app", app);
     }
-    // A session overlaps the window if it started before the window ends
-    // and ended (or is still open, i.e. "ends now") after it starts.
-    if let Some(to) = w.to {
-        params.push(Box::new(timefmt::format_ms(to)));
-        sql += &format!(" AND started_at <= ?{}", params.len());
-    }
-    if let Some(from) = w.from {
-        params.push(Box::new(timefmt::format_ms(from)));
-        let n = params.len();
-        params.push(Box::new(timefmt::format_ms(now)));
-        sql += &format!(" AND COALESCE(ended_at, ?{}) >= ?{n}", params.len());
-    }
-    params.push(Box::new(limit as i64));
-    sql += &format!(" ORDER BY started_at DESC, id DESC LIMIT ?{}", params.len());
+    f.overlaps(&w, now);
+    let limit = f.bind(limit as i64);
+    let sql = format!(
+        "SELECT id, app, window, started_at, ended_at, reconstructed_text FROM sessions
+         WHERE reconstructed_text IS NOT NULL{} ORDER BY started_at DESC, id DESC LIMIT {limit}",
+        f.sql
+    );
 
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+    let rows = stmt.query_map(f.params(), |r| {
         let text: String = r.get(5)?;
         Ok(SearchResult {
             session_id: r.get::<_, i64>(0)?.to_string(),
@@ -278,6 +315,151 @@ fn find(hay: &[char], needle: &[char]) -> Option<usize> {
         return None;
     }
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+// ---- sessions ---------------------------------------------------------------
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct Session {
+    pub session_id: String,
+    pub app: String,
+    pub window: String,
+    pub started_at: String,
+    /// `None` while the session is still open.
+    pub ended_at: Option<String>,
+    /// `idle`, `commit` (a submitted line, e.g. a shell command), `cancel`,
+    /// `field`, `stop` or `restart`; `None` while open.
+    pub end_reason: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionsOutput {
+    pub app: Option<String>,
+    pub window: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// How many sessions match in all (the page is `offset..offset+limit`).
+    pub total: u64,
+    pub offset: usize,
+    pub sessions: Vec<Session>,
+}
+
+/// Sessions in the time window, oldest first, with their full text,
+/// optionally only of apps whose id contains `app` and windows whose title
+/// contains `window` (both ignoring case). In a terminal every submitted
+/// command is a session, and the title usually names the host
+/// (`user@host: dir`), so `--window host` lists the commands run there.
+pub fn sessions(
+    dir: &DataDir,
+    app: Option<&str>,
+    window: Option<&str>,
+    flags: &TimeFlags,
+    limit: usize,
+    offset: usize,
+    now: Millis,
+) -> Result<SessionsOutput> {
+    if limit == 0 {
+        bail!("--limit must be at least 1");
+    }
+    let w = resolve(flags, Command::Sessions, now)?;
+    let mut f = Filter::default();
+    if let Some(app) = app {
+        f.contains("app", app);
+    }
+    if let Some(window) = window {
+        f.contains("window", window);
+    }
+    f.overlaps(&w, now);
+    let mut conn = store::open_reader(&dir.db_path())?;
+    // One snapshot for the count and the page.
+    let tx = conn.transaction()?;
+    let total: i64 = tx.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM sessions WHERE reconstructed_text IS NOT NULL{}",
+            f.sql
+        ),
+        f.params(),
+        |r| r.get(0),
+    )?;
+    let (limit, offset_p) = (f.bind(limit as i64), f.bind(offset as i64));
+    let sql = format!(
+        "SELECT id, app, window, started_at, ended_at, end_reason, reconstructed_text
+         FROM sessions WHERE reconstructed_text IS NOT NULL{}
+         ORDER BY started_at, id LIMIT {limit} OFFSET {offset_p}",
+        f.sql
+    );
+    let mut stmt = tx.prepare(&sql)?;
+    let rows = stmt.query_map(f.params(), |r| {
+        Ok(Session {
+            session_id: r.get::<_, i64>(0)?.to_string(),
+            app: r.get(1)?,
+            window: r.get(2)?,
+            started_at: timefmt::to_local(&r.get::<_, String>(3)?),
+            ended_at: r
+                .get::<_, Option<String>>(4)?
+                .map(|t| timefmt::to_local(&t)),
+            end_reason: r.get(5)?,
+            text: r.get(6)?,
+        })
+    })?;
+    let sessions = rows.collect::<rusqlite::Result<_>>()?;
+    Ok(SessionsOutput {
+        app: app.map(str::to_string),
+        window: window.map(str::to_string),
+        from: fmt_opt(w.from),
+        to: fmt_opt(w.to),
+        total: total as u64,
+        offset,
+        sessions,
+    })
+}
+
+// ---- apps -------------------------------------------------------------------
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct App {
+    pub app: String,
+    pub sessions: u64,
+    pub first_started_at: String,
+    /// When its last session in the window ended (or started, if still open).
+    pub last_active_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppsOutput {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub apps: Vec<App>,
+}
+
+/// The apps with sessions in the time window, most recently active first:
+/// the ids to pass to `--app`.
+pub fn apps(dir: &DataDir, flags: &TimeFlags, now: Millis) -> Result<AppsOutput> {
+    let w = resolve(flags, Command::Sessions, now)?;
+    let mut f = Filter::default();
+    f.overlaps(&w, now);
+    let conn = store::open_reader(&dir.db_path())?;
+    let sql = format!(
+        "SELECT app, COUNT(*), MIN(started_at), MAX(COALESCE(ended_at, started_at)) AS last
+         FROM sessions WHERE reconstructed_text IS NOT NULL{}
+         GROUP BY app ORDER BY last DESC, app",
+        f.sql
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(f.params(), |r| {
+        Ok(App {
+            app: r.get(0)?,
+            sessions: r.get::<_, i64>(1)? as u64,
+            first_started_at: timefmt::to_local(&r.get::<_, String>(2)?),
+            last_active_at: timefmt::to_local(&r.get::<_, String>(3)?),
+        })
+    })?;
+    Ok(AppsOutput {
+        from: fmt_opt(w.from),
+        to: fmt_opt(w.to),
+        apps: rows.collect::<rusqlite::Result<_>>()?,
+    })
 }
 
 // ---- text -----------------------------------------------------------------
@@ -506,9 +688,9 @@ mod tests {
             w(flags(None, None, None), Command::Text).from,
             Some(NOW - ten)
         );
-        assert_eq!(w(flags(None, None, None), Command::Search).from, None);
+        assert_eq!(w(flags(None, None, None), Command::Sessions).from, None);
         // --at: the 10 minutes ending at T, for both.
-        for c in [Command::Text, Command::Search] {
+        for c in [Command::Text, Command::Sessions] {
             let x = w(flags(Some("-1h"), None, None), c);
             assert_eq!(
                 (x.from, x.to, x.at),
@@ -516,7 +698,7 @@ mod tests {
             );
         }
         // --from alone: up to now.
-        let x = w(flags(None, Some("-2h"), None), Command::Search);
+        let x = w(flags(None, Some("-2h"), None), Command::Sessions);
         assert_eq!((x.from, x.to), (Some(NOW - 2 * h), Some(NOW)));
         // --to alone.
         assert_eq!(
@@ -524,7 +706,7 @@ mod tests {
             Some(NOW - h - ten)
         );
         assert_eq!(
-            w(flags(None, None, Some("-1h")), Command::Search).from,
+            w(flags(None, None, Some("-1h")), Command::Sessions).from,
             None
         );
         // Both.

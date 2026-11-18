@@ -92,6 +92,36 @@ enum Query {
         #[arg(long, value_name = "N", default_value_t = 20)]
         limit: usize,
     },
+    /// Writing sessions in the time window, oldest first, with their full
+    /// text: of apps whose id contains A, in windows whose title contains W.
+    /// In a terminal each submitted command is a session and the title
+    /// usually names the host, so --window HOST lists the commands run
+    /// there. Without time flags it covers all time; --to alone means up to T.
+    #[command(after_help = TIME_HELP)]
+    Sessions {
+        /// Only apps whose id contains A (case-insensitive), e.g. konsole.
+        #[arg(long, value_name = "A")]
+        app: Option<String>,
+        /// Only windows whose title contains W (case-insensitive).
+        #[arg(long, value_name = "W")]
+        window: Option<String>,
+        #[command(flatten)]
+        time: TimeArgs,
+        /// At most N sessions.
+        #[arg(long, value_name = "N", default_value_t = 50)]
+        limit: usize,
+        /// Skip the first K matching sessions (for the next page).
+        #[arg(long, value_name = "K", default_value_t = 0)]
+        offset: usize,
+    },
+    /// The apps with sessions in the time window, most recently active
+    /// first, with session counts: the ids --app accepts. Without time flags
+    /// it covers all time.
+    #[command(after_help = TIME_HELP)]
+    Apps {
+        #[command(flatten)]
+        time: TimeArgs,
+    },
     /// What was typed into an app in the time range, reconstructed (edits
     /// applied) per window title with the app's rules; each window's text
     /// starts empty at the start of the range. Without time flags it covers
@@ -148,6 +178,26 @@ fn dispatch(cli: Cli) -> Result<()> {
                         app.as_deref(),
                         &time.into(),
                         limit,
+                        now,
+                    )?)?,
+                    Query::Sessions {
+                        app,
+                        window,
+                        time,
+                        limit,
+                        offset,
+                    } => serde_json::to_string_pretty(&brain::query::sessions(
+                        &data_dir,
+                        app.as_deref(),
+                        window.as_deref(),
+                        &time.into(),
+                        limit,
+                        offset,
+                        now,
+                    )?)?,
+                    Query::Apps { time } => serde_json::to_string_pretty(&brain::query::apps(
+                        &data_dir,
+                        &time.into(),
                         now,
                     )?)?,
                     Query::Text { app, time } => serde_json::to_string_pretty(

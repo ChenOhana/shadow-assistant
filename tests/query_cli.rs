@@ -201,6 +201,146 @@ fn search_semantics_and_shapes() {
     );
 }
 
+/// A terminal day: a local shell, an ssh session to prod-db (the remote shell
+/// sets the title to `user@host: dir`, as Ubuntu's .bashrc does), another
+/// host, and a note in Kate. Returns the fixture and the start time.
+fn ssh_fixture() -> (tempfile::TempDir, std::path::PathBuf, Millis) {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("data");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut w = LogWriter::open(&dir.join("events.jsonl")).unwrap();
+    let t0 = now_ms() - 3 * 3_600_000;
+    let konsole = "org.kde.konsole";
+    let local = "~ : bash — Konsole";
+    let prod = "juan@prod-db: ~ — Konsole";
+    let mut t = typ(&mut w, t0, konsole, local, "ssh prod-db\n");
+    t = typ(&mut w, t + 1_000, konsole, prod, "df -h\n");
+    t = typ(
+        &mut w,
+        t + 1_000,
+        konsole,
+        prod,
+        "sudo systemctl restart nginx\n",
+    );
+    t = typ(&mut w, t + 1_000, konsole, prod, "exit\n");
+    // An hour later: another host, then a note.
+    t = typ(
+        &mut w,
+        t + 3_600_000,
+        konsole,
+        "juan@staging: /srv — Konsole",
+        "ls\n",
+    );
+    typ(
+        &mut w,
+        t + 1_000,
+        "org.kde.kate",
+        "notes.md — Kate",
+        "restarted nginx on prod",
+    );
+    drop(w);
+    let log = dir.join("events.jsonl");
+    let mut ing = Ingester::new(store::open_writer(&dir.join("brain.db")).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    (tmp, dir, t0)
+}
+
+fn texts(v: &Value) -> Vec<String> {
+    v["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["text"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn sessions_by_window_and_apps() {
+    let (_tmp, d, t0) = ssh_fixture();
+    let d = &d;
+
+    // The commands run on prod-db, oldest first, found by the window title.
+    let (code, v, err) = brain(d, &["sessions", "--app", "konsole", "--window", "PROD-DB"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(texts(&v), ["df -h", "sudo systemctl restart nginx", "exit"]);
+    assert_eq!(v["total"], 3);
+    let s = &v["sessions"][0];
+    for field in [
+        "session_id",
+        "app",
+        "window",
+        "started_at",
+        "ended_at",
+        "end_reason",
+        "text",
+    ] {
+        assert!(s.get(field).is_some(), "missing {field}: {s}");
+    }
+    assert_eq!(s["app"], "org.kde.konsole");
+    assert_eq!(s["end_reason"], "commit");
+    assert_local(&s["started_at"]);
+    assert_eq!(v["window"], "PROD-DB");
+
+    // Paging: total stays, the page moves.
+    let (_, v, _) = brain(
+        d,
+        &[
+            "sessions", "--window", "prod-db", "--limit", "2", "--offset", "1",
+        ],
+    );
+    assert_eq!(texts(&v), ["sudo systemctl restart nginx", "exit"]);
+    assert_eq!(
+        (v["total"].as_u64(), v["offset"].as_u64()),
+        (Some(3), Some(1))
+    );
+
+    // Time windows: the last 150 minutes hold only the staging command (about
+    // 2 h ago) and the note; the prod-db session was 3 h ago.
+    let (_, v, _) = brain(d, &["sessions", "--from", "-150m"]);
+    assert_eq!(texts(&v), ["ls", "restarted nginx on prod"]);
+    let at = format_ms(t0 + 30_000);
+    let (_, v, _) = brain(d, &["sessions", "--app", "konsole", "--at", &at]);
+    assert_eq!(
+        texts(&v),
+        [
+            "ssh prod-db",
+            "df -h",
+            "sudo systemctl restart nginx",
+            "exit"
+        ]
+    );
+
+    // The apps, most recently active first, with their session counts.
+    let (code, v, err) = brain(d, &["apps"]);
+    assert_eq!(code, 0, "{err}");
+    let apps: Vec<(String, u64)> = v["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| {
+            (
+                a["app"].as_str().unwrap().to_string(),
+                a["sessions"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        apps,
+        [
+            ("org.kde.kate".to_string(), 1),
+            ("org.kde.konsole".to_string(), 5)
+        ]
+    );
+    assert_local(&v["apps"][0]["last_active_at"]);
+    let (_, v, _) = brain(d, &["apps", "--to", &format_ms(t0 + 60_000)]);
+    assert_eq!(v["apps"].as_array().unwrap().len(), 1);
+
+    // Errors.
+    let (code, _, err) = brain(d, &["sessions", "--limit", "0"]);
+    assert_ne!(code, 0);
+    assert!(err.contains("--limit"), "{err}");
+}
+
 #[test]
 fn search_time_windows() {
     let f = fixture();
