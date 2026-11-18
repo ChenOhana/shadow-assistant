@@ -81,7 +81,8 @@ GNOME Shell.
 ## Code map
 
 ```
-src/main.rs              CLI (clap), error → stderr + exit 1
+src/main.rs              dispatches the commands, error → stderr + exit 1
+src/cli.rs               the command-line definition (clap); its /// is --help
 src/capture/mod.rs       `run` orchestration: platform, ingest thread, signals
 src/capture/platform.rs  the platform interfaces (Platform, Capture) and their contract
 src/capture/recorder.rs  the sink every source writes to: stamps focus, appends to
