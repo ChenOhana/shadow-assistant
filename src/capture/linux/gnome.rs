@@ -85,9 +85,10 @@ impl Desktop for Gnome {
             Err(_) => {
                 eprintln!(
                     "brain: warning: brain's GNOME Shell extension (brain@shadowassistant) is \
-                     not active, so keys are attributed to 'unknown', pastes are not resolved \
-                     and layout switches are not followed. Install it with `make install`, then \
-                     log out and back in once; brain picks it up as soon as it runs."
+                     not active (yet): until it is, keys are attributed to 'unknown', pastes \
+                     are not resolved and layout switches are not followed. If it is not \
+                     installed, run `make install` and log out and back in once; brain picks \
+                     it up as soon as it runs."
                 );
                 false
             }

@@ -628,7 +628,9 @@ window has to be read anyway. Clock steps backwards are discussed in section
   `gnome_e2e` runs a real `brain run` against a private, headless GNOME
   Shell (its own D-Bus session, home and systemd scope) with the extension
   installed: focus to a window without and with a desktop file, focus
-  back, a rename, a switch to Hebrew, the clipboard, and the lock (from a
+  back, a rename, a switch to Hebrew, focus and layout re-reported when the
+  extension is re-enabled (as around the lock screen), the clipboard, and
+  the lock (from a
   stand-in for GNOME's lock service: the private shell has no login
   session, on purpose, so it cannot reach the real session's lock state);
   `vscode_replay` and `tier2_e2e`'s replay tests drive real VS Code. The

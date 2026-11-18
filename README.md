@@ -36,7 +36,8 @@ VS Code installed (`/usr/bin/code`, or the snap).
 cargo build --release
 # binary: target/release/brain
 
-# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+# or build and install to /usr/bin/brain (asks for sudo for the copy only),
+# plus brain's GNOME Shell extension for your user when GNOME is installed:
 make
 ```
 
@@ -102,8 +103,8 @@ private to you (mode 0700) before starting it. Pass that directory to
 `systemctl --user clean --what=state brain`, unless `KEEP_DATA=1` is given.
 Only one `brain run` can use a data directory at a time; runs on separate
 directories work side by side (a test run next to the service, say), and
-each records everything you type. The service runs
-without `--vscode-replay`; add it to `ExecStart` in
+each records everything you type. The service runs without
+`--vscode-replay`; add it to `ExecStart` in
 `~/.config/systemd/user/brain.service` to turn it on.
 
 Data directory (mode 0700):
@@ -340,6 +341,12 @@ database read-only and reopen it to see the current state.
   compositor: a small KWin script on KDE, a GNOME Shell extension on GNOME,
   both reporting over D-Bus, and brain trusts only reports sent from the
   compositor's own bus connection. PLAN.md compares the alternatives.
+* **GNOME is verified against a real GNOME Shell, run headless** by
+  `tests/gnome_e2e.rs`: focus, renames, layout switches, the clipboard,
+  and the extension being disabled and re-enabled, as GNOME does around
+  the lock screen. Its lock screen is checked only through a stand-in for
+  GNOME's lock service, and a real stock-Ubuntu login has not been tried
+  yet.
 * **Platform layer.** Capture sits behind interfaces
   (`src/capture/platform.rs`): keys from evdev work on any Linux desktop;
   focus, clipboard, lock and keyboard settings come from a backend per

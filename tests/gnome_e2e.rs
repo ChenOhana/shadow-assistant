@@ -11,6 +11,8 @@
 //!   the window's Wayland app id) and to one with a desktop file (the app id
 //!   is the desktop file's name, as for installed apps), and a rename;
 //! * a layout switch to Hebrew, which brain applies to key resolution;
+//! * focus that moved while the extension was disabled, and the layout,
+//!   once it is enabled again (GNOME does that around the lock screen);
 //! * the screen lock, which pauses recording (from a stand-in for GNOME's
 //!   lock service: the private shell has no login session, on purpose, so
 //!   it cannot reach the real session's lock state);
@@ -452,6 +454,44 @@ fn brain_follows_a_real_gnome_shell() {
         "brain to follow the layout switch",
         Duration::from_secs(10),
         || brain_log().contains("keyboard layout switched to il (#1)"),
+    );
+
+    // GNOME disables extensions while the screen is locked and enables them
+    // again after (and may load them after a brain started early at login).
+    // Focus that moved meanwhile, and the layout, arrive on re-enable.
+    let extensions = |method: &str| {
+        gnome
+            .call(
+                "/org/gnome/Shell",
+                &format!("org.gnome.Shell.Extensions.{method}"),
+                &[EXTENSION],
+            )
+            .unwrap();
+    };
+    let switches = || {
+        brain_log()
+            .matches("keyboard layout switched to il")
+            .count()
+    };
+    let before = events(&data).len();
+    extensions("DisableExtension");
+    gnome
+        .call(
+            "/org/shadowassistant/TestHelper",
+            "org.shadowassistant.TestHelper.ActivateWindow",
+            &["brain test app"],
+        )
+        .unwrap();
+    extensions("EnableExtension");
+    wait_until(
+        "the re-enabled extension's reports",
+        Duration::from_secs(10),
+        || {
+            switches() == 2
+                && events(&data)[before..]
+                    .iter()
+                    .any(|e| e["type"] == "focus" && e["app"] == "org.shadowassistant.TestApp")
+        },
     );
 
     // The extension hands out the clipboard (what brain reads at a paste).

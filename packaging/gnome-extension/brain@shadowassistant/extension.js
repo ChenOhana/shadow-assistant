@@ -82,7 +82,11 @@ export default class BrainFocusExtension extends Extension {
         this._sourcesId = this._sources.connect('sources-changed', () =>
             this._dbus.emit_signal('InputSourcesChanged', null));
 
+        // A brain already running (started before GNOME loaded this) learns
+        // the current window and layout now.
         this._onFocus();
+        this._dbus.emit_signal('InputSourceChanged',
+            new GLib.Variant('(s)', [this.InputSource()]));
     }
 
     disable() {
