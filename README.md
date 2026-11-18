@@ -36,6 +36,7 @@ VS Code installed (`/usr/bin/code`, or the snap).
 # Rust toolchain (https://rustup.rs), then:
 cargo build --release
 # binary: target/release/brain
+# (make build does the same; make build-debug builds target/debug/brain)
 
 # or build and install to /usr/bin/brain (asks for sudo for the copy only),
 # plus brain's GNOME Shell extension for your user when GNOME is installed:

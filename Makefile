@@ -2,7 +2,9 @@
 #
 #   make                    build (release) and install to $(BINDIR), plus
 #                           the GNOME Shell extension when GNOME is installed
-#   make build              build only
+#   make build              build only (release: target/release/brain)
+#   make build-debug        debug build, unoptimized with debug info
+#                           (target/debug/brain); not installed
 #   make install-gnome-extension    the GNOME Shell extension only (needed
 #                           for focus tracking on GNOME; log out and in once)
 #   make install-service    install + enable the systemd user service
@@ -20,13 +22,16 @@ PREFIX ?= /usr
 BINDIR ?= $(PREFIX)/bin
 BIN    := target/release/brain
 
-.PHONY: all build install uninstall install-service uninstall-service \
+.PHONY: all build build-debug install uninstall install-service uninstall-service \
 	install-gnome-extension uninstall-gnome-extension chat-setup chat-test
 
 all: install
 
 build:
 	cargo build --release
+
+build-debug:
+	cargo build
 
 install: build
 	sudo install -m 0755 $(BIN) $(BINDIR)/brain
