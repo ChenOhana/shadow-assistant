@@ -3,7 +3,8 @@
 //! real (sandboxed, headless) VS Code, and its tier 2 text written back.
 //!
 //! The replay tests need /usr/bin/code, so they are ignored by default:
-//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.
+//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`
+//! (with `BRAIN_VSCODE_VISIBLE=1` in front, VS Code is shown instead).
 //! The saved-file tests need no VS Code and run with `cargo test`.
 
 use brain::event::{Event, EventKind, Mod, SystemState};

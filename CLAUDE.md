@@ -111,6 +111,8 @@ tests/                   integration tests that drive the real binary;
 - Tests that need VS Code are `#[ignore]`: `cargo test --release --test
   vscode_replay --test tier2_e2e -- --ignored --test-threads=1`
   (`tier2_e2e`'s saved-file tests need no VS Code and run by default).
+  `BRAIN_VSCODE_VISIBLE=1` shows the replay instance as a normal window
+  instead of headless (also for `brain run --vscode-replay`).
 - Every `brain run` a test starts goes through `tests/common::spawn_brain`
   (or `start_brain`): the guard stops it even when the test fails, and
   tests end with `assert_no_brain_on(data)`. No test may leave a process or

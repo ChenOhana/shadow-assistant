@@ -466,6 +466,9 @@ cargo test --release --test repeat_e2e --test real_keyboard_e2e --test two_insta
 # Replay into a real (headless) VS Code, incl. a file opened from outside
 # the window's folder, identified late through VS Code's window state:
 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+# The same, with VS Code shown as a normal window to watch the replays
+# (don't type meanwhile: it takes focus):
+BRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
 ```
 
 `sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`) grants two

@@ -10,7 +10,10 @@
 //!
 //! - **No display server.** Electron's headless Ozone backend
 //!   (`--ozone-platform=headless`): nothing is drawn on screen and no Xvfb or
-//!   nested compositor is needed.
+//!   nested compositor is needed. To watch replays, set
+//!   `BRAIN_VSCODE_VISIBLE=1`: VS Code then opens as a normal Wayland window
+//!   (the Wayland socket is a file, so the network namespace does not block
+//!   it); everything else about the sandbox stays the same.
 //! - **No network.** The instance runs in a fresh network namespace
 //!   (`unshare --map-current-user -n`, unprivileged): only a down loopback
 //!   device, so extensions, telemetry and sync cannot reach anything. The
@@ -201,6 +204,10 @@ struct Instance {
     child: Child,
     cdp: Cdp,
 }
+
+/// Set to `1` to show the replay instance as a normal window (for watching
+/// tests or replays) instead of running it headless.
+pub const VISIBLE_ENV: &str = "BRAIN_VSCODE_VISIBLE";
 
 pub struct VsCodeReplayer {
     work_dir: PathBuf,
@@ -415,9 +422,14 @@ impl VsCodeReplayer {
             Command::new(&unshare)
         };
         cmd.args(["--map-current-user", "-n"]).arg(&bin);
-        cmd.arg("--ozone-platform=headless")
-            .arg("--remote-debugging-pipe")
-            .arg(format!("--user-data-dir={}", user_data.display()));
+        let visible = std::env::var_os(VISIBLE_ENV).is_some_and(|v| v == "1");
+        cmd.arg(if visible {
+            "--ozone-platform=wayland"
+        } else {
+            "--ozone-platform=headless"
+        })
+        .arg("--remote-debugging-pipe")
+        .arg(format!("--user-data-dir={}", user_data.display()));
         match &extensions {
             Some(dir) => cmd.arg(format!("--extensions-dir={}", dir.display())),
             None => cmd
@@ -448,9 +460,11 @@ impl VsCodeReplayer {
                 cmd.env_remove(&k);
             }
         }
-        cmd.env_remove("DISPLAY")
-            .env_remove("WAYLAND_DISPLAY")
-            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
+        cmd.env_remove("DISPLAY");
+        if !visible {
+            cmd.env_remove("WAYLAND_DISPLAY");
+        }
+        cmd.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("XDG_DATA_HOME", home.join(".local/share"))

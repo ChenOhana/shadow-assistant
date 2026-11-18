@@ -2,6 +2,9 @@
 //! /usr/bin/code and take a few seconds each):
 //!
 //!     cargo test --test vscode_replay -- --ignored --test-threads=1
+//!
+//! To watch VS Code while they run, add `BRAIN_VSCODE_VISIBLE=1` in front
+//! (don't type meanwhile: the window takes focus).
 
 use brain::event::Mod;
 use brain::reconstruct::vscode::{ReplayEvent, ReplayInput, VsCodeReplayer};
