@@ -7,7 +7,9 @@ For every session transcript (and each subagent transcript under it):
                              messages, tool calls and (truncated) results
 
 Redaction replaces the given strings (e.g. an email address) everywhere,
-case-insensitively, in both outputs.
+case-insensitively, in both outputs, and always masks anything shaped like
+an Anthropic API key or token (`sk-ant-...`), so a key pasted into a session
+never reaches the repository.
 
 Usage (from the repository root):
   python3 -I scripts/export-ai-logs.py --redact you@example.com \
@@ -23,8 +25,12 @@ MAX_TOOL_INPUT = 4000
 MAX_TOOL_RESULT = 3000
 
 
+# Always masked, whatever --redact says: Anthropic keys and tokens.
+KEY_SHAPES = [re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}")]
+
+
 def redactor(secrets):
-    pats = [re.compile(re.escape(s), re.IGNORECASE) for s in secrets if s]
+    pats = KEY_SHAPES + [re.compile(re.escape(s), re.IGNORECASE) for s in secrets if s]
 
     def apply(text):
         for p in pats:
