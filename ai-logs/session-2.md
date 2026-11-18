@@ -24488,3 +24488,3551 @@ Only my own shell matched. No VS Code instance or sandbox scope is left. Committ
 }
 ```
 
+<details><summary>Tool result</summary>
+
+```
+default suite done
+email hits: 0
+1960940 Refresh AI logs
+933f647 Show the VS Code replay instance on request
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:37:24.361Z</sub>
+
+Setting `BRAIN_VSCODE_VISIBLE=1` now opens VS Code as a normal window, so you can watch the replay tests. It's pushed (`933f647`), and `ai-logs/` is refreshed.
+
+```sh
+BRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+```
+VS Code opens as a normal window and takes focus, so don't type while it runs. To watch a single test, add its name at the end, for example `vscode_undo`.
+
+**What changed:**
+- **`src/reconstruct/vscode/mod.rs`**, launch code only: with the variable set, VS Code starts with `--ozone-platform=wayland` instead of `headless` and keeps `WAYLAND_DISPLAY`. No network, the cut session bus and the CPU/memory caps all still apply. Without the variable nothing changes. It also applies to `brain run --vscode-replay` if set there.
+- **`tests/vscode_replay.rs` and `tests/tier2_e2e.rs`**: only their header comments, which now show the visible command.
+- **`README.md` and `CLAUDE.md`**: the command, one line each.
+
+**Checked:**
+- **Headless, unchanged:** all 14 VS Code tests still pass headless.
+- **Visible:** one test (`vscode_auto_close_and_auto_indent`) passed in visible mode. While it ran, the VS Code process had `--ozone-platform=wayland` and `WAYLAND_DISPLAY` set, so it really opened as a window.
+- **Default suite:** passes, and no VS Code instance or sandbox was left behind.
+
+## User  <sub>2026-11-18T09:38:33.930Z</sub>
+
+actually on your first run the vscode run was stuck and i killed the process from another terminal, let's run all of the new tests again to check it
+
+## Assistant  <sub>2026-11-18T09:38:41.915Z</sub>
+
+I'll look for traces of that killed run first, so I know which one got stuck, then rerun everything new.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "journalctl --user --since \"3 hours ago\" --no-pager 2>/dev/null | grep -iE 'brain-vscode|code.*(killed|signal)|scope.*(fail|kill)' | tail -20",
+  "description": "Search the user journal for killed VS Code scopes"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Nov 18 11:31:41 juan-pc systemd[1501]: Started brain-vscode-807833-1794994301883.scope - [systemd-run] /usr/bin/unshare --map-current-user -n /usr/share/code/code --ozone-platform=headless --remote-debugging-pipe --user-data-dir=/tmp/.tmpcFF8FF/vscode/user-data --extensions-dir=/tmp/.tmpcFF8FF/vscode/no-extensions --disable-extensions --disable-workspace-trust --skip-welcome --skip-release-notes --disable-telemetry --disable-crash-reporter --disable-gpu --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows --password-store=basic --new-window.
+Nov 18 11:32:05 juan-pc systemd[1501]: brain-vscode-807833-1794994301883.scope: Consumed 12.089s CPU time over 24.027s wall clock time, 515.8M memory peak.
+Nov 18 11:32:05 juan-pc systemd[1501]: Started brain-vscode-807833-1794994325930.scope - [systemd-run] /usr/bin/unshare --map-current-user -n /usr/share/code/code --ozone-platform=headless --remote-debugging-pipe --user-data-dir=/tmp/.tmpSLzCLF/vscode/user-data --extensions-dir=/tmp/.tmpSLzCLF/vscode/no-extensions --disable-extensions --disable-workspace-trust --skip-welcome --skip-release-notes --disable-telemetry --disable-crash-reporter --disable-gpu --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows --password-store=basic --new-window.
+Nov 18 11:32:30 juan-pc systemd[1501]: Started brain-vscode-807833-1794994350905.scope - [systemd-run] /usr/bin/unshare --map-current-user -n /usr/share/code/code --ozone-platform=headless --remote-debugging-pipe --user-data-dir=/tmp/.tmpiL87gS/vscode/user-data --extensions-dir=/tmp/.tmpiL87gS/vscode/no-extensions --disable-extensions --disable-workspace-trust --skip-welcome --skip-release-notes --disable-telemetry --disable-crash-reporter --disable-gpu --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows --password-store=basic --new-window.
+Nov 18 11:32:31 juan-pc systemd[1501]: brain-vscode-807833-1794994325930.scope: Consumed 12.564s CPU time over 25.108s wall clock time, 520.2M memory peak.
+Nov 18 11:32:38 juan-pc systemd[1501]: brain-vscode-807833-1794994350905.scope: Consumed 4.038s CPU time over 8.019s wall clock time, 301.4M memory peak.
+Nov 18 11:32:39 juan-pc systemd[1501]: Started brain-vscode-807833-1794994359461.scope - [systemd-run] /usr/bin/unshare --map-current-user -n /usr/share/code/code --ozone-platform=headless --remote-debugging-pipe --user-data-dir=/tmp/.tmp0DCP4L/vscode/user-data --extensions-dir=/tmp/.tmp0DCP4L/vscode/no-extensions --disable-extensions --disable-workspace-trust --skip-welcome --skip-release-notes --disable-telemetry --disable-crash-reporter --disable-gpu --disable-renderer-backgrounding --disable-background-timer-throttling --disable-backgrounding-occluded-windows --password-store=basic --new-window.
+Nov 18 11:33:04 juan-pc systemd[1501]: Started brain-vscode-807833-1794994384812.scope - [systemd-run] /us
+… [4619 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:38:48.342Z</sub>
+
+The log shows the one visible run I started finished normally in 29 s. I'll widen the search for a run that was killed:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "journalctl --user --since \"today\" --no-pager 2>/dev/null | grep -E 'brain-vscode' | grep -E 'wayland|Killed|killed|Failed|signal|Stopping|Deactivated' | cut -c1-200 | tail; echo ---; journalctl --user --since \"today\" --no-pager 2>/dev/null | grep -E 'brain-vscode-[0-9]+-[0-9]+\\.scope: Consumed' | awk '{print $1,$2,$3,$6,$7,$8,$9,$10,$11,$12}' | sort -k5 -t' ' | awk '{ if ($0 ~ /min/) print }' | tail",
+  "description": "Look for killed or unusually long VS Code scopes today"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Nov 18 11:34:56 juan-pc systemd[1501]: Started brain-vscode-812814-1794994496388.scope - [systemd-run] /usr/bin/unshare --map-current-user -n /usr/share/code/code --ozone-platform=wayland --remote-deb
+---
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "journalctl --user --since \"today\" --no-pager 2>/dev/null | grep -oE '^[A-Z][a-z]+ [0-9]+ [0-9:]+|brain-vscode-[0-9]+-[0-9]+\\.scope(: Consumed .* over [0-9.a-z ]+ wall)?|ozone-platform=[a-z]+' | paste -sd' ' | sed 's/Nov 18/\\nNov 18/g' | grep brain-vscode | awk '{ print $3, $4, $6, $(NF-2), $(NF-1), $NF }' | grep -vE '^[0-9:]+ brain-vscode-[0-9-]+\\.scope ozone' | head -60 | awk '{print}' | cut -c1-110 | sed -n '1,80p' | grep -E 'wall' | awk '{print $1, $2, $(NF-2), $(NF-1)}' | sort -k3 -n | tail -5; echo; journalctl --user --since \"today\" --no-pager | grep -c 'Started brain-vscode'; journalctl --user --since \"today\" --no-pager | grep -c 'brain-vscode.*Consumed'",
+  "description": "Find the longest VS Code scopes today and count starts vs ends"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+11:33:30 brain-vscode-807833-1794994409301.scope: over 836ms
+11:33:52 brain-vscode-807833-1794994410666.scope: over 22.175s
+11:34:14 brain-vscode-807833-1794994433215.scope: over 21.634s
+11:34:45 brain-vscode-807833-1794994454872.scope: over 30.457s
+11:35:25 brain-vscode-812814-1794994496388.scope: over 29.000s
+
+15
+15
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+No VS Code instance from today hung, since all 15 ended within 30 s, so the hang may be in another part or an earlier run. I'm adding timestamps and a hard time limit per suite to my new tests so any hang shows exactly where it occurs.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ts() { while IFS= read -r l; do printf '%s %s\\n' \"$(date +%T)\" \"$l\"; done; }; echo \"locked: $(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\"; for t in two_instances tier2_e2e; do echo \"== $t (default)\"; timeout 300 cargo test --release --test $t 2>&1 | grep -E '^test |test result|panicked' | ts; echo \"exit: ${pipestatus[1]}\"; done; echo \"== two_instances (desktop)\"; timeout 300 cargo test --release --test two_instances -- --ignored --nocapture 2>&1 | grep -E '^test |test result|panicked|^a: ' | ts; echo \"exit: ${pipestatus[1]}\"",
+  "description": "Rerun default and desktop new tests with timestamps",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+locked: false
+== two_instances (default)
+11:39:11 test two_real_captures_share_the_desktop ... ignored
+11:39:13 test two_runs_on_separate_folders_stay_apart ... ok
+11:39:13 test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+exit: 0
+== tier2_e2e (default)
+11:39:13 test file_outside_the_folder_is_identified_late_and_replayed ... ignored
+11:39:13 test vscode_session_is_upgraded_to_tier_2 ... ignored
+11:39:13 test shortcuts_make_no_session_without_tier_2 ... ok
+11:39:13 test shortcut_only_session_gets_the_saved_files_diff ... ok
+11:39:13 test shortcut_only_session_without_change_is_removed ... ok
+11:39:13 test file_saved_before_its_snapshot_uses_the_copy_taken_on_focus ... ok
+11:39:13 test saved_file_gives_the_session_text_without_replay ... ok
+11:39:13 test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.33s
+exit: 0
+== two_instances (desktop)
+11:39:21 a: ["hello"]  b: ["hello"]
+11:39:21 test two_real_captures_share_the_desktop ... ok
+11:39:21 test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.24s
+exit: 0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:39:24.682Z</sub>
+
+Those pass. Now the VS Code tests in visible mode, the full set this time (about 5 minutes, with a VS Code window on your screen):
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ts() { while IFS= read -r l; do printf '%s %s\\n' \"$(date +%T)\" \"$l\"; done; }; for t in tier2_e2e vscode_replay; do echo \"== $t (visible)\"; BRAIN_VSCODE_VISIBLE=1 timeout 480 cargo test --release --test $t -- --ignored --test-threads=1 2>&1 | grep -E '^test |test result|panicked|assertion' | ts; echo \"exit: ${pipestatus[1]}\"; done; echo \"leftover: $(ps -eo args | grep -cE '[c]ode .*remote-debugging-pipe') scopes=$(systemctl --user list-units --type=scope --no-pager | grep -c brain-vscode)\"",
+  "description": "Run all VS Code replay tests in visible mode with timestamps",
+  "timeout": 1200000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== tier2_e2e (visible)
+11:39:54 test file_outside_the_folder_is_identified_late_and_replayed ... ok
+11:40:25 test vscode_session_is_upgraded_to_tier_2 ... ok
+11:40:25 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 58.26s
+exit: 0
+== vscode_replay (visible)
+11:40:54 test vscode_auto_close_and_auto_indent ... ok
+11:41:30 test vscode_dies_with_its_owner ... ok
+11:41:56 test vscode_hebrew_text ... ok
+11:42:25 test vscode_instance_has_no_network ... ok
+11:42:34 test vscode_kill_handle_aborts_in_flight_replay ... ok
+11:42:34 test vscode_owner_helper ... ok
+11:43:00 test vscode_paste ... ok
+11:43:26 test vscode_plain_typing_and_backspace ... ok
+11:43:26 test vscode_resolves_default_title_from_history ... ok
+11:43:55 test vscode_timeout_fails_and_leaves_no_processes ... ok
+11:44:23 test vscode_undo ... ok
+11:45:08 test vscode_warm_reuse_without_leakage ... ok
+11:45:08 test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 282.65s
+exit: 0
+leftover: 0 scopes=1
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:45:11.913Z</sub>
+
+Every test passed, the slowest in 45 s, and no VS Code process is left. But one sandbox scope is still listed. Checking it:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "systemctl --user list-units --type=scope --no-pager --all | grep brain-vscode; for u in $(systemctl --user list-units --type=scope --no-pager --all --plain | awk '/brain-vscode/{print $1}'); do systemctl --user status $u --no-pager | head -12; done",
+  "description": "Inspect the remaining brain-vscode scope"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:45:24.153Z</sub>
+
+That scope was a sandbox from the last test that systemd was still cleaning up. It's gone now, so nothing is left behind.
+
+Every new test passes, and none hung:
+
+| Suite | Result | Time |
+|---|---|---|
+| `two_instances`, synthetic | ✅ | 1.4 s |
+| `two_instances`, real desktop | ✅ both folders got `hello` | 8 s |
+| `tier2_e2e`, the 5 saved-file tests | ✅ | 0.3 s |
+| `tier2_e2e`, replays, **visible** | ✅ 2/2 | 58 s |
+| `vscode_replay`, **visible** | ✅ 12/12, each 0–45 s | 283 s |
+
+Each visible test takes about 25–30 s because every test starts a fresh VS Code. The slowest was `vscode_warm_reuse_without_leakage` at 45 s, which runs several jobs.
+
+I couldn't find the run you killed. The system log has all 15 VS Code instances started today, and every one ended within 30 s, including the one visible run I started before this. So the hang you saw may have been in another part of the run, or in a run from before today. One clue: a stuck VS Code replay can't hang a test forever, because each replay has a time limit (60 s in `vscode_replay`, at least 45 s through `tier2_e2e`). After that the test fails and its VS Code is killed. A run that stayed stuck past that was probably stuck somewhere else.
+
+If it happens again, tell me the command you ran and the last line it printed. The stuck process can also be identified before you kill it:
+```sh
+ps -eo pid,etime,args | grep -E '[b]rain|[c]ode .*remote-debugging' | cut -c1-150
+```
+
+## User  <sub>2026-11-18T09:47:14.931Z</sub>
+
+awesome, now does this project is written generically so if i want to support more platforms in the future it can be done easily? do we support ubuntu today?
+
+## Assistant  <sub>2026-11-18T09:47:19.269Z</sub>
+
+I'll check how the platform-specific parts are wired before answering.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'cfg(target_os\\|cfg(unix\\|cfg(windows' src | head; grep -rn 'pub trait' src | head; grep -n 'fn start_capture' -A45 src/capture/mod.rs | head -70; grep -n 'enum Source' -A20 src/capture/mod.rs | head -25",
+  "description": "Check platform abstractions and capture wiring"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/sessions.rs:91:pub trait Tier2Snapshotter: Send {
+src/capture/recorder.rs:20:pub trait ClipboardSource: Send + Sync {
+154:fn start_capture(data_dir: &DataDir, log: LogWriter) -> Result<Source> {
+155-    let clipboard: Box<dyn ClipboardSource> = match desktop::KlipperClipboard::connect() {
+156-        Ok(c) => Box::new(c),
+157-        Err(e) => {
+158-            eprintln!("brain: warning: no session bus, pastes will not be resolved: {e:#}");
+159-            Box::new(NoClipboard)
+160-        }
+161-    };
+162-    let recorder = Arc::new(Recorder::new(log, clipboard));
+163-    recorder.system(SystemState::Start);
+164-
+165-    let system_bus = match zbus::blocking::Connection::system() {
+166-        Ok(c) => Some(c),
+167-        Err(e) => {
+168-            eprintln!("brain: warning: no system bus, sleep/wake will not be detected: {e:#}");
+169-            None
+170-        }
+171-    };
+172-    let spec = desktop::resolve_layout(system_bus.as_ref());
+173-    let kb = Keyboard::new(&spec).or_else(|e| {
+174-        eprintln!("brain: warning: layout {spec:?} failed ({e:#}); falling back to us");
+175-        Keyboard::new(&LayoutSpec::default())
+176-    })?;
+177-    let repeat = desktop::read_kde_config("kcminputrc")
+178-        .map(|t| RepeatConfig::from_kcminputrc(&t))
+179-        .unwrap_or_default();
+180-    let (mut input, control) = InputLoop::new(KeyProcessor::new(kb, repeat), recorder.clone())?;
+181-    input.open_initial()?;
+182-    let keyboards = input.keyboard_count();
+183-
+184-    let kwin = match desktop::KwinFocus::start(recorder.clone(), &data_dir.kwin_dir()) {
+185-        Ok(k) => {
+186-            let k = Arc::new(k);
+187-            k.watch_kwin_restarts();
+188-            Some(k)
+189-        }
+190-        Err(e) => {
+191-            eprintln!(
+192-                "brain: warning: focus tracking unavailable, keys will be attributed to \
+193-                 'unknown' (needs KDE Plasma/KWin): {e:#}"
+194-            );
+195-            None
+196-        }
+197-    };
+198-    let session_bus = match &kwin {
+199-        Some(k) => Some(k.connection().clone()),
+106:enum Source {
+107-    Devices {
+108-        recorder: Arc<Recorder>,
+109-        control: ControlHandle,
+110-        thread: JoinHandle<()>,
+111-        kwin: Option<Arc<desktop::KwinFocus>>,
+112-    },
+113-    Synthetic {
+114-        recorder: Arc<Recorder>,
+115-        stop: Arc<AtomicBool>,
+116-        thread: JoinHandle<()>,
+117-    },
+118-}
+119-
+120-impl Source {
+121-    fn recorder(&self) -> &Arc<Recorder> {
+122-        match self {
+123-            Source::Devices { recorder, .. } | Source::Synthetic { recorder, .. } => recorder,
+124-        }
+125-    }
+126-
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'ScreenSaver\\|LockedHint\\|org.gnome' src/capture/desktop.rs | head; wc -l src/capture/*.rs src/capture/*.js 2>/dev/null | tail -1; wc -l src/capture/*.rs; grep -rln 'libc::' src | sort; grep -n 'org.kde\\|konsole\\|google-chrome\\|fn classify' src/reconstruct/apps.rs | head -12",
+  "description": "Check lock detection source, platform code size and app tables"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+7://! | screen lock           | `org.freedesktop.ScreenSaver` `ActiveChanged` (session bus)|
+325:            Some("org.freedesktop.ScreenSaver"),
+326:            "/ScreenSaver",
+327:            Some("org.freedesktop.ScreenSaver"),
+338:        "org.freedesktop.ScreenSaver",
+339:        "org.freedesktop.ScreenSaver",
+  2929 total
+   547 src/capture/desktop.rs
+   420 src/capture/input.rs
+   636 src/capture/keys.rs
+   344 src/capture/mod.rs
+   366 src/capture/recorder.rs
+   140 src/capture/synthetic.rs
+   440 src/capture/xkb.rs
+  2893 total
+src/capture/input.rs
+src/capture/mod.rs
+src/datadir.rs
+src/reconstruct/vscode/mod.rs
+43:    "konsole",
+125:/// `google-chrome`, `org.kde.kate`). The id is split into lowercase tokens on
+128:pub fn classify(app: &str) -> AppClass {
+188:        assert_eq!(classify("org.kde.konsole"), AppClass::Terminal);
+190:        assert_eq!(classify("google-chrome"), AppClass::Browser);
+192:        assert_eq!(classify("org.kde.kate"), AppClass::Editor);
+198:        assert_eq!(classify("org.kde.krunner"), AppClass::Launcher);
+199:        assert_eq!(classify("org.kde.dolphin"), AppClass::Generic);
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:47:59.502Z</sub>
+
+## Is it built so more platforms can be added?
+Partly. The design leaves a clean place for new platforms to plug in, but the Linux-specific code isn't hidden behind interfaces yet.
+
+**What's already portable** (about three-quarters of the code):
+- Everything after capture: the event log, ingest, sessions, tier 0/1 reconstruction, SQLite storage and search, and both queries. None of it knows where events come from.
+- The connection point is the `Recorder`. Every input source just calls `key(...)`, `set_focus(app, window)` and `system(sleep|wake|lock…)`, and the event line in the log is the same everywhere.
+- The synthetic source (`brain run --synthetic`) already shows this works: it drives the whole pipeline with no evdev, no KDE and no D-Bus, and most tests use it.
+- The clipboard is behind an interface (`ClipboardSource`), so a non-KDE clipboard drops in.
+
+**What's tied to Linux and KDE** (`src/capture/`, about 2,900 lines, plus small parts elsewhere):
+- **Keys:** evdev and inotify (`input.rs`), resolved to characters with libxkbcommon (`xkb.rs`). This works on any Linux desktop, not only KDE.
+- **Focus, lock, layout switches, key-repeat settings, paste:** KDE-specific in `desktop.rs` (the KWin script, Klipper, `org.freedesktop.ScreenSaver`, `kcminputrc`). These are called directly from `start_capture`, not through an interface.
+- **Linux system calls** in `datadir.rs` (file locking, permissions) and in the signal handling in `capture/mod.rs`.
+- **The VS Code tier-2 sandbox** relies on Linux-only tools (`unshare`, `systemd-run`).
+- **No platform switches:** there are no `cfg(target_os)` blocks, so today it compiles only on Linux.
+
+**What adding a platform would take:**
+
+| Target | Work |
+|---|---|
+| **Another Linux desktop** (GNOME, Sway, X11) | Small. Keys already work. Add a focus source: a GNOME Shell extension could call the very same D-Bus method the KWin script calls, Sway has a window-list protocol, X11 has the active-window property. Also add that desktop's clipboard, lock signal and repeat settings. Best done after a first step: move `desktop.rs` behind a `Desktop` interface (focus, clipboard, lock, layouts, repeat) with KDE as its first implementation. That refactor stays inside `capture/`. |
+| **macOS / Windows** | A real project, but contained to one side. New key and focus sources (a CGEventTap and NSWorkspace on macOS; a keyboard hook and window-event hook on Windows); those give characters directly, so no xkb. Platform versions of file locking and signals behind `cfg` blocks. App-id entries in the tier-1 table (macOS bundle ids, Windows exe names). Tier 2 would stay Linux-only. Log, ingest, sessions, storage and queries stay as they are. |
+
+## Is Ubuntu supported today?
+**Yes, Ubuntu with KDE Plasma 6 on Wayland** (Kubuntu, or Ubuntu with Plasma installed). That's what it's built and tested on: Ubuntu 26.04 with Plasma 6, Wayland session.
+
+**Stock Ubuntu (GNOME) is not supported:**
+- **Keys are captured, but everything is filed under the app `unknown`,** because focus tracking needs KWin. Sessions and per-app search lose most of their value.
+- **Pastes aren't resolved,** because there's no Klipper.
+- **Pausing at the lock screen isn't verified there,** and I'd treat it as broken. Brain pauses capture on `org.freedesktop.ScreenSaver`'s lock signal, which KDE provides. I haven't checked whether GNOME emits it; if it doesn't, **your unlock password would be captured.** That alone is a reason not to run it on GNOME as it stands.
+
+The README's "Supported OS" section says "KDE Plasma 6 on Wayland" and that on other desktops keys go to `unknown`. It doesn't warn about the lock screen. Should I add that warning to the README, or plan the `Desktop` interface refactor?
+
+## User  <sub>2026-11-18T09:51:53.336Z</sub>
+
+isn't there a cross-platform keystrokes capture written in rust?
+
+## Assistant  <sub>2026-11-18T09:52:05.983Z</sub>
+
+There are a few, but none of them sees keystrokes on Wayland, which is the hard case here. I'll check the current state of the main ones before answering:
+
+**Tool call: `ToolSearch`**
+
+```
+{
+  "query": "select:WebSearch",
+  "max_results": 1
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+
+```
+
+</details>
+
+**Tool call: `WebSearch`**
+
+```
+{
+  "query": "rdev rust crate listen keyboard events Wayland support",
+  "mode": "standard"
+}
+```
+
+**Tool call: `WebSearch`**
+
+```
+{
+  "query": "rust crate cross-platform global keyboard listener Windows macOS Linux evdev Wayland 2026",
+  "mode": "standard"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Web search results for query: "rdev rust crate listen keyboard events Wayland support"
+
+Links: [{"title":"Expand description","url":"https://docs.rs/rdev/^0.5.3"},{"title":"hotkey-listener 0.3.2","url":"https://docs.rs/crate/hotkey-listener/0.3.2"},{"title":"docs.rs","url":"https://docs.rs/crate/rdev/^0.5.2"},{"title":"github.com","url":"https://GITHUB.COM/Narsil/rdev"},{"title":"docs.rs","url":"https://docs.rs/hotkey-listener/0.3.2/src/hotkey_listener/lib.rs.html"},{"title":"awesome.ecosyste.ms","url":"https://awesome.ecosyste.ms/projects/github.com%2FNarsil%2Frdev"},{"title":"openloaf-rdev 0.5.1","url":"https://docs.rs/crate/openloaf-rdev/0.5.1/source/README.md"},{"title":"rdev 0.5.3","url":"https://docs.rs/crate/rdev/0.5.3/source/src/lib.rs"},{"title":"Crate rdev","url":"https://docs.rs/rdev"},{"title":"docs.rs","url":"https://docs.rs/openloaf-rdev/0.5.1/src/openloaf_rdev/lib.rs.html"},{"title":"hotkey listener","url":"https://docs.rs/hotkey-listener"},{"title":"github.com","url":"https://github.com/TTWNO/rdev"},{"title":"github.com","url":"https://github.com/OpenLoaf/rdev"},{"title":"openloaf rdev","url":"https://docs.rs/openloaf-rdev"},{"title":"rdev Rust Library","url":"https://docsearch.algolia.com/mcp/docs/repo/narsil/rdev"},{"title":"rdev 0.5.3","url":"https://docs.rs/crate/rdev/latest"},{"title":"docs.rs","url":"https://docs.rs/rdev/0.4.5/src/rdev/lib.rs.html"},{"title":"shortcutd 0.2.0","url":"https://docs.rs/crate/shortcutd/latest"},{"title":"rdevin 0.1.0","url":"https://docs.rs/crate/rdevin/latest/source/src/lib.rs"},{"title":"r/rust Feb 22 '25","url":"https://redlib.hbubli.cc/r/rust/comments/1ivgu47/which_crate_to_use_to_detect_global_keyboard/meaxo3g"}]
+
+The short answer is that rdev's standard `listen` function doesn't support Wayland, but its `grab` function does, with a root-permission caveat.
+
+- **`listen` is X11-only.** The project's README says the listen function uses X11 APIs, and so will not work in Wayland or in the Linux kernel virtual console. The crate's own docs describe it as a library for keyboard and mouse on macOS, Windows and Linux (x11).
+- **`grab` works on Wayland, with conditions.** It sits behind the `unstable_grab` feature flag. Per the README, its evdev-based approach intercepts events, so they will work with both X11 and Wayland. The docs say the process running the loop generally needs elevated privileges; one comparison table notes that rdev's unstable_grab feature works on Wayland but requires root.
+- **Alternatives:** The hotkey-listener crate was built to fill this gap. It uses evdev directly (reads /dev/input), not X11 APIs, and it works on Linux and macOS. Its comparison table lists rdev as X11 only for Linux. The shortcutd project is another option, described as global shortcuts using evdev for systems like Wayland.
+- **Forks:** Forks such as OpenLoaf's openloaf-rdev and rdevin also exist, but the results I found didn't say whether they change the Wayland behavior.
+
+I didn't check the current crate
+… [218 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+Web search results for query: "rust crate cross-platform global keyboard listener Windows macOS Linux evdev Wayland 2026"
+
+Links: [{"title":"keytap 0.4.0","url":"https://docs.rs/crate/keytap/0.4.0/source/README.md"},{"title":"handy-keys 0.3.0","url":"https://docs.rs/crate/handy-keys/0.3.0"},{"title":"keytap 0.3.0","url":"https://docs.rs/crate/keytap/0.3.0/source/DESIGN.md"},{"title":"keytap 0.4.0","url":"https://docs.rs/crate/keytap/0.4.0/source/DESIGN.md"},{"title":"keytap 0.1.0","url":"https://docs.rs/crate/keytap/0.1.0/source/README.md"},{"title":"keytap 0.3.0","url":"https://docs.rs/crate/keytap/0.3.0/source/README.md"},{"title":"keytap 0.1.0","url":"https://docs.rs/crate/keytap/0.1.0"},{"title":"github.com","url":"https://GITHUB.COM/Narsil/rdev"},{"title":"keytap 0.2.0","url":"https://docs.rs/crate/keytap/0.2.0/source/README.md"},{"title":"keytap 0.2.0","url":"https://docs.rs/crate/keytap/0.2.0"},{"title":"docs.rs","url":"https://docs.rs/hotkey-listener/0.3.2/src/hotkey_listener/lib.rs.html"},{"title":"docs.rs","url":"https://docs.rs/crate/rdev/^0.5.2"},{"title":"hotkey listener","url":"https://docs.rs/hotkey-listener"},{"title":"keytap 0.4.0","url":"https://docs.rs/crate/keytap/0.4.0"},{"title":"8 releases","url":"https://lib.rs/crates/handy-keys"},{"title":"docs.rs","url":"https://docs.rs/openloaf-rdev/0.5.1/src/openloaf_rdev/lib.rs.html"},{"title":"hotkey-listener 0.3.2","url":"https://docs.rs/crate/hotkey-listener/0.3.2"},{"title":"rdev Rust Library","url":"https://docsearch.algolia.com/mcp/docs/repo/narsil/rdev"},{"title":"awesome.ecosyste.ms","url":"https://awesome.ecosyste.ms/projects/github.com%2FNarsil%2Frdev"}]
+
+The search turned up several Rust crates, with one clear gap: most don't cover all three platforms plus Wayland.
+
+- **keytap** (0.4.0) is the closest match. Its docs describe it as observe-only global keyboard taps for macOS, Windows, and Linux (X11 and Wayland). Its Linux and Windows backends are implemented and compile-verified across targets, and the maintainers want bug reports from real hardware. Version 0.1 had the same caveat, with those backends not yet run on real hardware. It is a young project, so check its recent release notes.
+- **handy-keys** (0.3.0) also claims all three platforms and says it uses low-level keyboard hooks. Its lib.rs page shows releases through March 2026, which suggests active maintenance.
+- **rdev** covers macOS, Windows, and Linux, but its Linux listener uses X11 APIs, and so will not work in Wayland. Its grab feature works on Wayland but requires root.
+- **hotkey-listener** (0.3.2) supports Wayland through evdev, but it covers only Linux and macOS, with no Windows support.
+- **global-hotkey** is register-only and relies on X11 on Linux, so it doesn't fit a raw event listener.
+
+For Linux evdev in general, expect to need root or being a member of the input group.
+
+I didn't find a crate with a long track record across all three platforms plus Wayland. For production use, keytap or handy-keys
+… [185 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:52:36.516Z</sub>
+
+Yes, there are several. For this project's main target, KDE on Wayland, none of them can replace what brain already does, but one could be the source for a future macOS or Windows port.
+
+**The crates:**
+
+| Crate | Platforms | Linux under Wayland | Fit for brain |
+|---|---|---|---|
+| **rdev**, the best known | macOS, Windows, Linux | Its listener uses **X11 only**, so it can't see native Wayland apps. Its Wayland mode (`unstable_grab`) grabs the keyboard through evdev and needs root. | No. Grabbing is approach D in PLAN.md (grab and forward), which adds a step to every keystroke and breaks "no input lag". The X11 listener is approach C. |
+| **keytap** | macOS, Windows, Linux X11 + Wayland | Says it supports Wayland; its own docs say the Linux and Windows backends are compile-checked but not yet tested on real hardware | Too young for a keylogger that must not miss or delay keys |
+| **handy-keys** | macOS, Windows, Linux | Says it supports all three, with releases into 2026 | Worth evaluating for macOS and Windows |
+| **hotkey-listener** | Linux (evdev), macOS | Yes, through evdev | Built for hotkeys; no Windows |
+| **global-hotkey** | all | X11 | Only registered shortcuts, not a full key stream |
+
+**Why none of them would replace brain's Linux capture:**
+1. **On Wayland the only passive source is evdev,** the kernel input devices. Any crate that works there reads `/dev/input` like brain does, and needs the same `input` group. A crate wouldn't avoid the hard part.
+2. **Raw keys aren't enough for brain.** These crates would leave out most of what `capture/` does on top of the raw keys:
+   - turning keys into the characters the app received, with your real layouts (Hebrew, Alt+Shift switching), through xkb;
+   - reproducing KDE's key-repeat schedule;
+   - logging shortcuts on the Latin layout;
+   - kernel timestamps, keyboard hotplug, reopening keyboards after sleep, and recovering from dropped events.
+3. **None of them tracks focus,** the app and window title, which sessions depend on. Lock detection and the clipboard aren't covered either.
+
+**For macOS and Windows** the situation is different. There the OS supplies characters and a supported global hook (a CGEventTap on macOS, a low-level keyboard hook on Windows). A crate like handy-keys, or those APIs called directly in a few hundred lines, would be a reasonable key source that calls brain's `Recorder`. Focus and lock would still need their own small per-OS code.
+
+So it comes back to the earlier answer: keep evdev on Linux, and if you port, add a per-OS key source behind the same `Recorder` interface.
+
+PLAN.md's comparison covers these approaches, but it doesn't name the crates. Should I add a short note there about rdev, keytap and handy-keys, and why brain doesn't use them?
+
+Sources:
+- [rdev on GitHub](https://GITHUB.COM/Narsil/rdev)
+- [rdev docs](https://docs.rs/rdev)
+- [keytap 0.4.0 README](https://docs.rs/crate/keytap/0.4.0/source/README.md)
+- [handy-keys 0.3.0](https://docs.rs/crate/handy-keys/0.3.0)
+- [handy-keys releases on lib.rs](https://lib.rs/crates/handy-keys)
+- [hotkey-listener](https://docs.rs/hotkey-listener)
+
+## User  <sub>2026-11-18T09:57:06.410Z</sub>
+
+so is it possible to have a cross-platform keystroke recording and then all of the translation and capturing behind interface?
+
+## Assistant  <sub>2026-11-18T09:57:31.797Z</sub>
+
+Yes, and the code is already close to that shape. The cut belongs at the point where a key has become "what the app received". Below that point every platform works differently; above it everything is the same.
+
+## The split
+```
+               ┌───────────── per platform (behind interfaces) ─────────────┐
+ Linux/KDE:    evdev ─► xkb + KDE repeat ─┐   KWin script ─┐   Klipper, logind, ScreenSaver
+ macOS:        CGEventTap (OS gives chars)┤   NSWorkspace ─┤   NSPasteboard, NSWorkspace
+ Windows:      WH_KEYBOARD_LL + ToUnicode ┤   WinEventHook ┤   clipboard API, WTS session events
+               └──────────────────────────┼────────────────┼──────────────────────────────┘
+                                          ▼                ▼
+                     KeySource          FocusSource     Desktop (clipboard, lock, sleep)
+                                          │
+                                          ▼
+ ─────────────── shared core, unchanged ──── Recorder ──► events.jsonl ──► ingest ──► sessions,
+                                                          tier 0/1 reconstruction ──► SQLite ──► query
+```
+
+**The interfaces:**
+- **`KeySource`** delivers resolved keys: the character or key name, the modifiers, a repeat flag and a timestamp. That's exactly what `Recorder::key` takes today. Each platform does its own translation behind it:
+  - **Linux:** evdev plus xkb plus KDE's repeat schedule, which is today's `input.rs`, `keys.rs` and `xkb.rs` moved as they are.
+  - **macOS and Windows:** the OS already supplies characters and repeats, so their sources are much thinner.
+  - The synthetic test source becomes just another `KeySource`.
+- **`FocusSource`** reports the app id, window title and "renamed" flag, the arguments of today's `Recorder::set_focus`.
+- **`Desktop`** covers the clipboard (already an interface, `ClipboardSource`), lock/unlock and sleep/wake, which become today's `Recorder::set_paused` and `system()` calls.
+- **A small platform layer** for the data-folder lock and signals (Unix `flock` and signals versus their Windows equivalents).
+
+**What doesn't move:** the log format, ingest, sessions, tier 0/1 reconstruction, storage, search and both queries, which is about three-quarters of the code. It already never knows where events come from; the synthetic tests prove that every day.
+
+## What an interface can't hide
+These need care per platform, beyond writing the source:
+- **App ids and window titles differ:** `org.kde.konsole` versus `com.apple.Terminal` versus `WindowsTerminal.exe`. The tier-1 app table and the title cleanup (unsaved-file markers and the like) need entries for each platform's conventions.
+- **Key repeat:** on Wayland each app repeats keys itself, so brain must reproduce the schedule. On macOS and Windows the OS sends repeats, so the source just passes them through.
+- **Text input:** dead keys, compose and IMEs work differently on each OS. This is a limitation everywhere today.
+- **Permissions:** the `input` group on Linux, the Accessibility/Input Monitoring permission on macOS, nothing special on Windows. Each platform needs its own README section.
+- **Testing:** the shared core keeps its synthetic tests. Each source needs its own end-to-end test on that OS, like the Kate tests on Linux.
+- **VS Code tier 2** stays Linux-only (its sandbox uses `unshare` and systemd), unless someone writes a sandbox per OS.
+
+## Cost of the first step
+Introducing the interfaces with Linux/KDE as the only implementation is a contained refactor of `src/capture/` (about 2,900 lines) and `datadir.rs`:
+- move the current code into `capture/linux/`;
+- define the three interfaces;
+- have `start_capture` pick the implementation with `cfg(target_os)`.
+
+Behaviour stays exactly the same, and the existing tests (synthetic, crash safety, Kate, two instances) would prove that. After that, adding GNOME, macOS or Windows means adding a folder, not changing the core.
+
+Do you want this as a written plan in PLAN.md's future-work section, or should I plan the refactor itself in detail for your approval?
+
+## User  <sub>2026-11-18T10:00:51.909Z</sub>
+
+i want to do it now, but first explain how will the keystroke recording look like, will you simply own your own interfaces or can we use a cross-platform library just for the bare sniffing of the keyboard
+
+## Assistant  <sub>2026-11-18T10:01:34.504Z</sub>
+
+## Recommendation: our own interfaces, with a library optional per platform
+The interfaces should be ours. A library can sit behind one of them for a platform where it's the best option. **On Linux the library shouldn't be used, even for the bare sniffing:**
+- **Wayland.** On KDE/Wayland the cross-platform crates either can't see keys at all (rdev's listener is X11-only) or grab the keyboard, which adds input lag and needs root (rdev's `unstable_grab`). The ones that claim Wayland support are young: keytap says its Linux backend hasn't been tested on real hardware.
+- **They deliver the wrong thing for brain.** They hand over keys already in their own form, often without the raw keycode that xkb needs for your Hebrew and Alt+Shift layouts, and without the kernel timestamp.
+- **They don't cover the parts that make capture reliable:** keyboard hotplug, reopening keyboards after sleep, recovering from dropped events, releasing held keys when a keyboard is unplugged, and the kernel event filter that keeps CPU under 1 %. brain already does all of these, with tests (crash safety, the Kate tests, the CPU and memory budget test).
+- **The sniffing part brain owns is small:** `input.rs` is about 420 lines. Replacing it with a dependency wouldn't save much and would risk the hard requirements.
+
+**On macOS and Windows** a library makes more sense: the OS supplies characters and repeats, and rdev's listener is mature on both. So the macOS or Windows `KeySource` could wrap a crate or call the OS hook directly; that decision comes when one is added. Nothing changes for that now: this refactor only adds the interfaces and moves the Linux code behind them. I can't build or test macOS or Windows code on this machine anyway.
+
+## How key recording will look
+```
+ per platform                                    core (unchanged)
+ ┌────────────────────────────────────────┐
+ │ KeySource          (thread of its own) │──► Recorder::key(ts, key, mods, repeat)
+ │  linux::Evdev  = input.rs + keys.rs    │         │ stamps app + window, one write(2)
+ │                  + xkb.rs  (moved)     │         ▼
+ │  Synthetic     = synthetic.rs (moved)  │     events.jsonl ──► ingest ──► …
+ │      ▲ needs                           │
+ │ KeyboardSettings  (layout, repeat,     │
+ │                   layout changes)      │
+ │  kde::Settings = kxkbrc, kcminputrc,   │
+ │                  layout D-Bus signals  │
+ ├────────────────────────────────────────┤
+ │ FocusSource        kde::KWinFocus      │──► Recorder::set_focus(app, window, renamed)
+ │ SessionEvents      kde lock (Screen-   │──► Recorder::set_paused / system(lock…)
+ │                    Saver), logind sleep│──► also tells the KeySource to reopen keyboards on wake
+ │ ClipboardSource    kde::Klipper        │◄── Recorder asks on a paste shortcut (exists today)
+ └────────────────────────────────────────┘
+```
+
+**The `KeySource` contract** is what any platform must guarantee, written in the trait's doc:
+- keys arrive as the app received them (characters resolved, shortcuts on the Latin layout), in time order, with key presses and releases delivered before the repeats due at the same moment;
+- it never blocks capture on anything but the single log write;
+- it releases held keys when a keyboard disappears;
+- it runs on its own thread until told to stop.
+
+**One split that's new compared to today:** Linux key capture (evdev plus xkb) works on any Linux desktop. But it needs the *desktop's* keyboard settings: which layouts, the repeat speed, and when you switch layout. Today those are read straight from KDE inside `start_capture`. Behind a `KeyboardSettings` interface, KDE becomes one implementation, and GNOME support would only add a GNOME settings reader plus a focus source. The evdev code wouldn't change.
+
+## Files
+| Today | After |
+|---|---|
+| `capture/input.rs`, `keys.rs`, `xkb.rs` | `capture/linux/evdev/` (moved, the code unchanged) |
+| `capture/desktop.rs` (KWin, Klipper, lock, sleep, layouts, KDE config) | split into `capture/linux/kde.rs` (focus, Klipper, lock, KDE settings) and `capture/linux/logind.rs` (sleep/wake, which is systemd, not KDE) |
+| `capture/synthetic.rs` | `capture/synthetic.rs`, now a `KeySource` |
+| `capture/mod.rs` `start_capture` | `capture/platform.rs`: the interfaces; `capture/linux/mod.rs`: wires the Linux pieces; `capture/mod.rs` picks the platform with `cfg(target_os = "linux")` |
+| `recorder.rs` | unchanged (it's the sink every source writes to) |
+| `datadir.rs` | unchanged for now (Unix file locks); marked as the platform layer to add later |
+
+**No behaviour change.** The proof is the existing tests passing as they are: unit tests, crash safety, the CPU/memory budget test, the query tests, two instances, the saved-file tests, and the Kate tests. I'll also check that the per-key path through `input.rs` stays exactly the same code.
+
+The README and PLAN.md will get a short "platform layer" section, and CLAUDE.md's code map will be updated.
+
+Should I start?
+
+## User  <sub>2026-11-18T10:05:34.096Z</sub>
+
+ok let's use our own interfaces. refactor this project to be generic and extendible to more platforms in the future. for now it should only support ubuntu+kde and stock ubuntu. for the tier2 adapters it is ok to leave it only to ubuntu+kde/stock ubuntu.
+
+## Assistant  <sub>2026-11-18T10:06:11.875Z</sub>
+
+This has two parts: the refactor, which you've approved, and a new desktop, stock Ubuntu (GNOME). GNOME raises questions the refactor doesn't, so I'll check what this machine has for GNOME first.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "which gnome-shell mutter gsettings gnome-extensions wl-paste 2>&1; dpkg -l 2>/dev/null | grep -E '^ii +(gnome-shell|mutter|ubuntu-desktop|gnome-session) ' | awk '{print $2, $3}'; lsb_release -ds 2>/dev/null; echo \"session: $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE\"; ls -la /usr/bin/code /snap/bin/code 2>&1 | cut -c1-120; grep -n 'fn find_vscode\\|/usr/bin/code\\|\"code\"' /home/juan/Documents/shadow-assistant/src/reconstruct/vscode/*.rs | head",
+  "description": "Check GNOME availability, OS version and VS Code paths"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+gnome-shell not found
+mutter not found
+/usr/bin/gsettings
+gnome-extensions not found
+wl-paste not found
+Ubuntu 26.04 LTS
+session: KDE wayland
+ls: cannot access '/snap/bin/code': No such file or directory
+lrwxrwxrwx 1 root root 24 Oct 14 14:47 /usr/bin/code -> /usr/share/code/bin/code
+/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/mod.rs:838:        "code": k.code,
+/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/mod.rs:849:        "code": k.code,
+/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/title.rs:10:    "code",
+/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/title.rs:442:        assert!(is_vscode("code"));
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+This machine has no GNOME, so before I build that side you need to make three decisions; the refactor itself I'll start right after.
+
+</details>
+
+**Tool call: `AskUserQuestion`**
+
+```
+{
+  "questions": [
+    {
+      "question": "Stock Ubuntu (GNOME on Wayland) gives programs no way to see which window is focused. The standard solution (used by tools like ActivityWatch) is a small GNOME Shell extension shipped with brain that reports focus, window titles, layout switches and the clipboard over D-Bus, like the KWin script does on KDE. GNOME on Wayland only loads a newly installed extension after logging out and back in once. Ship such an extension?",
+      "header": "GNOME focus",
+      "multiSelect": false,
+      "options": [
+        {
+          "label": "Ship an extension (Recommended)",
+          "description": "`make install` installs and enables it; one logout/login on first install. GNOME then gets focus, titles, layout switches and paste text, like KDE."
+        },
+        {
+          "label": "No extension",
+          "description": "On GNOME, keys only: everything filed under app `unknown`, no paste text, layout switches by Super+Space not followed."
+        }
+      ]
+    },
+    {
+      "question": "This machine runs KDE and has no GNOME, so I cannot run the GNOME side here as it is. How should the GNOME support be tested?",
+      "header": "GNOME tests",
+      "multiSelect": false,
+      "options": [
+        {
+          "label": "Install gnome-shell here (Recommended)",
+          "description": "You run `sudo apt install gnome-shell` once (a few hundred MB; your KDE session is untouched). Tests then start a private, headless GNOME Shell in its own D-Bus session and check the extension and brain against it, automatically."
+        },
+        {
+          "label": "You test on stock Ubuntu",
+          "description": "I build it and write a manual checklist; you run it on a real stock Ubuntu machine or VM. No automated GNOME tests."
+        },
+        {
+          "label": "Both",
+          "description": "Automated headless tests here, plus your manual check on a real stock Ubuntu."
+        }
+      ]
+    },
+    {
+      "question": "Brain pauses capture while the screen is locked, so the unlock password is never logged; that detection exists only for supported desktops. What should `brain run` do on any other desktop (Xfce, Sway, a bare TTY), where it can't detect the lock screen?",
+      "header": "Other desktops",
+      "multiSelect": false,
+      "options": [
+        {
+          "label": "Refuse to start (Recommended)",
+          "description": "Exit with an error naming the supported desktops (KDE Plasma, GNOME). --synthetic and the tests are unaffected. No risk of logging an unlock password."
+        },
+        {
+          "label": "Warn and continue",
+          "description": "Today's behaviour: keys under `unknown`, a warning on stderr, and the unlock password may be captured."
+        }
+      ]
+    }
+  ]
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Your questions have been answered: "Stock Ubuntu (GNOME on Wayland) gives programs no way to see which window is focused. The standard solution (used by tools like ActivityWatch) is a small GNOME Shell extension shipped with brain that reports focus, window titles, layout switches and the clipboard over D-Bus, like the KWin script does on KDE. GNOME on Wayland only loads a newly installed extension after logging out and back in once. Ship such an extension?"="Ship an extension (Recommended)", "This machine runs KDE and has no GNOME, so I cannot run the GNOME side here as it is. How should the GNOME support be tested?"="Install gnome-shell here (Recommended)", "Brain pauses capture while the screen is locked, so the unlock password is never logged; that detection exists only for supported desktops. What should `brain run` do on any other desktop (Xfce, Sway, a bare TTY), where it can't detect the lock screen?"="Warn and continue". You can now continue with these answers in mind.
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Decisions are set: a GNOME Shell extension, tested on a private headless GNOME Shell, with a warn-and-continue fallback on other desktops. Please install gnome-shell with `sudo apt install --no-install-recommends gnome-shell` when convenient, since that flag keeps apt from switching your login screen; I'm now starting stage 1 by reviewing the current capture code.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat src/capture/mod.rs",
+  "description": "Read the capture orchestration"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat src/capture/desktop.rs",
+  "description": "Read the KDE desktop integration"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat src/capture/input.rs; grep -n 'pub fn\\|pub struct\\|pub enum\\|impl\\b' src/capture/keys.rs src/capture/xkb.rs src/capture/recorder.rs src/capture/synthetic.rs | head -60",
+  "description": "Read the input loop and other capture APIs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Desktop integration over D-Bus (KDE Plasma): focus, clipboard, lock, sleep, layouts.
+//!
+//! | What                  | Source                                                     |
+//! |-----------------------|------------------------------------------------------------|
+//! | active app + window   | KWin script → our `Activated` method (session bus)         |
+//! | clipboard at paste    | `org.kde.klipper` `getClipboardContents` (session bus)     |
+//! | screen lock           | `org.freedesktop.ScreenSaver` `ActiveChanged` (session bus)|
+//! | layout switch/list    | `org.kde.KeyboardLayouts` signals (session bus)            |
+//! | sleep / wake          | logind `PrepareForSleep` (system bus)                      |
+//! | layout spec           | kxkbrc → `XKB_DEFAULT_*` env → systemd-localed             |
+//!
+//! Everything here is best effort. Without a session bus or KWin, capture still
+//! runs and attributes keys to the `unknown` app (with a warning on stderr).
+
+use super::input::{Control, ControlHandle};
+use super::recorder::{ClipboardSource, Recorder};
+use super::xkb::{Keyboard, LayoutSpec};
+use crate::event::{SystemState, UNKNOWN_APP};
+use anyhow::{Context, Result, bail};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use zbus::blocking::{Connection, MessageIterator};
+use zbus::message::Header;
+use zbus::{MatchRule, message::Type as MsgType};
+
+const OBJECT_PATH: &str = "/org/shadowassistant/Brain";
+const FOCUS_IFACE: &str = "org.shadowassistant.Brain.Focus";
+const KWIN: &str = "org.kde.KWin";
+const SCRIPT_TEMPLATE: &str = include_str!("kwin_focus.js");
+
+/// The app id for a window: its desktop file name (`code`, `google-chrome`,
+/// `org.kde.konsole`), else its window class, else `unknown`.
+pub fn app_id(desktop_file: &str, resource_class: &str) -> String {
+    let d = desktop_file.trim();
+    let r = resource_class.trim();
+    if !d.is_empty() {
+        d.strip_suffix(".desktop").unwrap_or(d).to_string()
+    } else if !r.is_empty() {
+        r.to_string()
+    } else {
+        UNKNOWN_APP.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Focus service + KWin script
+// ---------------------------------------------------------------------------
+
+struct FocusIface {
+    recorder: Arc<Recorder>,
+    /// Unique bus name of the running KWin; calls from anyone else are ignored.
+    kwin_owner: Arc<Mutex<Option<String>>>,
+}
+
+#[zbus::interface(name = "org.shadowassistant.Brain.Focus")]
+impl FocusIface {
+    fn activated(
+        &self,
+        #[zbus(header)] hdr: Header<'_>,
+        desktop_file: String,
+        resource_class: String,
+        caption: String,
+        renamed: bool,
+    ) {
+        let expected = self
+            .kwin_owner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let sender = hdr.sender().map(|s| s.as_str().to_string());
+        if expected.is_none() || sender != expected {
+    
+… [15916 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+//! `brain run`: capture → log → ingest, until SIGINT/SIGTERM.
+//!
+//! Threads:
+//! * **input**: one `poll` loop over all keyboards (the hot path, see [`input`]).
+//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.
+//! * **D-Bus**: zbus's connection executors plus one small thread per watched
+//!   signal (focus calls from KWin, lock, sleep, layout).
+//! * **tier2** (only with `--vscode-replay`): VS Code tier 2 jobs (a saved
+//!   file's diff, or a replay), one at a time.
+//! * **main**: waits for a termination signal, then shuts down in order.
+
+pub mod desktop;
+pub mod input;
+pub mod keys;
+pub mod recorder;
+pub mod synthetic;
+pub mod xkb;
+
+use crate::datadir::DataDir;
+use crate::event::SystemState;
+use crate::eventlog::LogWriter;
+use crate::ingest::Ingester;
+use crate::reconstruct::tier2::{Tier2Result, Tier2Worker, VsCodeSnapshots};
+use crate::sessions::Tier2Snapshotter;
+use crate::store;
+use anyhow::{Context, Result};
+use input::{Control, ControlHandle, InputLoop};
+use keys::{KeyProcessor, RepeatConfig};
+use recorder::{ClipboardSource, NoClipboard, Recorder};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
+use std::time::Duration;
+use xkb::{Keyboard, LayoutSpec};
+
+/// How often ingest tails the log (and fdatasyncs it).
+pub const INGEST_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    /// Test hook: type a built-in corpus at this many keys per second instead
+    /// of reading input devices (see [`synthetic`]). Desktop integration is off.
+    pub synthetic_rate: Option<f64>,
+    /// Reconstruct VS Code sessions by replaying them into a sandboxed VS
+    /// Code (tier 2). Off by default.
+    pub vscode_replay: bool,
+}
+
+pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
+    // Block termination signals before any thread exists, so every thread
+    // inherits the mask and only `wait_for_signal` on the main thread sees them.
+    let signals = block_termination_signals()?;
+    // Everything brain writes is private to the user.
+    // SAFETY: umask is always safe to call.
+    unsafe { libc::umask(0o077) };
+
+    data_dir.create()?;
+    let _lock = data_dir.lock_exclusive()?;
+    let log = LogWriter::open(&data_dir.log_path())?;
+    let conn = store::open_writer(&data_dir.db_path())?;
+    let tier2: Option<Box<dyn Tier2Snapshotter>> = if opts.vscode_replay {
+        let snaps = VsCodeSnapshots::new(data_dir.vscode_dir().join("snapshots"))?;
+        snaps.prune(&conn)?;
+        Some(Box::new(snaps))
+    } else {
+        None
+    };
+    let ingester = Ingester::with_tier2(conn, &data_dir.log_path(), tier2)?;
+    let tier2_worker = if opts.vscode_replay {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = Tier2Worker::spawn(
+            data_dir.db_path(),
+            data_dir.log_path(),
+            data_dir.vscode_dir(),
+            tx,
+        )?;
+        eprintln!("brain: VS Code
+… [8873 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+//! The input thread: reads every keyboard with one `poll(2)` loop.
+//!
+//! Mice and touchpads are not read: the mouse position is invisible to
+//! `brain`, so a click could only say "the cursor moved somewhere", which
+//! reconstruction cannot use (see README, "Decisions and edge cases").
+//!
+//! * **Passive.** Devices are opened read-only and never grabbed, so the
+//!   compositor receives every event exactly as before. `brain` cannot add
+//!   input lag, whatever it does.
+//! * **Cheap.** Each device gets an evdev event mask (`EVIOCSMASK`) so the
+//!   kernel only wakes us for key transitions. LED, `MSC_SCAN` and other
+//!   events never reach userspace. When nothing is pressed, the thread
+//!   sleeps in `poll` with no timeout.
+//! * **Robust.** `/dev/input` is watched with inotify for hotplug. A vanished
+//!   device releases its held keys. On resume from sleep, every device is
+//!   closed and re-opened.
+
+use super::keys::{KeyOut, KeyProcessor};
+use super::recorder::Recorder;
+use crate::timefmt::{Millis, now_ms, system_time_ms};
+use anyhow::{Context, Result, bail};
+use evdev::raw_stream::RawDevice;
+use evdev::{EventType, KeyCode};
+use std::collections::HashSet;
+use std::ffi::CString;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender};
+
+const INPUT_DIR: &str = "/dev/input";
+
+// evdev codes not exported as consts we can match on.
+const SYN_DROPPED: u16 = 3;
+
+/// Messages from other threads to the input thread.
+pub enum Control {
+    /// Close and re-open all devices (after resume from sleep).
+    Reopen,
+    /// KDE's layout switcher changed the active layout.
+    SetLayout(u32),
+    /// Replace the keymap (the layout list changed).
+    SetKeyboard(Box<super::xkb::Keyboard>),
+    Stop,
+}
+
+/// Sends [`Control`] messages and wakes the input thread's `poll`.
+#[derive(Clone)]
+pub struct ControlHandle {
+    tx: Sender<Control>,
+    wake: Arc<OwnedFd>,
+}
+
+impl ControlHandle {
+    pub fn send(&self, msg: Control) {
+        if self.tx.send(msg).is_ok() {
+            let one: u64 = 1;
+            // SAFETY: writing 8 bytes to a valid eventfd.
+            unsafe { libc::write(self.wake.as_raw_fd(), (&one as *const u64).cast(), 8) };
+        }
+    }
+}
+
+struct Device {
+    id: u32,
+    path: PathBuf,
+    dev: RawDevice,
+}
+
+pub struct InputLoop {
+    devices: Vec<Device>,
+    next_id: u32,
+    inotify: OwnedFd,
+    wake: Arc<OwnedFd>,
+    rx: Receiver<Control>,
+    keys: KeyProcessor,
+    recorder: Arc<Recorder>,
+    /// Paths that failed with EACCES, reported once.
+    denied: HashSet<PathBuf>,
+}
+
+impl InputLoop {
+    pub fn new(keys: KeyProcessor, recorder: Arc<Recorder>) -> Result<(Self, ControlHandle)> {
+        // SAFETY: plain syscalls; return values are checked.
+        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if wake < 0 {
+            return Err(std::io::Error::last_os_error()).context("eventfd");
+        }
+… [15948 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:10:23.089Z</sub>
+
+I have the full picture of the capture code. One more check before designing desktop detection: how the service starts, since detection relies on the session's environment:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat packaging/brain.service; cat Cargo.toml; systemctl --user show-environment | grep -E 'XDG_CURRENT_DESKTOP|XDG_SESSION|WAYLAND|DESKTOP_SESSION'; grep -rn 'capture::desktop\\|capture::input\\|capture::keys\\|capture::xkb\\|capture::synthetic' src tests | grep -v '^src/capture' | head",
+  "description": "Check service unit, dependencies, session environment, external uses"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+# systemd *user* service: runs `brain run` as you, inside your desktop
+# session (it needs your session D-Bus for KWin focus, Klipper, screen lock
+# and keyboard layouts). No root: keyboards are read through the `input`
+# group. Install with `make install-service`; `make uninstall-service`
+# removes it together with its data (KEEP_DATA=1 keeps the data).
+[Unit]
+Description=brain: capture what you type and make it searchable
+Documentation=https://github.com/ChenOhana/shadow-assistant
+# Start with the Plasma session, after the compositor, and stop at logout.
+PartOf=graphical-session.target
+After=graphical-session.target plasma-kwin_wayland.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+# The data directory is the service's state directory, created by systemd
+# before start, private to the user: ~/.local/state/brain (%S/brain).
+# `systemctl --user clean --what=state brain` deletes it.
+StateDirectory=brain
+StateDirectoryMode=0700
+ExecStart=/usr/bin/brain run --data-dir %S/brain
+# SIGTERM stops brain cleanly (final ingest, KWin script unloaded).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+# stderr (warnings, layout switches, tier 2 failures) goes to the journal:
+#   journalctl --user -u brain -f
+
+[Install]
+WantedBy=graphical-session.target
+[package]
+name = "brain"
+version = "0.1.0"
+edition = "2024"
+description = "Shadow assistant: captures what you type and makes it searchable"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+evdev = "0.13"
+libc = "0.2"
+rusqlite = { version = "0.43", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+DESKTOP_SESSION=plasma
+QT_WAYLAND_RECONNECT=1
+WAYLAND_DISPLAY=wayland-0
+XDG_CURRENT_DESKTOP=KDE
+XDG_SESSION_CLASS=user
+XDG_SESSION_DESKTOP=KDE
+XDG_SESSION_ID=3
+XDG_SESSION_PATH=/org/freedesktop/DisplayManager/Session1
+XDG_SESSION_TYPE=wayland
+tests/common/mod.rs:8:use brain::capture::synthetic::us_keycode;
+tests/repeat_e2e.rs:27:use brain::capture::synthetic::us_keycode;
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The service reads XDG_CURRENT_DESKTOP from the session (KDE here), with a D-Bus probe as fallback, and only two tests outside capture/ touch its internals. Next I'll check the KDE-specific parsing that sits inside the generic key code.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,82p src/capture/keys.rs; grep -n 'from_kcminputrc\\|kcminputrc' src/capture/keys.rs | head; sed -n 1,30p src/capture/synthetic.rs | grep -n '^use'; sed -n 60,75p src/capture/synthetic.rs; grep -n 'super::\\|crate::' src/capture/keys.rs src/capture/xkb.rs src/capture/synthetic.rs src/capture/recorder.rs | head -20",
+  "description": "Read repeat config parsing and module dependencies"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Turns raw evdev key transitions into the key events apps actually received.
+//!
+//! This is pure logic with no I/O, so it is driven directly by unit tests:
+//! * characters and modifiers are resolved with xkbcommon ([`super::xkb`]),
+//! * auto-repeat is synthesized on the compositor's schedule ([`Repeater`]).
+//!   The kernel's own repeat events (value 2) run on a different timer than
+//!   the one Wayland clients use, so they are ignored,
+//! * per-device held-key tracking releases keys when a device disappears, so
+//!   a modifier can never get stuck "down".
+
+use super::xkb::{Keyboard, key_name};
+use crate::event::Mod;
+use crate::timefmt::Millis;
+use std::collections::{HashMap, HashSet};
+
+/// Compositor key-repeat settings.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RepeatConfig {
+    pub enabled: bool,
+    pub delay_ms: Millis,
+    pub rate_hz: f64,
+}
+
+impl Default for RepeatConfig {
+    /// KDE Plasma's defaults.
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            delay_ms: 600,
+            rate_hz: 25.0,
+        }
+    }
+}
+
+impl RepeatConfig {
+    /// Reads `[Keyboard]` from KDE's `kcminputrc` text, falling back to defaults.
+    pub fn from_kcminputrc(text: &str) -> Self {
+        let mut cfg = Self::default();
+        let mut in_keyboard = false;
+        for line in text.lines().map(str::trim) {
+            if line.starts_with('[') {
+                in_keyboard = line == "[Keyboard]";
+                continue;
+            }
+            if !in_keyboard {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            match k.trim() {
+                "KeyRepeat" => cfg.enabled = v.trim() == "repeat" || v.trim() == "true",
+                "RepeatDelay" => {
+                    if let Ok(d) = v.trim().parse::<f64>()
+                        && d >= 0.0
+                    {
+                        cfg.delay_ms = d as Millis;
+                    }
+                }
+                "RepeatRate" => {
+                    if let Ok(r) = v.trim().parse::<f64>() {
+                        if r > 0.0 {
+                            cfg.rate_hz = r;
+                        } else {
+                            cfg.enabled = false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        cfg
+    }
+
+    fn interval_ms(&self) -> f64 {
+        1000.0 / self.rate_hz
+    }
+}
+
+/// Synthesizes auto-repeat for the most recently pressed repeating key, the
+/// same way Wayland clients do: after `delay_ms`, then every `1/rate_hz`.
+#[derive(Debug)]
+36:    /// Reads `[Keyboard]` from KDE's `kcminputrc` text, falling back to defaults.
+37:    pub fn from_kcminputrc(text: &str) -> Self {
+620:    fn parses_kcminputrc() {
+621:        let cfg = RepeatConfig::from_kcminputrc(
+632:        let off = RepeatConfig::from_kcminputrc("[Keyboard]\nKeyRepeat=nothing\n");
+634:        assert_eq!(Rep
+… [2081 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The layout is settled, so I'm moving the Linux files over with only their import paths changed, and splitting desktop.rs by concern and moving KDE's kcminputrc parsing into the KDE module.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p src/capture/linux && git mv src/capture/input.rs src/capture/linux/input.rs && git mv src/capture/keys.rs src/capture/linux/keys.rs && git mv src/capture/xkb.rs src/capture/linux/xkb.rs && git mv src/capture/synthetic.rs src/capture/linux/synthetic.rs && git mv src/capture/desktop.rs src/capture/linux/kde.rs && git mv src/capture/kwin_focus.js src/capture/linux/kwin_focus.js && git status --short",
+  "description": "Move Linux capture files into capture/linux/"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+R  src/capture/input.rs -> src/capture/linux/input.rs
+R  src/capture/desktop.rs -> src/capture/linux/kde.rs
+R  src/capture/keys.rs -> src/capture/linux/keys.rs
+R  src/capture/kwin_focus.js -> src/capture/linux/kwin_focus.js
+R  src/capture/synthetic.rs -> src/capture/linux/synthetic.rs
+R  src/capture/xkb.rs -> src/capture/linux/xkb.rs
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:11:34.835Z</sub>
+
+Now the platform interface itself:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/platform.rs",
+  "content": "//! The platform layer: what `brain run` needs from the operating system and\n//! the desktop, behind interfaces, so that another platform is a new module\n//! rather than a change to the core.\n//!\n//! A [`Platform`] starts capture and writes everything into a [`Recorder`]:\n//!\n//! * the keys as the focused app received them ([`Recorder::key`]),\n//! * the focused app and window title ([`Recorder::set_focus`]),\n//! * screen lock, which pauses recording ([`Recorder::set_paused`]),\n//! * sleep and wake ([`Recorder::system`]),\n//! * the clipboard text at a paste shortcut, through the\n//!   [`ClipboardSource`](super::recorder::ClipboardSource) the recorder is\n//!   built with.\n//!\n//! Everything after the recorder (the log, ingest, sessions, reconstruction,\n//! storage and queries) is platform-independent.\n//!\n//! **The contract for a key source**, whatever the platform:\n//!\n//! * keys are reported as the app received them: characters resolved with\n//!   the user's active layout, shortcuts named on the Latin layout (Ctrl+A,\n//!   not Ctrl+ש), repeats on the schedule the app sees;\n//! * in time order, with key transitions delivered before the repeats due at\n//!   the same moment;\n//! * passively: capture never grabs the keyboard or delays a key, and the\n//!   source blocks on nothing but the recorder's single log write;\n//! * keys held on a device that disappears are released, so a modifier can\n//!   never stay stuck.\n//!\n//! Platforms today: [`Linux`](super::linux::Linux) (keys from evdev resolved\n//! with xkbcommon, plus a backend per desktop environment, see\n//! [`super::linux::desktop`]) and the synthetic test source\n//! [`Synthetic`](super::linux::synthetic::Synthetic). A macOS or Windows port\n//! would add a module here with its own key source (a CGEventTap, a\n//! low-level keyboard hook), focus source and lock/sleep events.\n\nuse super::recorder::Recorder;\nuse crate::datadir::DataDir;\nuse crate::eventlog::LogWriter;\nuse anyhow::Result;\nuse std::sync::Arc;\n\n/// An operating system (or test source) that `brain run` can capture from.\npub trait Platform {\n    /// Starts capturing into a new [`Recorder`] over `log`, after writing\n    /// the `start` marker. Desktop integration that is unavailable is\n    /// reported on stderr and skipped; only what makes capture impossible\n    /// (no readable keyboard device, say) is an error.\n    fn start(&self, data_dir: &DataDir, log: LogWriter) -> Result<Box<dyn Capture>>;\n}\n\n/// A running capture, started by [`Platform::start`].\npub trait Capture {\n    /// The recorder every source writes into.\n    fn recorder(&self) -> &Arc<Recorder>;\n    /// Stops every source and waits for their threads, leaving nothing\n    /// behind on the desktop (a KWin script, say).\n    fn stop(self: Box<Self>);\n}\n\n/// The platform of the machine `brain` runs on.\npub fn native() -> Box<dyn Platform> {\n    Box::new(super::linux::Linux)\n}\n"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/platform.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:11:48.045Z</sub>
+
+Now `capture/mod.rs`. The orchestration stays, and the hard-wired Linux start moves behind the platform:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/capture/mod.rs'; s=open(p).read()\nold_head=s[:s.index(\"/// How often ingest tails the log\")]\nnew_head='''//! `brain run`: capture → log → ingest, until SIGINT/SIGTERM.\n//!\n//! Capture itself comes from a [`platform::Platform`] (Linux today, see\n//! [`linux`]); this module wires it to the log, ingest and tier 2, which are\n//! the same on every platform.\n//!\n//! Threads (Linux):\n//! * **input**: one `poll` loop over all keyboards (the hot path, see\n//!   [`linux::input`]).\n//! * **ingest**: tails the log into SQLite once per second, and fdatasyncs the log.\n//! * **D-Bus**: zbus's connection executors plus one small thread per watched\n//!   signal (focus calls from the desktop, lock, sleep, layout).\n//! * **tier2** (only with `--vscode-replay`): VS Code tier 2 jobs (a saved\n//!   file's diff, or a replay), one at a time.\n//! * **main**: waits for a termination signal, then shuts down in order.\n\n#[cfg(not(target_os = \"linux\"))]\ncompile_error!(\n    \"brain captures on Linux only for now; another OS needs a platform module \\\\\n     in src/capture/ (see src/capture/platform.rs)\"\n);\n\npub mod linux;\npub mod platform;\npub mod recorder;\n\nuse crate::datadir::DataDir;\nuse crate::event::SystemState;\nuse crate::eventlog::LogWriter;\nuse crate::ingest::Ingester;\nuse crate::reconstruct::tier2::{Tier2Result, Tier2Worker, VsCodeSnapshots};\nuse crate::sessions::Tier2Snapshotter;\nuse crate::store;\nuse anyhow::{Context, Result};\nuse platform::Platform;\nuse recorder::Recorder;\nuse std::sync::Arc;\nuse std::sync::atomic::{AtomicBool, Ordering};\nuse std::thread::JoinHandle;\nuse std::time::Duration;\n\n'''\ns=new_head+s[s.index(\"/// How often ingest tails the log\"):]\ns=s.replace('''    /// Test hook: type a built-in corpus at this many keys per second instead\n    /// of reading input devices (see [`synthetic`]). Desktop integration is off.''','''    /// Test hook: type a built-in corpus at this many keys per second instead\n    /// of reading input devices (see [`linux::synthetic`]). Desktop\n    /// integration is off.''')\nold='''    let source = match opts.synthetic_rate {\n        Some(rate) => start_synthetic(log, rate)?,\n        None => start_capture(data_dir, log)?,\n    };\n    let recorder = source.recorder().clone();'''\nnew='''    let platform: Box<dyn Platform> = match opts.synthetic_rate {\n        Some(rate) => Box::new(linux::synthetic::Synthetic { rate }),\n        None => platform::native(),\n    };\n    let capture = platform.start(data_dir, log)?;\n    let recorder = capture.recorder().clone();'''\nassert s.count(old)==1; s=s.replace(old,new)\nold='''    source.stop();\n    recorder.system(SystemState::Stop);'''\nnew='''    capture.stop();\n    recorder.system(SystemState::Stop);'''\nassert s.count(old)==1; s=s.replace(old,new)\ni=s.index(\"/// A running input source; [`Source::stop`] shuts it down.\")\nj=s.index(\"/// Tails the log into SQLite every [`INGEST_INTERVAL`]\")\ns=s[:i]+s[j:]\nopen(p,'w').write(s)\nEOF\ngrep -n 'LogWriter\\|Recorder' src/capture/mod.rs | head",
+  "description": "Make capture/mod.rs platform-neutral"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+29:use crate::eventlog::LogWriter;
+36:use recorder::Recorder;
+66:    let log = LogWriter::open(&data_dir.log_path())?;
+122:        recorder: Arc<Recorder>,
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:12:01.098Z</sub>
+
+Now the Linux platform, which wires evdev, logind and the detected desktop:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/mod.rs",
+  "content": "//! Linux: keys from the kernel's input devices, everything else from the\n//! desktop environment.\n//!\n//! * **Keys** ([`input`], [`keys`], [`xkb`]) work the same on every Linux\n//!   desktop: evdev is read passively and each key is resolved with\n//!   xkbcommon into what the app received. Only the keyboard *settings*\n//!   (layouts, layout switches, the repeat schedule) come from the desktop.\n//! * **Sleep and wake** come from systemd-logind ([`logind`]), on any\n//!   desktop.\n//! * **Focus, clipboard, screen lock and keyboard settings** come from a\n//!   [`desktop::Desktop`] backend, chosen at start ([`desktop::detect`]):\n//!   KDE Plasma today. A desktop without a backend still gets keys, filed\n//!   under the app `unknown`, with a warning.\n\npub mod desktop;\npub mod input;\npub mod keys;\npub mod synthetic;\npub mod xkb;\n\nmod dbus;\nmod kde;\nmod layout;\nmod logind;\n\nuse super::platform::{Capture, Platform};\nuse super::recorder::Recorder;\nuse crate::datadir::DataDir;\nuse crate::event::SystemState;\nuse crate::eventlog::LogWriter;\nuse anyhow::Result;\nuse desktop::{DesktopContext, DesktopSession};\nuse input::{Control, ControlHandle, InputLoop};\nuse keys::KeyProcessor;\nuse std::sync::Arc;\nuse std::thread::JoinHandle;\nuse xkb::{Keyboard, LayoutSpec};\n\n/// Real capture on Linux: input devices plus desktop integration.\npub struct Linux;\n\nimpl Platform for Linux {\n    fn start(&self, data_dir: &DataDir, log: LogWriter) -> Result<Box<dyn Capture>> {\n        let desktop = desktop::detect();\n        let recorder = Arc::new(Recorder::new(log, desktop.clipboard()));\n        recorder.system(SystemState::Start);\n\n        let system_bus = match zbus::blocking::Connection::system() {\n            Ok(c) => Some(c),\n            Err(e) => {\n                eprintln!(\"brain: warning: no system bus, sleep/wake will not be detected: {e:#}\");\n                None\n            }\n        };\n        let (spec, repeat) = desktop.keyboard(system_bus.as_ref());\n        let kb = Keyboard::new(&spec).or_else(|e| {\n            eprintln!(\"brain: warning: layout {spec:?} failed ({e:#}); falling back to us\");\n            Keyboard::new(&LayoutSpec::default())\n        })?;\n        let (mut input, control) =\n            InputLoop::new(KeyProcessor::new(kb, repeat), recorder.clone())?;\n        input.open_initial()?;\n        let keyboards = input.keyboard_count();\n\n        let session = desktop.start(DesktopContext {\n            recorder: recorder.clone(),\n            input: control.clone(),\n            system_bus: system_bus.clone(),\n            data_dir,\n        });\n        if let Some(sys) = &system_bus {\n            logind::watch_sleep(sys, recorder.clone(), control.clone());\n        }\n\n        let thread = std::thread::Builder::new()\n            .name(\"input\".into())\n            .spawn(move || input.run())?;\n        eprintln!(\n            \"brain: capturing from {keyboards} keyboard(s), desktop {}, focus tracking {}, \\\n             layout {}; data in {}\",\n            desktop.name(),\n            session.focus_tracking(),\n            if spec.layout.is_empty() {\n                \"us\"\n            } else {\n                &spec.layout\n            },\n            data_dir.root().display()\n        );\n        Ok(Box::new(LinuxCapture {\n            recorder,\n            control,\n            thread,\n            session,\n        }))\n    }\n}\n\nstruct LinuxCapture {\n    recorder: Arc<Recorder>,\n    control: ControlHandle,\n    thread: JoinHandle<()>,\n    session: Box<dyn DesktopSession>,\n}\n\nimpl Capture for LinuxCapture {\n    fn recorder(&self) -> &Arc<Recorder> {\n        &self.recorder\n    }\n\n    fn stop(self: Box<Self>) {\n        self.control.send(Control::Stop);\n        if self.thread.join().is_err() {\n            eprintln!(\"brain: warning: input thread panicked\
+… [59 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/mod.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:12:15.397Z</sub>
+
+Now the desktop interface, detection, and the fallback for unsupported desktops:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/desktop.rs",
+  "content": "//! Desktop environments: what `brain` needs from the desktop besides the\n//! keys, behind one interface per environment.\n//!\n//! | Backend          | Focus      | Clipboard | Screen lock                   | Keyboard settings          |\n//! |------------------|------------|-----------|-------------------------------|----------------------------|\n//! | KDE Plasma       | KWin script| Klipper   | `org.freedesktop.ScreenSaver` | kxkbrc, kcminputrc, layout switch signals |\n//! | anything else    | none (`unknown`) | none | `org.freedesktop.ScreenSaver` if the desktop has it | `XKB_DEFAULT_*`, systemd-localed |\n//!\n//! A new desktop is one more [`Desktop`] implementation and a line in\n//! [`detect`]; the key capture does not change.\n\nuse super::input::ControlHandle;\nuse super::keys::RepeatConfig;\nuse super::xkb::LayoutSpec;\nuse super::{dbus, kde, layout};\nuse crate::capture::recorder::{ClipboardSource, NoClipboard, Recorder};\nuse crate::datadir::DataDir;\nuse crate::event::UNKNOWN_APP;\nuse std::path::PathBuf;\nuse std::sync::Arc;\nuse zbus::blocking::Connection;\n\n/// A desktop environment backend.\npub trait Desktop {\n    /// Its name, for messages (`KDE Plasma`).\n    fn name(&self) -> String;\n    /// Reads the clipboard at a paste shortcut. Called on the input thread,\n    /// so it must answer quickly (or give up).\n    fn clipboard(&self) -> Box<dyn ClipboardSource>;\n    /// The keyboard layouts and key-repeat schedule the compositor uses, so\n    /// keys resolve to what the apps receive.\n    fn keyboard(&self, system: Option<&Connection>) -> (LayoutSpec, RepeatConfig);\n    /// Starts reporting focus, screen lock and layout switches. What is\n    /// unavailable is reported on stderr and skipped.\n    fn start(&self, ctx: DesktopContext<'_>) -> Box<dyn DesktopSession>;\n}\n\n/// What a desktop backend reports into.\npub struct DesktopContext<'a> {\n    pub recorder: Arc<Recorder>,\n    /// The input thread, for layout switches and keymap changes.\n    pub input: ControlHandle,\n    pub system_bus: Option<Connection>,\n    pub data_dir: &'a DataDir,\n}\n\n/// A started desktop backend.\npub trait DesktopSession {\n    /// How focus is tracked, for the start message (`via KWin`).\n    fn focus_tracking(&self) -> &'static str;\n    /// Undoes what the backend set up on the desktop (unloads a script).\n    fn stop(&self);\n}\n\n/// Picks the backend for the running desktop: from `XDG_CURRENT_DESKTOP`\n/// (set by the session, also for user services), else by which compositor\n/// owns its name on the session bus.\npub fn detect() -> Box<dyn Desktop> {\n    let current = std::env::var(\"XDG_CURRENT_DESKTOP\").unwrap_or_default();\n    if has_token(&current, \"KDE\") || on_session_bus(kde::KWIN) {\n        return Box::new(kde::Kde);\n    }\n    Box::new(Unsupported {\n        name: if current.is_empty() {\n            \"unknown\".into()\n        } else {\n            current\n        },\n    })\n}\n\n/// Whether the colon-separated desktop list (`ubuntu:GNOME`) names `token`.\nfn has_token(list: &str, token: &str) -> bool {\n    list.split(':').any(|t| t.trim().eq_ignore_ascii_case(token))\n}\n\nfn on_session_bus(name: &str) -> bool {\n    Connection::session().is_ok_and(|c| dbus::name_owner(&c, name).is_ok())\n}\n\n/// The app id for a window: its desktop file name (`code`, `google-chrome`,\n/// `org.kde.konsole`), else its window class, else `unknown`.\npub fn app_id(desktop_file: &str, resource_class: &str) -> String {\n    let d = desktop_file.trim();\n    let r = resource_class.trim();\n    if !d.is_empty() {\n        d.strip_suffix(\".desktop\").unwrap_or(d).to_string()\n    } else if !r.is_empty() {\n        r.to_string()\n    } else {\n        UNKNOWN_APP.to_string()\n    }\n}\n\n/// The user's configuration directory (`$XDG_CONFIG_HOME`, else `~/.config`).\npub(super) fn config_dir() -> Option<PathBuf
+… [3215 more characters in the raw transcript]
+```
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/dbus.rs",
+  "content": "//! D-Bus helpers shared by the desktop backends and logind.\n\nuse anyhow::Result;\nuse zbus::blocking::{Connection, MessageIterator};\nuse zbus::{MatchRule, message::Type as MsgType};\n\n/// The unique bus name currently owning the well-known name `name`.\npub(super) fn name_owner(conn: &Connection, name: &str) -> Result<String> {\n    let owner: String = conn\n        .call_method(\n            Some(\"org.freedesktop.DBus\"),\n            \"/org/freedesktop/DBus\",\n            Some(\"org.freedesktop.DBus\"),\n            \"GetNameOwner\",\n            &(name,),\n        )?\n        .body()\n        .deserialize()?;\n    Ok(owner)\n}\n\n/// Spawns a thread that calls `handler` for each matching signal sent by the\n/// current owner of the well-known name `sender`. Signals from anyone else\n/// on the bus are dropped. `arg0` restricts on the first string argument.\npub(super) fn spawn_signal_watch(\n    conn: &Connection,\n    sender: &'static str,\n    interface: &'static str,\n    member: &'static str,\n    arg0: Option<&'static str>,\n    mut handler: impl FnMut(&zbus::Message) + Send + 'static,\n) {\n    let conn = conn.clone();\n    let spawn = std::thread::Builder::new()\n        .name(format!(\"dbus-{member}\"))\n        .spawn(move || {\n            let mut run = || -> Result<()> {\n                let mut rule = MatchRule::builder()\n                    .msg_type(MsgType::Signal)\n                    .interface(interface)?\n                    .member(member)?;\n                if let Some(a) = arg0 {\n                    rule = rule.add_arg(a)?;\n                }\n                let iter = MessageIterator::for_match_rule(rule.build(), &conn, Some(64))?;\n                let mut owner = name_owner(&conn, sender).ok();\n                for msg in iter {\n                    let msg = msg?;\n                    let from = msg.header().sender().map(|s| s.as_str().to_string());\n                    if from.is_none() {\n                        continue;\n                    }\n                    if from != owner {\n                        // The service may have restarted under a new unique name.\n                        owner = name_owner(&conn, sender).ok();\n                        if from != owner {\n                            continue; // spoofed: not sent by the service we trust\n                        }\n                    }\n                    handler(&msg);\n                }\n                Ok(())\n            };\n            if let Err(e) = run() {\n                eprintln!(\"brain: warning: stopped listening for {interface}.{member}: {e:#}\");\n            }\n        });\n    if let Err(e) = spawn {\n        eprintln!(\"brain: warning: could not start D-Bus watcher thread: {e}\");\n    }\n}\n"
+}
+```
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/logind.rs",
+  "content": "//! Sleep and wake from systemd-logind, the same on every desktop.\n\nuse super::dbus;\nuse super::input::{Control, ControlHandle};\nuse crate::capture::recorder::Recorder;\nuse crate::event::SystemState;\nuse std::sync::Arc;\nuse zbus::blocking::Connection;\n\n/// Marks sleep/wake in the log and re-opens input devices on resume (their\n/// file descriptors can go stale across suspend).\npub(super) fn watch_sleep(system: &Connection, recorder: Arc<Recorder>, control: ControlHandle) {\n    dbus::spawn_signal_watch(\n        system,\n        \"org.freedesktop.login1\",\n        \"org.freedesktop.login1.Manager\",\n        \"PrepareForSleep\",\n        None,\n        move |msg| match msg.body().deserialize::<bool>() {\n            Ok(true) => recorder.system(SystemState::Sleep),\n            Ok(false) => {\n                recorder.system(SystemState::Wake);\n                control.send(Control::Reopen);\n            }\n            Err(_) => {}\n        },\n    );\n}\n"
+}
+```
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/layout.rs",
+  "content": "//! The system's keyboard layout, for desktops that do not configure their own:\n//! the session's `XKB_DEFAULT_*` environment, then systemd-localed.\n\nuse super::xkb::LayoutSpec;\nuse zbus::blocking::Connection;\n\n/// The layout from `XKB_DEFAULT_*`, else systemd-localed, else `us`.\npub(super) fn system_layout(system: Option<&Connection>) -> LayoutSpec {\n    let env = |k: &str| std::env::var(k).unwrap_or_default();\n    let from_env = LayoutSpec {\n        layout: env(\"XKB_DEFAULT_LAYOUT\"),\n        variant: env(\"XKB_DEFAULT_VARIANT\"),\n        model: env(\"XKB_DEFAULT_MODEL\"),\n        options: env(\"XKB_DEFAULT_OPTIONS\"),\n    };\n    if !from_env.layout.is_empty() {\n        return from_env;\n    }\n    if let Some(spec) = system.and_then(layout_from_localed) {\n        return spec;\n    }\n    LayoutSpec::default()\n}\n\nfn layout_from_localed(system: &Connection) -> Option<LayoutSpec> {\n    let get = |prop: &str| -> Option<String> {\n        let reply = system\n            .call_method(\n                Some(\"org.freedesktop.locale1\"),\n                \"/org/freedesktop/locale1\",\n                Some(\"org.freedesktop.DBus.Properties\"),\n                \"Get\",\n                &(\"org.freedesktop.locale1\", prop),\n            )\n            .ok()?;\n        let v: zbus::zvariant::OwnedValue = reply.body().deserialize().ok()?;\n        String::try_from(v).ok()\n    };\n    let spec = LayoutSpec {\n        layout: get(\"X11Layout\")?,\n        variant: get(\"X11Variant\").unwrap_or_default(),\n        model: get(\"X11Model\").unwrap_or_default(),\n        options: get(\"X11Options\").unwrap_or_default(),\n    };\n    (!spec.layout.is_empty()).then_some(spec)\n}\n"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/desktop.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/dbus.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/logind.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/layout.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:12:55.549Z</sub>
+
+Now `kde.rs`. The KWin, Klipper and layout code is unchanged; what's new is the `Desktop` implementation around it and the `kcminputrc` parser moved in from `keys.rs`:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/kde.rs",
+  "content": "//! KDE Plasma: focus, clipboard, screen lock and keyboard settings over D-Bus.\n//!\n//! | What                  | Source                                                     |\n//! |-----------------------|------------------------------------------------------------|\n//! | active app + window   | KWin script → our `Activated` method (session bus)         |\n//! | clipboard at paste    | `org.kde.klipper` `getClipboardContents` (session bus)     |\n//! | screen lock           | `org.freedesktop.ScreenSaver` `ActiveChanged` (session bus)|\n//! | layout switch/list    | `org.kde.KeyboardLayouts` signals (session bus)            |\n//! | layout spec           | kxkbrc → `XKB_DEFAULT_*` env → systemd-localed             |\n//! | key repeat            | kcminputrc `[Keyboard]`                                    |\n//!\n//! Everything here is best effort. Without a session bus or KWin, capture still\n//! runs and attributes keys to the `unknown` app (with a warning on stderr).\n\nuse super::dbus::{name_owner, spawn_signal_watch};\nuse super::desktop::{\n    Desktop, DesktopContext, DesktopSession, app_id, config_dir, watch_freedesktop_lock,\n};\nuse super::input::{Control, ControlHandle};\nuse super::keys::RepeatConfig;\nuse super::layout::system_layout;\nuse super::xkb::{Keyboard, LayoutSpec};\nuse crate::capture::recorder::{ClipboardSource, NoClipboard, Recorder};\nuse crate::timefmt::Millis;\nuse anyhow::{Context, Result, bail};\nuse std::path::{Path, PathBuf};\nuse std::sync::{Arc, Mutex};\nuse std::time::Duration;\nuse zbus::blocking::Connection;\nuse zbus::message::Header;\n\nconst OBJECT_PATH: &str = \"/org/shadowassistant/Brain\";\nconst FOCUS_IFACE: &str = \"org.shadowassistant.Brain.Focus\";\npub(super) const KWIN: &str = \"org.kde.KWin\";\nconst SCRIPT_TEMPLATE: &str = include_str!(\"kwin_focus.js\");\n\n/// The KDE Plasma backend.\npub(super) struct Kde;\n\nimpl Desktop for Kde {\n    fn name(&self) -> String {\n        \"KDE Plasma\".into()\n    }\n\n    fn clipboard(&self) -> Box<dyn ClipboardSource> {\n        match KlipperClipboard::connect() {\n            Ok(c) => Box::new(c),\n            Err(e) => {\n                eprintln!(\"brain: warning: no session bus, pastes will not be resolved: {e:#}\");\n                Box::new(NoClipboard)\n            }\n        }\n    }\n\n    fn keyboard(&self, system: Option<&Connection>) -> (LayoutSpec, RepeatConfig) {\n        let repeat = read_kde_config(\"kcminputrc\")\n            .map(|t| repeat_from_kcminputrc(&t))\n            .unwrap_or_default();\n        (resolve_layout(system), repeat)\n    }\n\n    fn start(&self, ctx: DesktopContext<'_>) -> Box<dyn DesktopSession> {\n        let kwin = match KwinFocus::start(ctx.recorder.clone(), &ctx.data_dir.kwin_dir()) {\n            Ok(k) => {\n                let k = Arc::new(k);\n                k.watch_kwin_restarts();\n                Some(k)\n            }\n            Err(e) => {\n                eprintln!(\n                    \"brain: warning: focus tracking unavailable, keys will be attributed to \\\n                     'unknown' (needs KDE Plasma/KWin): {e:#}\"\n                );\n                None\n            }\n        };\n        let session_bus = match &kwin {\n            Some(k) => Some(k.connection().clone()),\n            None => Connection::session().ok(),\n        };\n        if let Some(s) = &session_bus {\n            watch_freedesktop_lock(s, ctx.recorder.clone());\n            watch_layouts(s, ctx.system_bus.clone(), ctx.input.clone());\n        }\n        Box::new(KdeSession { kwin })\n    }\n}\n\nstruct KdeSession {\n    kwin: Option<Arc<KwinFocus>>,\n}\n\nimpl DesktopSession for KdeSession {\n    fn focus_tracking(&self) -> &'static str {\n        if self.kwin.is_some() {\n            \"via KWin\"\n        } else {\n            \"unavailable\"\n        }\n    }\n\n    fn stop(&self) {\n        if let
+… [12545 more characters in the raw transcript]
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 612,636p src/capture/linux/keys.rs",
+  "description": "Read the kcminputrc test to move"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+The file /home/juan/Documents/shadow-assistant/src/capture/linux/kde.rs has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+                p.key(0, code, if down { 1 } else { 0 }, ts, &mut emit);
+            }
+            p.tick(end, &mut emit);
+            assert_eq!(got, expected, "scenario {scenario}: {events:?}");
+        }
+    }
+
+    #[test]
+    fn parses_kcminputrc() {
+        let cfg = RepeatConfig::from_kcminputrc(
+            "[Mouse]\nRepeatDelay=1\n[Keyboard]\nKeyRepeat=repeat\nRepeatDelay=250\nRepeatRate=30.5\n",
+        );
+        assert_eq!(
+            cfg,
+            RepeatConfig {
+                enabled: true,
+                delay_ms: 250,
+                rate_hz: 30.5
+            }
+        );
+        let off = RepeatConfig::from_kcminputrc("[Keyboard]\nKeyRepeat=nothing\n");
+        assert!(!off.enabled);
+        assert_eq!(RepeatConfig::from_kcminputrc(""), RepeatConfig::default());
+    }
+}
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:13:40.683Z</sub>
+
+Moving that test into `kde.rs` with its parser, and updating the moved files' imports:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\np='src/capture/linux/keys.rs'; s=open(p).read()\n# remove from_kcminputrc impl\ni=s.index(\"    /// Reads `[Keyboard]` from KDE's `kcminputrc` text, falling back to defaults.\\n    pub fn from_kcminputrc\")\nj=s.index(\"    fn interval_ms(&self) -> f64 {\")\ns=s[:i]+s[j:]\n# remove test\ni=s.index(\"    #[test]\\n    fn parses_kcminputrc() {\")\nj=s.index(\"        assert_eq!(RepeatConfig::from_kcminputrc(\\\"\\\"), RepeatConfig::default());\\n    }\\n\")+len(\"        assert_eq!(RepeatConfig::from_kcminputrc(\\\"\\\"), RepeatConfig::default());\\n    }\\n\")\ns=s[:i].rstrip()+\"\\n\"+s[j:]\ns=s.replace(\"\"\"/// Compositor key-repeat settings.\"\"\",\"\"\"/// Compositor key-repeat settings (the desktop backend reads them).\"\"\")\nopen(p,'w').write(s)\nedit('src/capture/linux/kde.rs',[(\"\"\"    #[test]\n    fn script_template_has_all_placeholders() {\"\"\",\"\"\"    #[test]\n    fn parses_kcminputrc() {\n        let cfg = repeat_from_kcminputrc(\n            \"[Mouse]\\\\nRepeatDelay=1\\\\n[Keyboard]\\\\nKeyRepeat=repeat\\\\nRepeatDelay=250\\\\nRepeatRate=30.5\\\\n\",\n        );\n        assert_eq!(\n            cfg,\n            RepeatConfig {\n                enabled: true,\n                delay_ms: 250,\n                rate_hz: 30.5\n            }\n        );\n        let off = repeat_from_kcminputrc(\"[Keyboard]\\\\nKeyRepeat=nothing\\\\n\");\n        assert!(!off.enabled);\n        assert_eq!(repeat_from_kcminputrc(\"\"), RepeatConfig::default());\n    }\n\n    #[test]\n    fn script_template_has_all_placeholders() {\"\"\")])\nedit('src/capture/linux/input.rs',[(\"use super::recorder::Recorder;\",\"use crate::capture::recorder::Recorder;\")])\nedit('src/capture/linux/synthetic.rs',[(\"use super::recorder::Recorder;\",\"use crate::capture::recorder::Recorder;\")])\nfor p in ['tests/common/mod.rs','tests/repeat_e2e.rs']:\n    edit(p,[(\"use brain::capture::synthetic::us_keycode;\",\"use brain::capture::linux::synthetic::us_keycode;\")])\nEOF\nsed -n 1,20p src/capture/linux/synthetic.rs; grep -n 'Default for RepeatConfig' -A3 src/capture/linux/keys.rs",
+  "description": "Move the kcminputrc test; fix moved files' imports"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! A synthetic input source for tests and benchmarks (`brain run --synthetic RATE`).
+//!
+//! It types a fixed corpus as raw evdev key transitions, at `RATE` key presses
+//! per second, through the same [`KeyProcessor`] → [`Recorder`] → log → ingest
+//! path as real input. After every sentence it switches to a terminal, runs a
+//! shell command (Enter commits that session) and switches back (the editor
+//! session resumes), so sessions open, commit and resume all the time. Only the evdev device read is replaced. Crash-safety,
+//! consistency and resource tests can therefore run unattended, without root
+//! access to `/dev/uinput`.
+
+use super::keys::{KeyOut, KeyProcessor};
+use crate::capture::recorder::Recorder;
+use crate::timefmt::now_ms;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+pub const SYNTHETIC_APP: &str = "synthetic";
+pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
+pub const SYNTHETIC_TERMINAL: &str = "org.kde.konsole";
+24:impl Default for RepeatConfig {
+25-    /// KDE Plasma's defaults.
+26-    fn default() -> Self {
+27-        Self {
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:13:52.537Z</sub>
+
+Now the synthetic source becomes a `Platform`. Its start code moves here from the old `capture/mod.rs` unchanged:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/capture/linux/synthetic.rs'; s=open(p).read()\nold=\"\"\"//! session resumes), so sessions open, commit and resume all the time. Only the evdev device read is replaced. Crash-safety,\n//! consistency and resource tests can therefore run unattended, without root\n//! access to `/dev/uinput`.\n\nuse super::keys::{KeyOut, KeyProcessor};\nuse crate::capture::recorder::Recorder;\nuse crate::timefmt::now_ms;\nuse std::sync::Arc;\nuse std::sync::atomic::{AtomicBool, Ordering};\nuse std::time::{Duration, Instant};\n\"\"\"\nnew=\"\"\"//! session resumes), so sessions open, commit and resume all the time. Only\n//! the evdev device read is replaced, and desktop integration is off.\n//! Crash-safety, consistency and resource tests can therefore run unattended,\n//! without root access to `/dev/uinput` or a desktop.\n\nuse super::keys::{KeyOut, KeyProcessor, RepeatConfig};\nuse super::xkb::{Keyboard, LayoutSpec};\nuse crate::capture::platform::{Capture, Platform};\nuse crate::capture::recorder::{NoClipboard, Recorder};\nuse crate::datadir::DataDir;\nuse crate::event::SystemState;\nuse crate::eventlog::LogWriter;\nuse crate::timefmt::now_ms;\nuse anyhow::Result;\nuse std::sync::Arc;\nuse std::sync::atomic::{AtomicBool, Ordering};\nuse std::thread::JoinHandle;\nuse std::time::{Duration, Instant};\n\n/// The synthetic source as a [`Platform`]: types at `rate` key presses per\n/// second on the US layout.\npub struct Synthetic {\n    pub rate: f64,\n}\n\nimpl Platform for Synthetic {\n    fn start(&self, _data_dir: &DataDir, log: LogWriter) -> Result<Box<dyn Capture>> {\n        let recorder = Arc::new(Recorder::new(log, Box::new(NoClipboard)));\n        recorder.system(SystemState::Start);\n        let kb = Keyboard::new(&LayoutSpec {\n            layout: \"us\".into(),\n            ..Default::default()\n        })?;\n        let keys = KeyProcessor::new(kb, RepeatConfig::default());\n        let stop = Arc::new(AtomicBool::new(false));\n        let rate = self.rate;\n        let thread = {\n            let (recorder, stop) = (recorder.clone(), stop.clone());\n            std::thread::Builder::new()\n                .name(\"synthetic\".into())\n                .spawn(move || run(keys, recorder, rate, stop))?\n        };\n        eprintln!(\"brain: synthetic input at {rate} keys/s\");\n        Ok(Box::new(SyntheticCapture {\n            recorder,\n            stop,\n            thread,\n        }))\n    }\n}\n\nstruct SyntheticCapture {\n    recorder: Arc<Recorder>,\n    stop: Arc<AtomicBool>,\n    thread: JoinHandle<()>,\n}\n\nimpl Capture for SyntheticCapture {\n    fn recorder(&self) -> &Arc<Recorder> {\n        &self.recorder\n    }\n\n    fn stop(self: Box<Self>) {\n        self.stop.store(true, Ordering::Relaxed);\n        if self.thread.join().is_err() {\n            eprintln!(\"brain: warning: synthetic input thread panicked\");\n        }\n    }\n}\n\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\np='src/capture/linux/keys.rs'; s=open(p).read()\ns=s.replace(\"\"\"impl Default for RepeatConfig {\n    /// KDE Plasma's defaults.\"\"\",\"\"\"impl Default for RepeatConfig {\n    /// KDE Plasma's defaults (600 ms, 25 Hz).\"\"\")\nopen(p,'w').write(s)\nEOF\ncargo build --release 2>&1 | grep -E '^(warning|error)' -A10 | head -60",
+  "description": "Make the synthetic source a Platform; build",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:14:23.669Z</sub>
+
+It builds cleanly on the first try. Next, `Cargo.toml` marks the Linux-only dependencies as such, so a future port starts from an honest dependency list:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='Cargo.toml'; s=open(p).read()\ns=s.replace('evdev = \"0.13\"\\n','').replace('zbus = \"5\"\\n','')\ns=s.replace('[dev-dependencies]','''# Capture on Linux: input devices and the desktop's D-Bus services\n# (src/capture/linux/). Another platform brings its own.\n[target.'cfg(target_os = \"linux\")'.dependencies]\nevdev = \"0.13\"\nzbus = \"5\"\n\n[dev-dependencies]''')\nopen(p,'w').write(s)\nEOF\ncat Cargo.toml | sed -n 8,26p; cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -30; cargo doc --no-deps 2>&1 | grep -E '^warning' -A6 | head -20; git diff --stat Cargo.lock | tail -1",
+  "description": "Mark Linux-only dependencies; lint and doc check",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+rusqlite = { version = "0.43", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Capture on Linux: input devices and the desktop's D-Bus services
+# (src/capture/linux/). Another platform brings its own.
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+warning: public documentation for `linux` links to private item `logind`
+ --> src/capture/linux/mod.rs:8:54
+  |
+8 | //! * **Sleep and wake** come from systemd-logind ([`logind`]), on any
+  |                                                      ^^^^^^ this item is private
+  |
+  = note: this link will resolve properly if you pass `--document-private-items`
+--
+warning: `brain` (lib doc) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.42s
+   Generated /home/juan/Documents/shadow-assistant/target/doc/brain/index.html
+[This command modified 2 files you've previously read: src/capture/linux/mod.rs, src/capture/linux/desktop.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -i 's|//! \\* \\*\\*Sleep and wake\\*\\* come from systemd-logind (\\[`logind`\\]), on any|//! * **Sleep and wake** come from systemd-logind (`logind.rs`), on any|' src/capture/linux/mod.rs && cargo doc --no-deps 2>&1 | grep -cE '^warning'; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Fix doc link; lint; run the full default suite",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+     Running unittests src/lib.rs 
+test result: ok. 131 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.88s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.40s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[This command modified 1 file you've previously read: src/capture/linux/mod.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All 131 unit tests pass, one more than before with the new desktop-detection test. I'm checking that the moved key-capture files differ only in import lines, to confirm the hot path is unchanged.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A && git diff --cached -M --stat | tail -20; echo; for f in input xkb; do echo \"== $f.rs\"; git diff --cached -M -- src/capture/$f.rs src/capture/linux/$f.rs | grep -E '^[-+][^-+]'; done; echo \"== keys.rs (non-kcminputrc changes)\"; git diff --cached -M -- src/capture/keys.rs src/capture/linux/keys.rs | grep -E '^[-+][^-+]' | grep -vE 'kcminputrc|KeyRepeat|RepeatDelay|RepeatRate|in_keyboard|cfg\\.|let Some\\(\\(k, v\\)\\)|continue;|^\\-\\s*\\}|^-\\s*$|match k.trim|_ => \\{\\}|if let Ok|&& d >= 0|let mut cfg|for line in|if line.starts|if !in_|\\} else \\{|cfg$|RepeatConfig \\{|enabled: true|delay_ms: 250|rate_hz: 30.5|assert' | head -20",
+  "description": "Show the moved key-capture files differ only in imports"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ Cargo.toml                               |   6 +-
+ src/capture/linux/dbus.rs                |  71 ++++++
+ src/capture/linux/desktop.rs             | 200 +++++++++++++++++
+ src/capture/{ => linux}/input.rs         |   2 +-
+ src/capture/{desktop.rs => linux/kde.rs} | 361 +++++++++++++------------------
+ src/capture/{ => linux}/keys.rs          |  61 +-----
+ src/capture/{ => linux}/kwin_focus.js    |   0
+ src/capture/linux/layout.rs              |  46 ++++
+ src/capture/linux/logind.rs              |  28 +++
+ src/capture/linux/mod.rs                 | 117 ++++++++++
+ src/capture/{ => linux}/synthetic.rs     |  69 +++++-
+ src/capture/{ => linux}/xkb.rs           |   0
+ src/capture/mod.rs                       | 197 +++--------------
+ src/capture/platform.rs                  |  64 ++++++
+ tests/common/mod.rs                      |   2 +-
+ tests/repeat_e2e.rs                      |   2 +-
+ 16 files changed, 780 insertions(+), 446 deletions(-)
+
+== input.rs
+-use super::recorder::Recorder;
++use crate::capture::recorder::Recorder;
+== xkb.rs
+== keys.rs (non-kcminputrc changes)
+-/// Compositor key-repeat settings.
++/// Compositor key-repeat settings (the desktop backend reads them).
+-    /// KDE Plasma's defaults.
++    /// KDE Plasma's defaults (600 ms, 25 Hz).
+-                    {
+-                        if r > 0.0 {
+-    #[test]
+-        );
+-            cfg,
+-        );
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The input loop and xkb code are untouched apart from one import, and keys.rs only lost the KDE parser. Next I'll run the three Kate tests to confirm KDE integration still works through the new layer.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "[ \"$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\" = \"false\" ] && echo unlocked && cargo test --release --test real_keyboard_e2e --test repeat_e2e --test two_instances -- --ignored --nocapture --test-threads=1 2>&1 | grep -E 'kate [AB]|^a: |reconstructed:|test result|panicked'; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"",
+  "description": "Run the real-desktop KDE tests through the refactored capture",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+unlocked
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.08s
+reconstructed: "abccddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffgggggggggggghhhhhhhhhhhhiiiiiiiiiiijjjkkkkkkkkkkkkkkkkkkkkkkkkk"
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.46s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.25s
+leftover: brain=0 kate=0 layout=0
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All three pass through the new layer. Next I'll check the KDE start message and the fallback path, running brain with XDG_CURRENT_DESKTOP=XFCE in a private D-Bus session where no KWin exists.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "B=target/release/brain; T=$CLAUDE_JOB_DIR/tmp; rm -rf $T/kde $T/xfce; ($B run --data-dir $T/kde 2>&1 & p=$!; sleep 2; kill -TERM $p; wait $p; echo \"exit $?\") | sed 's/^/[kde] /'; dbus-run-session -- sh -c \"XDG_CURRENT_DESKTOP=XFCE $B run --data-dir $T/xfce 2>&1 & p=\\$!; sleep 2; kill -TERM \\$p; wait \\$p; echo exit \\$?\" | sed 's/^/[xfce] /'; grep -c '\"type\":\"system\"' $T/kde/events.jsonl $T/xfce/events.jsonl; rm -rf $T/kde $T/xfce",
+  "description": "Check start messages on KDE and an unsupported desktop",
+  "timeout": 60000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+[kde] brain: capturing from 1 keyboard(s), desktop KDE Plasma, focus tracking via KWin, layout us,il; data in /home/juan/.claude/jobs/64f49a65/tmp/kde
+[kde] brain: received signal 15, stopping
+[kde] exit 0
+[xfce] brain: warning: desktop 'XFCE' is not supported (KDE Plasma is): keys are attributed to 'unknown', pastes are not resolved, and the screen lock is detected only if the desktop implements org.freedesktop.ScreenSaver, so an unlock password may be recorded
+[xfce] brain: capturing from 1 keyboard(s), desktop XFCE (unsupported), focus tracking unavailable, layout us,il; data in /home/juan/.claude/jobs/64f49a65/tmp/xfce
+[xfce] brain: received signal 15, stopping
+[xfce] exit 0
+/home/juan/.claude/jobs/64f49a65/tmp/xfce/events.jsonl:2
+/home/juan/.claude/jobs/64f49a65/tmp/kde/events.jsonl:2
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Both paths work: KDE starts as before and now names the desktop, while the unsupported desktop shows your chosen warning, keeps key capture, and still finds your layouts. Next I'm updating the docs that mention the old file paths.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'capture/input\\|capture/keys\\|capture/xkb\\|capture/desktop\\|capture/synthetic\\|kwin_focus.js\\|capture/recorder\\|src/capture' README.md PLAN.md CLAUDE.md src tests | grep -v '^src/capture/linux/kde.rs.*include_str' | cut -c1-140",
+  "description": "Find doc references to old capture paths"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+CLAUDE.md:73:src/capture/mod.rs       `run` orchestration: sources, ingest thread, signals
+CLAUDE.md:74:src/capture/input.rs     poll loop over keyboards (evdev), hotplug, EVIOCSMASK
+CLAUDE.md:75:src/capture/keys.rs      pure key processing: xkb resolution + repeat synthesis
+CLAUDE.md:76:src/capture/xkb.rs       libxkbcommon FFI wrapper
+CLAUDE.md:77:src/capture/recorder.rs  stamps focus, appends to log, clipboard on paste, lock pause
+CLAUDE.md:78:src/capture/desktop.rs   D-Bus: KWin focus script, Klipper, lock, sleep, layouts
+CLAUDE.md:79:src/capture/synthetic.rs synthetic input source for tests/benchmarks
+PLAN.md:94:libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)
+PLAN.md:149:(`src/capture/desktop.rs`, `kwin_focus.js`)
+src/capture/mod.rs:20:     in src/capture/ (see src/capture/platform.rs)"
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('CLAUDE.md',[(\"\"\"src/capture/mod.rs       `run` orchestration: sources, ingest thread, signals\nsrc/capture/input.rs     poll loop over keyboards (evdev), hotplug, EVIOCSMASK\nsrc/capture/keys.rs      pure key processing: xkb resolution + repeat synthesis\nsrc/capture/xkb.rs       libxkbcommon FFI wrapper\nsrc/capture/recorder.rs  stamps focus, appends to log, clipboard on paste, lock pause\nsrc/capture/desktop.rs   D-Bus: KWin focus script, Klipper, lock, sleep, layouts\nsrc/capture/synthetic.rs synthetic input source for tests/benchmarks\"\"\",\"\"\"src/capture/mod.rs       `run` orchestration: platform, ingest thread, signals\nsrc/capture/platform.rs  the platform interfaces (Platform, Capture) and their contract\nsrc/capture/recorder.rs  the sink every source writes to: stamps focus, appends to\n                         the log, clipboard on paste, lock pause\nsrc/capture/linux/       the Linux platform:\n  mod.rs                 wires evdev keys, logind sleep and the desktop backend\n  input.rs               poll loop over keyboards (evdev), hotplug, EVIOCSMASK\n  keys.rs                pure key processing: xkb resolution + repeat synthesis\n  xkb.rs                 libxkbcommon FFI wrapper\n  desktop.rs             the Desktop interface, detection, unsupported fallback\n  kde.rs, kwin_focus.js  KDE Plasma: KWin focus, Klipper, lock, layouts, repeat\n  logind.rs, layout.rs   sleep/wake; system keyboard layout (env, localed)\n  dbus.rs                signal watching shared by the backends\n  synthetic.rs           synthetic input source for tests/benchmarks\"\"\")])\nedit('PLAN.md',[\n(\"\"\"libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)\"\"\",\"\"\"libxkbcommon.** (`src/capture/linux/input.rs`, `keys.rs`, `xkb.rs`)\"\"\"),\n(\"\"\"(`src/capture/desktop.rs`, `kwin_focus.js`)\"\"\",\"\"\"(`src/capture/linux/kde.rs`, `kwin_focus.js`)\"\"\"),\n(\"\"\"## 3. Event format and ingestion\"\"\",\"\"\"### 2.4 The platform layer\n\nCapture sits behind interfaces (`src/capture/platform.rs`), so another\nplatform is a new module, not a change to the core:\n\n- A **`Platform`** starts capture and writes everything into the\n  `Recorder`: keys as the app received them, focus (app id, window title,\n  renamed), screen lock, sleep/wake, and the clipboard at a paste shortcut.\n  Everything after the recorder (log, ingest, sessions, reconstruction,\n  storage, queries) is platform-independent. The trait documents the\n  contract every key source must keep: characters as the app received\n  them, shortcuts on the Latin layout, time order with transitions before\n  same-moment repeats, never grabbing or delaying a key, releasing keys of\n  a vanished device.\n- **Linux** (`src/capture/linux/`) is one platform: keys from evdev and\n  xkbcommon, which work on any Linux desktop, and sleep/wake from logind.\n  Everything else comes from a **`Desktop`** backend chosen at start from\n  `XDG_CURRENT_DESKTOP` (or the compositor's name on the session bus):\n  focus, clipboard, screen lock, and the keyboard settings the key\n  resolution needs (layouts, layout switches, repeat schedule). KDE Plasma\n  is one backend. A desktop without one still gets keys, attributed to\n  `unknown`, with a warning that its screen lock may not be detected.\n- The **synthetic** test source is another `Platform`.\n- `Cargo.toml` lists evdev and zbus as Linux-only dependencies, and a build\n  for another OS stops with a message pointing at the platform layer.\n\nA macOS or Windows port would add a platform with its own key source (a\nCGEventTap, a low-level keyboard hook: the OS supplies characters and\nrepeats there), focus source and lock/sleep events. Cross-platform key\ncrates (rdev, keytap, handy-keys) could sit behind its key source; on\n
+… [400 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+fmt-ok
+[This command modified 1 file you've previously read: PLAN.md. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add -A && git commit -q -F - <<'EOF'\nPut capture behind platform interfaces\n\nTo make other platforms a new module rather than a change to the core,\ncapture now sits behind interfaces (src/capture/platform.rs): a\nPlatform starts capture into the Recorder, whose contract for key\nsources is written down there. Everything after the Recorder was\nalready platform-independent and is untouched.\n\nLinux is one platform (src/capture/linux/): evdev keys resolved with\nxkbcommon and logind sleep/wake, which work on any desktop, plus a\nDesktop backend chosen from XDG_CURRENT_DESKTOP (or KWin's name on the\nsession bus) for focus, clipboard, screen lock and keyboard settings.\nKDE Plasma is the first backend; the old desktop.rs is split into\nkde.rs, logind.rs, layout.rs and dbus.rs, and KDE's kcminputrc parser\nmoved out of the generic key code. A desktop without a backend gets\nkeys under `unknown` with a warning that its lock screen may not be\ndetected (the owner's choice). The synthetic test source is a\nPlatform too. evdev and zbus become Linux-only dependencies, and other\ntargets stop with a compile error naming the platform layer.\n\nNo behaviour change on KDE: the input loop and xkb code moved\nunchanged, all default tests pass, and the real-desktop tests (KWin\nfocus, Hebrew via Alt+Shift, hotplug, key repeat, two captures) pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngit push -q origin main && git log --oneline | head -1; which gnome-shell gnome-extensions 2>&1 | head -2",
+  "description": "Commit and push stage 1; check whether gnome-shell is installed"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ca94e97 Put capture behind platform interfaces
+gnome-shell not found
+gnome-extensions not found
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:18:47.329Z</sub>
+
+Stage 1 is done and pushed: capture now sits behind platform interfaces, and KDE behaves exactly as before. Stage 2 (stock Ubuntu) needs `gnome-shell` installed so I can test it, and it isn't installed yet. So I'll stop here, per the stage habit, with the stage 2 plan below for your approval.
+
+## Stage 1: platform interfaces (`ca94e97`)
+```
+src/capture/
+  mod.rs        brain run: picks the platform, wires it to log, ingest, tier 2
+  platform.rs   Platform / Capture interfaces + the contract every key source keeps
+  recorder.rs   the sink every source writes to (unchanged)
+  linux/        the Linux platform
+    mod.rs      evdev keys + logind sleep + the detected desktop
+    input.rs, keys.rs, xkb.rs    key capture (moved; only one import line changed)
+    desktop.rs  Desktop interface, detection, fallback for unsupported desktops
+    kde.rs      KDE Plasma backend: KWin focus, Klipper, lock, layouts, repeat
+    logind.rs, layout.rs, dbus.rs, synthetic.rs
+```
+- **Desktop detection:** the desktop is picked from `XDG_CURRENT_DESKTOP`, or from KWin's name on the session bus.
+- **Unsupported desktops:** keys are still captured under `unknown`, with a warning that the lock screen may not be detected (your choice). I checked it in a private D-Bus session posing as XFCE.
+- **Synthetic source:** the test source is a platform too.
+- **Build:** evdev and zbus are now Linux-only dependencies, and a build for another OS stops with a message pointing at `platform.rs`.
+- **No behaviour change on KDE:**
+  - the diff shows the input loop and xkb code unchanged, apart from one import line;
+  - all default tests pass (131 unit tests; the extra one is the new detection test);
+  - the three real-desktop tests pass: KWin focus, Hebrew through Alt+Shift, keyboard hotplug, key repeat, and two captures sharing KWin.
+- **Docs:** PLAN.md has a new "2.4 The platform layer" section, including why cross-platform key crates don't help on Linux. CLAUDE.md's code map is updated.
+
+## Stage 2 plan: stock Ubuntu (GNOME on Wayland)
+**A GNOME Shell extension** (`brain@shadowassistant`, shipped in `packaging/`), the GNOME counterpart of the KWin script. It runs inside GNOME Shell and offers on the session bus:
+- a signal on every focus change and window-title change (app id, title, renamed);
+- a signal on every layout switch (Super+Space);
+- a method that returns the clipboard text.
+
+**A `gnome.rs` backend in brain:**
+- **Focus and layout switches** come from the extension's signals, accepted only from GNOME Shell's own bus connection, the same check the KDE backend does.
+- **Clipboard** comes from the extension's method, with a 300 ms limit.
+- **Screen lock** comes from `org.gnome.ScreenSaver`.
+- **Keyboard settings** come from GNOME's own settings: the input sources and xkb options, and key delay and repeat interval (GNOME's defaults are 500 ms and 30 ms).
+- **Detection:** chosen when `XDG_CURRENT_DESKTOP` contains `GNOME` (Ubuntu sets `ubuntu:GNOME`).
+- **Missing extension:** if the extension isn't active, brain warns and says how to install it.
+
+**Installation:**
+- `make install` also installs the extension for your user and enables it when GNOME is present. GNOME on Wayland only loads it after one logout and login.
+- The service unit also starts after GNOME Shell.
+
+**Stock Ubuntu apps:**
+- **Tier 1:** the app table learns Ubuntu's default apps: Ptyxis and GNOME Console (terminals), Firefox as a snap (`firefox_firefox`), and Text Editor.
+- **VS Code as a snap:** its app id is `code_code`. Tier 2 recognizes it, and the replay finds `/snap/bin/code`.
+
+**Tests:** a new `#[ignore]` test (`tests/gnome_e2e.rs`) starts a private headless GNOME Shell with the extension installed into a temporary home folder. It opens Kate windows on that GNOME, then checks that brain logs focus and title changes, a layout switch, the clipboard at a paste, and the lock signal, and that nothing is left behind. Your KDE session isn't touched.
+
+**One trade-off for you to accept or change:** the extension's clipboard method answers any program in your session. On GNOME Wayland, background apps normally can't read the clipboard, so this is a real widening, though KDE's Klipper already answers anyone the same way. I can make the extension answer only callers whose executable is named `brain` (it can look up the calling process). That isn't strong security, since any program can be named `brain`, but it stops casual readers.
+
+**To continue:**
+1. Install GNOME Shell without the recommended packages, so your SDDM login screen stays:
+   ```sh
+   sudo apt install --no-install-recommends gnome-shell
+   ```
+2. Tell me to start stage 2, and whether the clipboard method should answer anyone (like Klipper) or only callers named `brain`.
+
+## User  <sub>2026-11-18T10:23:24.163Z</sub>
+
+i installed it, it is ok to answer anyone like klipper, continue
+
+## Assistant  <sub>2026-11-18T10:23:28.392Z</sub>
+
+I'll check what got installed and what this GNOME Shell supports for running headless.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "gnome-shell --version; which gnome-extensions gjs mutter gdbus dbus-run-session 2>&1; gnome-shell --help 2>&1 | grep -iE 'headless|virtual|nested|wayland|devkit|replace|mode' | head -20; dpkg -l | grep -E '^ii +(gnome-shell|mutter|gjs|gnome-settings-daemon|gsettings-desktop-schemas) ' | awk '{print $2,$3}'",
+  "description": "Check the installed GNOME Shell version and headless options"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+GNOME Shell 50.1
+/usr/bin/gnome-extensions
+/usr/bin/gjs
+mutter not found
+/usr/bin/gdbus
+/usr/bin/dbus-run-session
+  --wayland                 Run as a wayland compositor
+  --no-x11                  Run wayland compositor without starting Xwayland
+  --wayland-display         Specify Wayland display name to use
+  --display-server          Run as a full display server, rather than nested
+  --headless                Run as a headless display server
+  --virtual-monitor         Add persistent virtual monitor (WxH or WxH@R)
+  --devkit                  Run development kit
+  --mode=MODE               Use a specific mode, e.g. “gdm” for login screen
+  --list-modes              List possible modes
+gjs 1.88.0-1
+gnome-settings-daemon 50.0-1ubuntu1
+gnome-shell 50.1-0ubuntu1.5
+gsettings-desktop-schemas 50.0-1ubuntu2
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+GNOME Shell 50.1 is installed with headless support, and I'm now checking that a private headless instance starts here, isolated from your KDE session.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home $T/run; chmod 700 $T/run; cd $T; timeout 25 dbus-run-session -- env -u WAYLAND_DISPLAY -u DISPLAY HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME sh -c 'gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1 & s=$!; for i in $(seq 1 40); do gdbus introspect --session --dest org.gnome.Shell --object-path /org/gnome/Shell >/dev/null 2>&1 && { echo \"shell up after ${i}x0.25s\"; break; }; sleep 0.25; done; ls $XDG_RUNTIME_DIR; gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.freedesktop.DBus.Properties.Get org.gnome.Shell ShellVersion; gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.GetActive; kill $s; wait $s'; echo \"--- log:\"; grep -vE '^\\s*$' $T/shell.log | head -25",
+  "description": "Try starting a private headless GNOME Shell",
+  "timeout": 60000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.a11y.Bus' requested by ':1.7' (uid=1000 pid=833249 comm="gnome-shell --headless --wayland --no-x11 --virtua" label="unconfined")
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Successfully activated service 'org.a11y.Bus'
+shell up after 7x0.25s
+brain-test-0
+brain-test-0.lock
+dconf
+gnome-shell
+Error: GDBus.Error:org.freedesktop.DBus.Error.UnknownMethod: Object does not exist at path “/org/gnome/Shell”
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.gnome.ScreenSaver' requested by ':1.11' (uid=1000 pid=833338 comm="gdbus call --session --dest org.gnome.ScreenSaver" label="unconfined")
+dbus-daemon[833328]: Activating service name='org.a11y.atspi.Registry' requested by ':1.0' (uid=1000 pid=833249 comm="gnome-shell --headless --wayland --no-x11 --virtua" label="unconfined")
+dbus-daemon[833328]: Successfully activated service 'org.a11y.atspi.Registry'
+SpiRegistry daemon is running with well-known name - org.a11y.atspi.Registry
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Successfully activated service 'org.gnome.ScreenSaver'
+Error: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.ScreenShield was not provided by any .service files
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.gnome.Shell.Screencast' requested by ':1.1' (uid=1000 pid=833249 comm="gnome-shell --headless --wayland --no-x11 --virtua" label="unconfined")
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.freedesktop.impl.portal.PermissionStore' requested by ':1.1' (uid=1000 pid=833249 comm="gnome-shell --headless --wayland --no-x11 --virtua" label="unconfined")
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.gnome.Shell.CalendarServer' requested by ':1.1' (uid=1000 pid=833249 comm="gnome-shell --headless --wayland --no-x11 --virtua" label="unconfined")
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Successfully activated service 'org.freedesktop.impl.portal.PermissionStore'
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activating service name='org.gnome.evolution.dataserver.Sources5' requested by ':1.16' (uid=1000 pid=833395 comm="/usr/libexec/gnome-shell-calendar-server" label="unconfined")
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activated service 'org.gnome.evolution.dataserver.Sources5' failed: Failed to execute program org.gnome.evolution.dataserver.Sources5: No such file or directory
+
+(gnome-shell-calendar-server:833395): ShellCalendarServer-WARNING **: 12:23:45.484: Failed to start evolution-source-registry: Error calling StartServiceByName for org.gnome.evolution.dataserver.Sources5: Failed to execute program org.gnome.evolution.dataserver.Sources5: No such file or directory
+dbus-daemon[833247]: [session uid=1000 pid=833247 pidfd=5] Activated
+… [5598 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+A headless GNOME Shell came up in its own D-Bus session and I stopped it on purpose; next I'm checking which window toolkits and GNOME's unsafe test mode the test can use before writing the extension.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "gnome-shell --help 2>&1 | grep -iE 'unsafe|debug|automation' ; ls /usr/lib/x86_64-linux-gnu/girepository-1.0/ | grep -E '^(Gtk|Gdk|Adw|Meta|Shell|St)-' | head; which kate gnome-text-editor 2>&1; ls /usr/share/applications | grep -iE 'kate|ptyxis|console|terminal|firefox|texteditor' | head; ls /usr/libexec/dconf-service 2>&1",
+  "description": "Check unsafe mode, GTK typelibs and available test apps"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+  --debug-control           Enable debug control D-Bus interface
+Adw-1.typelib
+Gdk-3.0.typelib
+Gdk-4.0.typelib
+Gtk-3.0.typelib
+Gtk-4.0.typelib
+/usr/bin/kate
+gnome-text-editor not found
+org.kde.kate.desktop
+org.kde.plasma-interactiveconsole.desktop
+/usr/libexec/dconf-service
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+GTK 4 is available, so the test can open its own window in this GNOME session and rename it. Next I'm checking whether `--debug-control` supports a scripted layout switch and screen lock.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home $T/run; chmod 700 $T/run; cd $T; timeout 30 dbus-run-session -- env -u WAYLAND_DISPLAY -u DISPLAY HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME sh -c 'gnome-shell --headless --wayland --no-x11 --debug-control --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1 & s=$!; for i in $(seq 1 60); do gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.freedesktop.DBus.Properties.Get org.gnome.Shell ShellVersion >/dev/null 2>&1 && { echo \"ready after ${i}x0.25s\"; break; }; sleep 0.25; done; gdbus introspect --session --dest org.gnome.Shell --object-path /org/gnome/Shell/DebugControl 2>&1 | grep -E \"method|property|interface\" | head -20; gdbus introspect --session --dest org.gnome.Shell --object-path /org/gnome/Shell | grep -E \"method|interface\" | head -20; echo \"lock:\"; gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.GetActive; kill $s; wait $s' 2>&1 | grep -vE 'dbus-daemon|Activat|^\\s*$|portal|ibus|SpiRegistry|qt\\.|wl_display' ",
+  "description": "Introspect the headless shell's debug and shell interfaces",
+  "timeout": 60000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(gnome-shell-calendar-server:833904): ShellCalendarServer-WARNING **: 12:25:18.976: Failed to start evolution-source-registry: Error calling StartServiceByName for org.gnome.evolution.dataserver.Sources5: Failed to execute program org.gnome.evolution.dataserver.Sources5: No such file or directory
+ready after 8x0.25s
+  interface org.freedesktop.DBus.Properties {
+    methods:
+      Get(in  s interface_name,
+      GetAll(in  s interface_name,
+      Set(in  s interface_name,
+      PropertiesChanged(s interface_name,
+  interface org.freedesktop.DBus.Introspectable {
+    methods:
+  interface org.freedesktop.DBus.Peer {
+    methods:
+  interface org.gnome.Shell {
+    methods:
+  interface org.gnome.Shell.Extensions {
+    methods:
+lock:
+Error: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.ScreenShield was not provided by any .service files
+
+kf.wallet.ksecretd: Lacking a socket, pipe: 0 env: 0
+kf.dbusaddons: DBus session bus not found. To circumvent this problem try the following command (with bash):
+    export $(dbus-launch)
+QThreadStorage: entry 1 destroyed before end of thread 0x57add27a8320
+Command did not complete within its 60s timeout and was moved to the background (ID: br1o5ia9s). Output is being written to: /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/tasks/br1o5ia9s.output. You will be notified when it completes. It is running now: do not start a second copy while it runs. If it is no longer needed, stop it with TaskStop. To check interim output, use Read on that file path.
+Session cwd remains /home/juan/Documents/shadow-assistant; directory changes made by the backgrounded command do not apply to subsequent commands.
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:26:28.732Z</sub>
+
+That run hung on exit: services the private bus had started (portals, ibus, a KDE wallet daemon) outlived it. The test harness will need to kill the whole tree. I'll stop it and clean up:
+
+**Tool call: `ToolSearch`**
+
+```
+{
+  "query": "select:TaskStop",
+  "max_results": 1
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+
+```
+
+</details>
+
+**Tool call: `TaskStop`**
+
+```
+{
+  "task_id": "br1o5ia9s"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+{"message":"Successfully stopped task: br1o5ia9s (T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home $T/run; chmod 700 $T/run; cd $T; timeout 30 dbus-run-session -- env -u WAYLAND_DISPLAY -u DISPLAY HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME sh -c 'gnome-shell --headless --wayland --no-x11 --debug-control --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1 & s=$!; for\n\n... [468 characters truncated] ...\n\n/gnome/Shell | grep -E \"method|interface\" | head -20; echo \"lock:\"; gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.GetActive; kill $s; wait $s' 2>&1 | grep -vE 'dbus-daemon|Activat|^\\s*$|portal|ibus|SpiRegistry|qt\\.|wl_display' )","task_id":"br1o5ia9s","task_type":"local_bash","command":"T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home $T/run; chmod 700 $T/run; cd $T; timeout 30 dbus-run-session -- env -u WAYLAND_DISPLAY -u DISPLAY HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME sh -c 'gnome-shell --headless --wayland --no-x11 --debug-control --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1 & s=$!; for i in $(seq 1 60); do gdbus call --ses\n\n... [429 characters truncated] ...\n\ng/gnome/Shell | grep -E \"method|interface\" | head -20; echo \"lock:\"; gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.GetActive; kill $s; wait $s' 2>&1 | grep -vE 'dbus-daemon|Activat|^\\s*$|portal|ibus|SpiRegistry|qt\\.|wl_display' "}
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=$CLAUDE_JOB_DIR/tmp/gs; ps -eo pid,ppid,etime,args | grep -E \"$T|brain-test-0|dbus-daemon --.*session|xdg-desktop-portal|ibus-daemon|ksecretd|at-spi|gnome-shell\" | grep -v grep | cut -c1-150",
+  "description": "Find processes left from the probe run"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+   1569    1501  3-21:39:35 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+   1594       1  3-21:39:35 /usr/bin/ksecretd --pam-login 13 14
+   1718    1501  3-21:39:34 /usr/libexec/at-spi-bus-launcher
+   1732    1718  3-21:39:34 /usr/bin/dbus-daemon --config-file=/usr/share/defaults/at-spi2/accessibility.conf --nofork --print-address 11 --address=un
+   1792    1501  3-21:39:34 /usr/libexec/at-spi2-registryd --use-gnome-session
+   1983    1501  3-21:39:34 /usr/libexec/xdg-desktop-portal
+   2048    1501  3-21:39:33 /usr/libexec/xdg-desktop-portal-gtk
+   2159    1501  3-21:39:33 /usr/lib/x86_64-linux-gnu/libexec/xdg-desktop-portal-kde
+ 834155    1501       01:14 /usr/lib/x86_64-linux-gnu/libexec/xdg-desktop-portal-kde
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+A leftover xdg-desktop-portal-kde process (pid 834155) from my probe is now owned by systemd; I'll stop only that one and leave your session's processes alone.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "tr '\\0' ' ' </proc/834155/environ 2>/dev/null | grep -o 'DBUS_SESSION_BUS_ADDRESS=[^ ]*'; kill 834155 && sleep 1; ps -p 834155 >/dev/null && echo \"still running\" || echo \"stopped\"; rm -rf $CLAUDE_JOB_DIR/tmp/gs",
+  "description": "Confirm the leftover belongs to the private bus, then stop it"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Oo3gD0CMYU,guid=84b06f167c3856ada73bf0a96afd7d0d
+stopped
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The probe's private bus was the source of the stray process, and it's stopped now. I'm containing the private GNOME in its own systemd scope, starting no extra services on its bus, and blocking its lock signal from reaching the real session, then prototyping that setup.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -c \"import gi; gi.require_version('Gio','2.0'); from gi.repository import Gio; print('python3-gi ok')\"; T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home $T/run $T/services; chmod 700 $T/run; cat > $T/bus.conf <<EOF\n<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n<busconfig>\n  <type>session</type>\n  <listen>unix:path=$T/bus</listen>\n  <auth>EXTERNAL</auth>\n  <servicedir>$T/services</servicedir>\n  <policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/><allow eavesdrop=\"true\"/><allow own=\"*\"/></policy>\n</busconfig>\nEOF\nU=brain-gnome-probe-$$; cd $T; systemd-run --user --scope -q --collect --unit $U -- env -i PATH=/usr/bin:/bin HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=$T/bus sh -c \"dbus-daemon --config-file=$T/bus.conf --nofork >bus.log 2>&1 & sleep 0.3; gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1\" & sleep 1; for i in $(seq 1 60); do DBUS_SESSION_BUS_ADDRESS=unix:path=$T/bus gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.freedesktop.DBus.Properties.Get org.gnome.Shell ShellVersion >/dev/null 2>&1 && { echo \"ready after $((i))x0.25s+1s\"; break; }; sleep 0.25; done; echo \"procs in scope:\"; systemctl --user status $U.scope --no-pager 2>/dev/null | grep -E '─[0-9]+ ' | sed 's/.*─//' | cut -c1-90; systemctl --user stop $U.scope; sleep 0.5; echo \"after stop: $(systemctl --user is-active $U.scope 2>&1)\"; ps -eo args | grep -c \"[b]rain-test-0\"; grep -iE 'error|warn' $T/shell.log | head -8; rm -rf $T",
+  "description": "Prototype a contained headless GNOME Shell in a systemd scope",
+  "timeout": 60000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+python3-gi ok
+ready after 6x0.25s+1s
+procs in scope:
+834454 sh -c "dbus-daemon --config-file=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus.conf -
+834456 dbus-daemon --config-file=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus.conf --nofork
+834458 gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-disp
+834522 ibus-daemon --panel disable
+834527 /usr/libexec/ibus-dconf
+834528 /usr/libexec/ibus-extension-gtk3
+834552 bwrap --unshare-all --die-with-parent --chdir / --ro-bind /usr /usr --dev /dev --ro
+834553 bwrap --unshare-all --die-with-parent --chdir / --ro-bind /usr /usr --dev /dev --ro
+834554 /usr/libexec/glycin-loaders/2+/glycin-svg --dbus-fd 59
+834557 /usr/libexec/ibus-engine-simple
+after stop: inactive
+1
+(gnome-shell:834458): libmutter-WARNING **: 12:27:26.612: Unknown experimental feature 'scale-monitor-framebuffer'
+(gnome-shell:834458): libmutter-WARNING **: 12:27:26.612: Unknown experimental feature 'xwayland-native-scaling'
+GNOME Shell-Message: 12:27:28.349: Error registering session with GDM: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.DisplayManager was not provided by any .service files
+portal is not running: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.portal.IBus was not provided by any .service files
+(gnome-shell:834458): GNOME Shell-CRITICAL **: 12:27:28.413: Gio.DBusError: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.CalendarServer was not provided by any .service files
+(gnome-shell:834458): GNOME Shell-CRITICAL **: 12:27:28.449: Gio.DBusError: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.CalendarServer was not provided by any .service files
+(gnome-shell:834458): Gjs-WARNING **: 12:27:28.565: Type GITypeInfo of property NM.Object::client does not match return type GITypeInfo of getter get_client. Falling back to slow path
+Shell cwd was reset to /home/juan/Documents/shadow-assistant
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The contained setup is working: GNOME Shell starts in about 2.5 s and stops cleanly with its scope. Next I'll check the tier-1 app table and how the VS Code replay locates its binary.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 30,80p src/reconstruct/apps.rs; sed -n 120,150p src/reconstruct/apps.rs; sed -n 1,20p src/reconstruct/vscode/title.rs; grep -n 'usr/share/code\\|/usr/bin/code\\|fn vscode_binary\\|fn find_code\\|\"code\"' src/reconstruct/vscode/mod.rs | head",
+  "description": "Read the app classification table and VS Code binary lookup"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    }
+
+    /// The reconstruction tier this class gets: 1 when per-app rules apply.
+    pub fn tier(self) -> i64 {
+        match self {
+            AppClass::Generic => 0,
+            _ => 1,
+        }
+    }
+}
+
+const TERMINALS: &[&str] = &[
+    "ghostty",
+    "konsole",
+    "yakuake",
+    "terminal", // org.gnome.Terminal, xfce4-terminal, ...
+    "kitty",
+    "alacritty",
+    "wezterm",
+    "foot",
+    "xterm",
+    "urxvt",
+    "tilix",
+    "terminator",
+    "terminology",
+    "ptyxis",
+    "kgx", // GNOME Console
+    "warp",
+];
+const BROWSERS: &[&str] = &[
+    "chrome",
+    "chromium",
+    "firefox",
+    "brave",
+    "edge",
+    "vivaldi",
+    "opera",
+    "librewolf",
+    "zen",
+    "epiphany",
+    "falkon",
+];
+const CHATS: &[&str] = &[
+    "slack",
+    "discord",
+    "telegram",
+    "telegramdesktop",
+    "signal",
+    "element",
+    "whatsapp",
+    "teams",
+    "kdevelop",
+    "ghostwriter",
+];
+
+/// Classifies an app id (a desktop file name such as `com.mitchellh.ghostty`,
+/// `google-chrome`, `org.kde.kate`). The id is split into lowercase tokens on
+/// `.`, `-` and `_`, and matched token by token, so `code` matches
+/// `code-url-handler` but not `vscode-like-tool`.
+pub fn classify(app: &str) -> AppClass {
+    let lower = app.to_ascii_lowercase();
+    let tokens: Vec<&str> = lower.split(['.', '-', '_']).collect();
+    let has = |table: &[&str]| tokens.iter().any(|t| table.contains(t));
+    // Order matters only for ids that would match two tables.
+    if has(TERMINALS) {
+        AppClass::Terminal
+    } else if has(EDITORS) {
+        AppClass::Editor
+    } else if has(LAUNCHERS) {
+        AppClass::Launcher
+    } else if has(CHATS) {
+        AppClass::Chat
+    } else if has(BROWSERS) {
+        AppClass::Browser
+    } else {
+        AppClass::Generic
+    }
+}
+
+/// The window part of a session key. Editors mark unsaved documents in the
+/// title (`● main.rs - proj - Visual Studio Code`, `notes.txt * — Kate`), and
+/// that marker flips on the first keystroke. Left in, it would split every
+//! VS Code window titles: which app ids are VS Code, the dirty marker, and
+//! which file on disk a title refers to.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+/// App ids VS Code reports under KDE/Wayland (desktop file name, or the
+/// resource class when there is none), plus the OSS builds and Flatpak id.
+const VSCODE_APP_IDS: &[&str] = &[
+    "code",
+    "code-url-handler",
+    "code-insiders",
+    "visual-studio-code",
+    "com.visualstudio.code",
+    "com.microsoft.vscode", // Microsoft's .deb/.rpm package on KDE Wayland
+    "com.visualstudio.code.oss",
+    "code-oss",
+    "codium",
+    "vscodium",
+    "com.vscodium.codium",
+838:        "code": k.code,
+849:        "code": k.code,
+898:        "/usr/share/code/code",
+901:        "/snap/code/current/usr/share/code/code",
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The tier-1 table already covers Ptyxis, snap Firefox and GNOME Terminal, so I'm only adding GNOME Console (`org.gnome.Console`) and the snap's VS Code app id (`code_code`). Next comes the GNOME Shell extension.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p /home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant && cat > /home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant/metadata.json <<'EOF'\n{\n  \"uuid\": \"brain@shadowassistant\",\n  \"name\": \"brain: focus reporter\",\n  \"description\": \"Reports the focused window, keyboard layout switches and, on request, the clipboard to brain (the shadow assistant) over D-Bus. Needed for brain's focus tracking on GNOME, where Wayland gives other programs no way to see the focused window.\",\n  \"shell-version\": [\"45\", \"46\", \"47\", \"48\", \"49\", \"50\"],\n  \"url\": \"https://github.com/ChenOhana/shadow-assistant\"\n}\nEOF\necho ok",
+  "description": "Write the GNOME extension metadata"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ok
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cat /home/juan/Documents/shadow-assistant/src/capture/linux/kwin_focus.js",
+  "description": "Read the KWin script to mirror its behaviour"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+// Generated by `brain run`; loaded into KWin over D-Bus and unloaded on exit.
+//
+// Wayland gives ordinary clients no way to ask "which window is focused?", so
+// this script runs inside the compositor and pushes every activation and
+// active-window title change to brain's D-Bus service.
+const SERVICE = "@SERVICE@";
+const PATH = "@PATH@";
+const IFACE = "@IFACE@";
+
+// `renamed` tells brain whether this is the same window with a new title
+// (true) or a window being activated (false): typing can rename a window
+// (VS Code names a new file after its first line), but never activate one.
+function report(w, renamed) {
+    if (w) {
+        callDBus(SERVICE, PATH, IFACE, "Activated",
+                 String(w.desktopFileName || ""), String(w.resourceClass || ""),
+                 String(w.caption || ""), renamed);
+    } else {
+        callDBus(SERVICE, PATH, IFACE, "Activated", "", "", "", false);
+    }
+}
+
+function watch(w) {
+    // Title changes mark a new context in the same app: a browser tab switch,
+    // another file in the editor, a new command in the terminal title.
+    w.captionChanged.connect(function () {
+        if (workspace.activeWindow === w) {
+            report(w, true);
+        }
+    });
+}
+
+workspace.windowList().forEach(watch);
+workspace.windowAdded.connect(watch);
+workspace.windowActivated.connect(function (w) { report(w, false); });
+report(workspace.activeWindow, false);
+```
+
+</details>
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant/extension.js",
+  "content": "// brain's focus reporter for GNOME Shell: the GNOME counterpart of the KWin\n// script brain loads on KDE Plasma.\n//\n// Wayland gives ordinary programs no way to ask \"which window is focused?\",\n// so this extension runs inside GNOME Shell and offers, on the Shell's own\n// session-bus connection, at /org/shadowassistant/GnomeShell:\n//\n//   signal Focus(desktopFile, windowClass, title, renamed)\n//       on every focus change, and on title changes of the focused window\n//       (renamed = true: the same window with a new title).\n//   signal InputSourceChanged(id)      the layout switched (Super+Space)\n//   signal InputSourcesChanged()       the layout list changed\n//   method Current() -> (desktopFile, windowClass, title)\n//   method InputSource() -> id         the active input source (\"us\", \"il\")\n//   method Clipboard() -> text         the clipboard text, read on request\n//\n// brain trusts these only when they come from the owner of org.gnome.Shell,\n// so no other program can pose as this extension.\n\nimport GLib from 'gi://GLib';\nimport Gio from 'gi://Gio';\nimport Shell from 'gi://Shell';\nimport St from 'gi://St';\nimport * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';\nimport {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';\n\nconst OBJECT_PATH = '/org/shadowassistant/GnomeShell';\nconst IFACE_XML = `\n<node>\n  <interface name=\"org.shadowassistant.GnomeShell\">\n    <method name=\"Current\">\n      <arg type=\"s\" direction=\"out\" name=\"desktopFile\"/>\n      <arg type=\"s\" direction=\"out\" name=\"windowClass\"/>\n      <arg type=\"s\" direction=\"out\" name=\"title\"/>\n    </method>\n    <method name=\"InputSource\">\n      <arg type=\"s\" direction=\"out\" name=\"id\"/>\n    </method>\n    <method name=\"Clipboard\">\n      <arg type=\"s\" direction=\"out\" name=\"text\"/>\n    </method>\n    <signal name=\"Focus\">\n      <arg type=\"s\" name=\"desktopFile\"/>\n      <arg type=\"s\" name=\"windowClass\"/>\n      <arg type=\"s\" name=\"title\"/>\n      <arg type=\"b\" name=\"renamed\"/>\n    </signal>\n    <signal name=\"InputSourceChanged\">\n      <arg type=\"s\" name=\"id\"/>\n    </signal>\n    <signal name=\"InputSourcesChanged\"/>\n  </interface>\n</node>`;\n\n// The app of a window: its desktop file (as KWin reports it), and its class\n// (the Wayland app id) for windows without one.\nfunction describe(window) {\n    if (!window)\n        return ['', '', ''];\n    const app = Shell.WindowTracker.get_default().get_window_app(window);\n    let desktopFile = app ? app.get_id() ?? '' : '';\n    if (desktopFile.startsWith('window:'))\n        desktopFile = ''; // the tracker's made-up id for windows without one\n    const windowClass = window.get_gtk_application_id() || window.get_wm_class() || '';\n    return [desktopFile, windowClass, window.get_title() ?? ''];\n}\n\nexport default class BrainFocusExtension extends Extension {\n    enable() {\n        this._dbus = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this);\n        this._dbus.export(Gio.DBus.session, OBJECT_PATH);\n\n        this._window = null;\n        this._titleId = 0;\n        this._focusId = global.display.connect('notify::focus-window',\n            () => this._onFocus());\n\n        this._sources = Keyboard.getInputSourceManager();\n        this._sourceId = this._sources.connect('current-source-changed', () =>\n            this._dbus.emit_signal('InputSourceChanged',\n                new GLib.Variant('(s)', [this.InputSource()])));\n        this._sourcesId = this._sources.connect('sources-changed', () =>\n            this._dbus.emit_signal('InputSourcesChanged', null));\n\n        this._onFocus();\n    }\n\n    disable() {\n        this._unwatchTitle();\n        global.display.disconnect(this._focusId);\n        this._sources.disconnect(this.
+… [1359 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant/extension.js (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:28:32.151Z</sub>
+
+Before writing the Rust side, I'll check that this extension actually loads in the private GNOME Shell and answers. A tiny GTK 4 window (via gjs) provides the focus and title changes:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=$CLAUDE_JOB_DIR/tmp/gs; rm -rf $T; mkdir -p $T/home/.config/glib-2.0/settings $T/home/.local/share/gnome-shell/extensions $T/run $T/services; chmod 700 $T/run; cp -r /home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant $T/home/.local/share/gnome-shell/extensions/; printf \"[org/gnome/shell]\\nenabled-extensions=['brain@shadowassistant']\\n\\n[org/gnome/desktop/input-sources]\\nsources=[('xkb', 'us'), ('xkb', 'il')]\\n\" > $T/home/.config/glib-2.0/settings/keyfile; cat > $T/bus.conf <<EOF\n<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n<busconfig><type>session</type><listen>unix:path=$T/bus</listen><auth>EXTERNAL</auth><servicedir>$T/services</servicedir>\n<policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/><allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>\nEOF\ncat > $T/win.js <<'EOF'\nimport Gtk from 'gi://Gtk?version=4.0';\nimport GLib from 'gi://GLib';\nconst app = new Gtk.Application({application_id: 'org.shadowassistant.TestWindow'});\napp.connect('activate', () => {\n    const w = new Gtk.ApplicationWindow({application: app, title: ARGV[0]});\n    w.present();\n    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => { w.set_title(ARGV[0] + ' renamed'); return false; });\n    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => { w.get_clipboard().set('text from the test window'); return false; });\n});\napp.run([]);\nEOF\nU=brain-gnome-probe-$$; cd $T; E=\"env -i PATH=/usr/bin:/bin HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=$T/bus\"; systemd-run --user --scope -q --collect --unit $U -- $E sh -c \"dbus-daemon --config-file=$T/bus.conf --nofork >bus.log 2>&1 & sleep 0.3; gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1\" & \nG=\"$E gdbus call --session --dest org.gnome.Shell --object-path /org/shadowassistant/GnomeShell --method org.shadowassistant.GnomeShell\"\nsleep 1; for i in $(seq 1 60); do $G.Current >/dev/null 2>&1 && { echo \"extension answering after $((i))x0.25s+1s\"; break; }; sleep 0.25; done\n$E gdbus monitor --session --dest org.gnome.Shell > monitor.log 2>&1 & M=$!\necho \"Current: $($G.Current 2>&1)\"; echo \"InputSource: $($G.InputSource 2>&1)\"\nsystemd-run --user --scope -q --collect --unit $U-win -- $E WAYLAND_DISPLAY=brain-test-0 gjs -m $T/win.js \"brain test window\" >win.log 2>&1 &\nsleep 3.5; echo \"Current: $($G.Current 2>&1)\"; echo \"Clipboard: $($G.Clipboard 2>&1)\"\nkill $M; echo \"--- signals:\"; grep -A1 'org.shadowassistant' monitor.log | grep -vE '^--$' | head -12\nsystemctl --user stop $U-win.scope $U.scope 2>/dev/null; sleep 0.5; echo \"scopes: $(systemctl --user is-active $U.scope $U-win.scope | tr '\\n' ' ')\"; grep -iE 'brain|extension' shell.log | head -5; cat win.log | head -5; cd /; rm -rf $T",
+  "description": "Load the extension in a private headless GNOME and probe it",
+  "timeout": 90000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Failed to find executable env -i PATH=/usr/bin:/bin HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home XDG_RUNTIME_DIR=/home/juan/.claude/jobs/64f49a65/tmp/gs/run XDG_CONFIG_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.config XDG_DATA_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.local/share XDG_CACHE_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus: No such file or directory
+Current: (eval):22: no such file or directory: env -i PATH=/usr/bin:/bin HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home XDG_RUNTIME_DIR=/home/juan/.claude/jobs/64f49a65/tmp/gs/run XDG_CONFIG_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.config XDG_DATA_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.local/share XDG_CACHE_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus gdbus call --session --dest org.gnome.Shell --object-path /org/shadowassistant/GnomeShell --method org.shadowassistant.GnomeShell.Current
+InputSource: (eval):22: no such file or directory: env -i PATH=/usr/bin:/bin HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home XDG_RUNTIME_DIR=/home/juan/.claude/jobs/64f49a65/tmp/gs/run XDG_CONFIG_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.config XDG_DATA_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.local/share XDG_CACHE_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus gdbus call --session --dest org.gnome.Shell --object-path /org/shadowassistant/GnomeShell --method org.shadowassistant.GnomeShell.InputSource
+Current: (eval):24: no such file or directory: env -i PATH=/usr/bin:/bin HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home XDG_RUNTIME_DIR=/home/juan/.claude/jobs/64f49a65/tmp/gs/run XDG_CONFIG_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.config XDG_DATA_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.local/share XDG_CACHE_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=/home/juan/.claude/jobs/64f49a65/tmp/gs/bus gdbus call --session --dest org.gnome.Shell --object-path /org/shadowassistant/GnomeShell --method org.shadowassistant.GnomeShell.Current
+Clipboard: (eval):24: no such file or directory: env -i PATH=/usr/bin:/bin HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home XDG_RUNTIME_DIR=/home/juan/.claude/jobs/64f49a65/tmp/gs/run XDG_CONFIG_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.config XDG_DATA_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.local/share XDG_CACHE_HOME=/home/juan/.claude/jobs/64f49a65/tmp/gs/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETT
+… [1003 more characters in the raw transcript]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:29:07.558Z</sub>
+
+Just a shell quoting mistake: zsh doesn't split `$E` into words. I'll put the probe in a bash script instead:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p $CLAUDE_JOB_DIR/tmp/scripts && cat > $CLAUDE_JOB_DIR/tmp/scripts/probe.sh <<'SCRIPT'\n#!/bin/bash\nset -u\nT=$1; EXT=$2\nrm -rf $T; mkdir -p $T/home/.config/glib-2.0/settings $T/home/.local/share/gnome-shell/extensions $T/run $T/services; chmod 700 $T/run\ncp -r $EXT $T/home/.local/share/gnome-shell/extensions/\nprintf \"[org/gnome/shell]\\nenabled-extensions=['brain@shadowassistant']\\n\\n[org/gnome/desktop/input-sources]\\nsources=[('xkb', 'us'), ('xkb', 'il')]\\n\" > $T/home/.config/glib-2.0/settings/keyfile\ncat > $T/bus.conf <<EOF\n<!DOCTYPE busconfig PUBLIC \"-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN\" \"http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd\">\n<busconfig><type>session</type><listen>unix:path=$T/bus</listen><auth>EXTERNAL</auth><servicedir>$T/services</servicedir>\n<policy context=\"default\"><allow send_destination=\"*\" eavesdrop=\"true\"/><allow eavesdrop=\"true\"/><allow own=\"*\"/></policy></busconfig>\nEOF\ncat > $T/win.js <<'EOF'\nimport Gtk from 'gi://Gtk?version=4.0';\nimport GLib from 'gi://GLib';\nconst app = new Gtk.Application({application_id: 'org.shadowassistant.TestWindow'});\napp.connect('activate', () => {\n    const w = new Gtk.ApplicationWindow({application: app, title: ARGV[0]});\n    w.present();\n    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1500, () => { w.set_title(ARGV[0] + ' renamed'); return false; });\n    GLib.timeout_add(GLib.PRIORITY_DEFAULT, 2000, () => { w.get_clipboard().set('text from the test window'); return false; });\n});\napp.run([]);\nEOF\nU=brain-gnome-probe-$$; cd $T\nE=(env -i PATH=/usr/bin:/bin HOME=$T/home XDG_RUNTIME_DIR=$T/run XDG_CONFIG_HOME=$T/home/.config XDG_DATA_HOME=$T/home/.local/share XDG_CACHE_HOME=$T/home/.cache XDG_CURRENT_DESKTOP=GNOME GSETTINGS_BACKEND=keyfile NO_AT_BRIDGE=1 DBUS_SESSION_BUS_ADDRESS=unix:path=$T/bus)\nsystemd-run --user --scope -q --collect --unit $U -- \"${E[@]}\" sh -c \"dbus-daemon --config-file=$T/bus.conf --nofork >bus.log 2>&1 & sleep 0.3; exec gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display brain-test-0 > shell.log 2>&1\" &\nG=(\"${E[@]}\" gdbus call --session --dest org.gnome.Shell --object-path /org/shadowassistant/GnomeShell --method)\nsleep 1; for i in $(seq 1 60); do \"${G[@]}\" org.shadowassistant.GnomeShell.Current >/dev/null 2>&1 && { echo \"extension answering after $((i))x0.25s+1s\"; break; }; sleep 0.25; done\n\"${E[@]}\" gdbus monitor --session --dest org.gnome.Shell > monitor.log 2>&1 & M=$!\necho \"Current: $(\"${G[@]}\" org.shadowassistant.GnomeShell.Current 2>&1)\"; echo \"InputSource: $(\"${G[@]}\" org.shadowassistant.GnomeShell.InputSource 2>&1)\"\nsystemd-run --user --scope -q --collect --unit $U-win -- \"${E[@]}\" WAYLAND_DISPLAY=brain-test-0 gjs -m $T/win.js \"brain test window\" >win.log 2>&1 &\nsleep 3.5; echo \"Current: $(\"${G[@]}\" org.shadowassistant.GnomeShell.Current 2>&1)\"; echo \"Clipboard: $(\"${G[@]}\" org.shadowassistant.GnomeShell.Clipboard 2>&1)\"\nkill $M; echo \"--- signals:\"; grep -A1 'org.shadowassistant' monitor.log | grep -vE '^--$' | head -12\nsystemctl --user stop $U-win.scope $U.scope 2>/dev/null; sleep 0.5; echo \"scopes: $(systemctl --user is-active $U.scope $U-win.scope | tr '\\n' ' ')\"\necho \"--- shell log (extension lines):\"; grep -iE 'brain|extension|JS ERROR' shell.log | head -8; head -5 win.log\nSCRIPT\nbash $CLAUDE_JOB_DIR/tmp/scripts/probe.sh $CLAUDE_JOB_DIR/tmp/gs /home/juan/Documents/shadow-assistant/packaging/gnome-extension/brain@shadowassistant; rm -rf $CLAUDE_JOB_DIR/tmp/gs",
+  "description": "Probe the extension in a contained headless GNOME",
+  "timeout": 90000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+extension answering after 6x0.25s+1s
+Current: ('', '', '')
+InputSource: ('us',)
+Current: ('', 'org.shadowassistant.TestWindow', 'brain test window renamed')
+Clipboard: ('',)
+--- signals:
+/org/shadowassistant/GnomeShell: org.shadowassistant.GnomeShell.Focus ('', 'org.shadowassistant.TestWindow', 'brain test window', false)
+/org/gnome/Shell/Introspect: org.gnome.Shell.Introspect.WindowsChanged ()
+/org/shadowassistant/GnomeShell: org.shadowassistant.GnomeShell.Focus ('', 'org.shadowassistant.TestWindow', 'brain test window renamed', true)
+scopes: inactive inactive 
+--- shell log (extension lines):
+libmutter-Message: 12:29:22.298: Using Wayland display name 'brain-test-0'
+
+(gjs:835353): Gtk-WARNING **: 12:29:23.016: Unable to acquire the address of the accessibility bus: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files. If you are attempting to run GTK without a11y support, GTK_A11Y should be set to 'none'.
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The extension's focus, rename and input-source checks all pass, but the clipboard came back empty on headless Wayland. I'm adding a small helper extension that only the test loads, so it can set the clipboard and switch layouts, then I'll move on to the Rust backend's shared lock watcher.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/capture/linux/desktop.rs',[\n(\"\"\"/// Pauses capture while the screen is locked, so the unlock password is never\n/// recorded (under whatever app had focus before the lock). Uses the\n/// freedesktop `org.freedesktop.ScreenSaver` interface (KDE, Xfce, ...).\npub(super) fn watch_freedesktop_lock(conn: &Connection, recorder: Arc<Recorder>) {\n    let active: Option<bool> = conn\n        .call_method(\n            Some(\"org.freedesktop.ScreenSaver\"),\n            \"/ScreenSaver\",\n            Some(\"org.freedesktop.ScreenSaver\"),\n            \"GetActive\",\n            &(),\n        )\n        .ok()\n        .and_then(|m| m.body().deserialize().ok());\n    if active == Some(true) {\n        recorder.set_paused(true);\n    }\n    dbus::spawn_signal_watch(\n        conn,\n        \"org.freedesktop.ScreenSaver\",\n        \"org.freedesktop.ScreenSaver\",\n        \"ActiveChanged\",\n        None,\n        move |msg| {\n            if let Ok(locked) = msg.body().deserialize::<bool>() {\n                recorder.set_paused(locked);\n            }\n        },\n    );\n}\"\"\",\"\"\"/// A screen-saver service whose `ActiveChanged(bool)` signal and `GetActive`\n/// method say whether the screen is locked. Its interface has its name.\npub(super) struct LockService {\n    pub name: &'static str,\n    pub path: &'static str,\n}\n\n/// The freedesktop interface (KDE, Xfce, ...).\npub(super) const FREEDESKTOP_LOCK: LockService = LockService {\n    name: \"org.freedesktop.ScreenSaver\",\n    path: \"/ScreenSaver\",\n};\n\n/// Pauses capture while the screen is locked, so the unlock password is never\n/// recorded (under whatever app had focus before the lock).\npub(super) fn watch_lock(conn: &Connection, service: &LockService, recorder: Arc<Recorder>) {\n    let active: Option<bool> = conn\n        .call_method(\n            Some(service.name),\n            service.path,\n            Some(service.name),\n            \"GetActive\",\n            &(),\n        )\n        .ok()\n        .and_then(|m| m.body().deserialize().ok());\n    if active == Some(true) {\n        recorder.set_paused(true);\n    }\n    dbus::spawn_signal_watch(\n        conn,\n        service.name,\n        service.name,\n        \"ActiveChanged\",\n        None,\n        move |msg| {\n            if let Ok(locked) = msg.body().deserialize::<bool>() {\n                recorder.set_paused(locked);\n            }\n        },\n    );\n}\"\"\"),\n(\"\"\"        if let Ok(session) = Connection::session() {\n            watch_freedesktop_lock(&session, ctx.recorder);\n        }\"\"\",\"\"\"        if let Ok(session) = Connection::session() {\n            watch_lock(&session, &FREEDESKTOP_LOCK, ctx.recorder);\n        }\"\"\"),\n])\nedit('src/capture/linux/kde.rs',[\n(\"\"\"use super::desktop::{\n    Desktop, DesktopContext, DesktopSession, app_id, config_dir, watch_freedesktop_lock,\n};\"\"\",\"\"\"use super::desktop::{\n    Desktop, DesktopContext, DesktopSession, FREEDESKTOP_LOCK, app_id, config_dir, watch_lock,\n};\"\"\"),\n(\"\"\"            watch_freedesktop_lock(s, ctx.recorder.clone());\"\"\",\"\"\"            watch_lock(s, &FREEDESKTOP_LOCK, ctx.recorder.clone());\"\"\"),\n])\nEOF\ncargo build -q 2>&1 | grep -E '^(warning|error)' -A6 | head",
+  "description": "Generalise the lock watcher for GNOME's interface",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(Bash completed with no output)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:30:24.045Z</sub>
+
+Now the GNOME backend itself:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/capture/linux/gnome.rs",
+  "content": "//! GNOME (stock Ubuntu): focus, clipboard, screen lock and keyboard settings.\n//!\n//! | What                  | Source                                                       |\n//! |-----------------------|--------------------------------------------------------------|\n//! | active app + window   | brain's GNOME Shell extension, `Focus` signal                |\n//! | clipboard at paste    | the extension's `Clipboard` method                           |\n//! | screen lock           | `org.gnome.ScreenSaver` `ActiveChanged` (GNOME Shell)        |\n//! | layout switch/list    | the extension's `InputSourceChanged` / `InputSourcesChanged` |\n//! | layout spec           | `org.gnome.desktop.input-sources` (`sources`, `xkb-options`) |\n//! | key repeat            | `org.gnome.desktop.peripherals.keyboard`                     |\n//!\n//! GNOME on Wayland gives programs no way to see the focused window, so\n//! brain ships a GNOME Shell extension (`packaging/gnome-extension/`) that\n//! reports it, the counterpart of the KWin script on KDE. The extension\n//! answers on GNOME Shell's own bus connection, and brain accepts its signals\n//! only from the owner of `org.gnome.Shell`, so nothing else can pose as it.\n//! Without the extension (not installed, or installed but GNOME not yet\n//! restarted), keys are still captured, under `unknown`, with a warning.\n\nuse super::dbus::spawn_signal_watch;\nuse super::desktop::{\n    Desktop, DesktopContext, DesktopSession, LockService, app_id, watch_lock,\n};\nuse super::input::{Control, ControlHandle};\nuse super::keys::RepeatConfig;\nuse super::layout::system_layout;\nuse super::xkb::{Keyboard, LayoutSpec};\nuse crate::capture::recorder::{ClipboardSource, NoClipboard};\nuse crate::timefmt::Millis;\nuse anyhow::{Result, bail};\nuse std::process::Command;\nuse std::sync::{Arc, Mutex};\nuse std::time::Duration;\nuse zbus::blocking::Connection;\n\npub(super) const SHELL: &str = \"org.gnome.Shell\";\nconst EXT_PATH: &str = \"/org/shadowassistant/GnomeShell\";\nconst EXT_IFACE: &str = \"org.shadowassistant.GnomeShell\";\nconst GNOME_LOCK: LockService = LockService {\n    name: \"org.gnome.ScreenSaver\",\n    path: \"/org/gnome/ScreenSaver\",\n};\n/// XKB keymaps hold at most this many layouts; GNOME (mutter) splits longer\n/// input-source lists into keymaps of this many and switches between them.\nconst XKB_MAX_LAYOUTS: usize = 4;\n\n/// The GNOME backend.\npub(super) struct Gnome;\n\nimpl Desktop for Gnome {\n    fn name(&self) -> String {\n        \"GNOME\".into()\n    }\n\n    fn clipboard(&self) -> Box<dyn ClipboardSource> {\n        match ExtensionClipboard::connect() {\n            Ok(c) => Box::new(c),\n            Err(e) => {\n                eprintln!(\"brain: warning: no session bus, pastes will not be resolved: {e:#}\");\n                Box::new(NoClipboard)\n            }\n        }\n    }\n\n    fn keyboard(&self, system: Option<&Connection>) -> (LayoutSpec, RepeatConfig) {\n        let sources = input_sources();\n        let spec = layouts_for(&sources, 0)\n            .map(|(spec, _)| spec)\n            .unwrap_or_else(|| system_layout(system));\n        (spec, repeat_settings())\n    }\n\n    fn start(&self, ctx: DesktopContext<'_>) -> Box<dyn DesktopSession> {\n        let conn = match Connection::session() {\n            Ok(c) => c,\n            Err(e) => {\n                eprintln!(\"brain: warning: no session bus, focus tracking unavailable: {e:#}\");\n                return Box::new(GnomeSession { extension: false });\n            }\n        };\n        let extension = match call::<(String, String, String)>(&conn, \"Current\") {\n            Ok((desktop_file, class, title)) => {\n                ctx.recorder\n                    .set_focus(&app_id(&desktop_file, &class), &title, false);\n                true\n            }\n            Err(_) => {\n                eprintln!(
+… [10388 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/src/capture/linux/gnome.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:31:11.124Z</sub>
+
+Two fixes before wiring it in: a leftover helper I don't use, and `layouts_for` shouldn't run `gsettings` itself, so its unit test stays pure:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/capture/linux/gnome.rs',[\n(\"\"\"/// Whether brain's GNOME Shell extension answers on this session bus.\n#[allow(dead_code)]\nfn extension_active(conn: &Connection) -> Result<()> {\n    if call::<(String, String, String)>(conn, \"Current\").is_err() {\n        bail!(\"not active\");\n    }\n    Ok(())\n}\n\n\"\"\",\"\"),\n(\"use anyhow::{Result, bail};\",\"use anyhow::Result;\"),\n(\"\"\"        let sources = input_sources();\n        let spec = layouts_for(&sources, 0)\n            .map(|(spec, _)| spec)\"\"\",\"\"\"        let sources = input_sources();\n        let spec = layouts_for(&sources, 0, &xkb_options())\n            .map(|(spec, _)| spec)\"\"\"),\n(\"\"\"        let Some((spec, group)) = layouts_for(&self.sources, index) else {\"\"\",\"\"\"        let Some((spec, group)) = layouts_for(&self.sources, index, &xkb_options()) else {\"\"\"),\n(\"\"\"/// The keymap holding XKB source number `index`, as mutter builds it (the\n/// sources in groups of [`XKB_MAX_LAYOUTS`]), and the source's group in it.\n/// `None` when there are no XKB sources.\nfn layouts_for(sources: &[String], index: usize) -> Option<(LayoutSpec, u32)> {\"\"\",\"\"\"/// The keymap holding XKB source number `index`, as mutter builds it (the\n/// sources in groups of [`XKB_MAX_LAYOUTS`], with GNOME's XKB `options`),\n/// and the source's group in it. `None` when there are no XKB sources.\nfn layouts_for(sources: &[String], index: usize, options: &str) -> Option<(LayoutSpec, u32)> {\"\"\"),\n(\"\"\"        model: String::new(),\n        options: xkb_options(),\n    };\"\"\",\"\"\"        model: String::new(),\n        options: options.to_string(),\n    };\"\"\"),\n(\"\"\"        let (spec, group) = layouts_for(&ids(&[\"us\", \"il\"]), 1).unwrap();\n        assert_eq!((spec.layout.as_str(), spec.variant.as_str(), group), (\"us,il\", \"\", 1));\n        let (spec, group) = layouts_for(&ids(&[\"us+intl\", \"il\"]), 0).unwrap();\n        assert_eq!((spec.layout.as_str(), spec.variant.as_str(), group), (\"us,il\", \"intl,\", 0));\n        let six = ids(&[\"us\", \"il\", \"de\", \"fr\", \"ru\", \"ua\"]);\n        let (spec, group) = layouts_for(&six, 4).unwrap();\n        assert_eq!((spec.layout.as_str(), group), (\"ru,ua\", 0));\n        assert!(layouts_for(&[], 0).is_none());\"\"\",\"\"\"        let (spec, group) = layouts_for(&ids(&[\"us\", \"il\"]), 1, \"grp:alt_shift_toggle\").unwrap();\n        assert_eq!((spec.layout.as_str(), spec.variant.as_str(), group), (\"us,il\", \"\", 1));\n        assert_eq!(spec.options, \"grp:alt_shift_toggle\");\n        let (spec, group) = layouts_for(&ids(&[\"us+intl\", \"il\"]), 0, \"\").unwrap();\n        assert_eq!((spec.layout.as_str(), spec.variant.as_str(), group), (\"us,il\", \"intl,\", 0));\n        let six = ids(&[\"us\", \"il\", \"de\", \"fr\", \"ru\", \"ua\"]);\n        let (spec, group) = layouts_for(&six, 4, \"\").unwrap();\n        assert_eq!((spec.layout.as_str(), group), (\"ru,ua\", 0));\n        assert!(layouts_for(&[], 0, \"\").is_none());\"\"\"),\n])\nedit('src/capture/linux/mod.rs',[(\"mod dbus;\\nmod kde;\",\"mod dbus;\\nmod gnome;\\nmod kde;\"),\n(\"\"\"//!   KDE Plasma today. A desktop without a backend still gets keys, filed\n//!   under the app `unknown`, with a warning.\"\"\",\"\"\"//!   KDE Plasma and GNOME (stock Ubuntu). A desktop without a backend still\n//!   gets keys, filed under the app `unknown`, with a warning.\"\"\")])\nedit('src/capture/linux/desktop.rs',[\n(\"\"\"//! | KDE Plasma       | KWin script| Klipper   | `org.freedesktop.ScreenSaver` | kxkbrc, kcminputrc, layout switch signals |\"\"\",\"\"\"//! | KDE Plasma       | KWin script| Klipper   | `org.freedesktop.ScreenSaver` | kxkbrc, kcminputrc, layout switch signals |\n//! | GNOME            | brain's GNOME Shell ex
+… [1320 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+test capture::linux::gnome::tests::parses_gsettings_values ... ok
+test capture::linux::gnome::tests::keymaps_follow_mutters_groups_of_four ... ok
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 131 filtered out; finished in 0.00s
+[This command modified 3 files you've previously read: src/capture/linux/desktop.rs, src/capture/linux/gnome.rs, src/capture/linux/mod.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Unit tests pass, so I'm moving to an end-to-end run against a private GNOME Shell, with a test-helper extension, a small GTK window, and a stand-in for the lock service.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p tests/fixtures/gnome/brain-test-helper@shadowassistant && cat > tests/fixtures/gnome/brain-test-helper@shadowassistant/metadata.json <<'EOF'\n{\n  \"uuid\": \"brain-test-helper@shadowassistant\",\n  \"name\": \"brain test helper\",\n  \"description\": \"Test only: lets tests/gnome_e2e.rs set the clipboard and switch the layout of a private headless GNOME Shell, which has no keyboard to do it with.\",\n  \"shell-version\": [\"45\", \"46\", \"47\", \"48\", \"49\", \"50\"]\n}\nEOF\ncat > tests/fixtures/gnome/brain-test-helper@shadowassistant/extension.js <<'EOF'\n// Test only, loaded into the private headless GNOME Shell of\n// tests/gnome_e2e.rs (never installed for real): a headless shell has no\n// keyboard, so nothing could set the clipboard or press Super+Space there.\n\nimport Gio from 'gi://Gio';\nimport St from 'gi://St';\nimport * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';\nimport {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';\n\nconst IFACE_XML = `\n<node>\n  <interface name=\"org.shadowassistant.TestHelper\">\n    <method name=\"SetClipboard\"><arg type=\"s\" direction=\"in\" name=\"text\"/></method>\n    <method name=\"ActivateInputSource\"><arg type=\"s\" direction=\"in\" name=\"id\"/></method>\n  </interface>\n</node>`;\n\nexport default class TestHelper extends Extension {\n    enable() {\n        this._dbus = Gio.DBusExportedObject.wrapJSObject(IFACE_XML, this);\n        this._dbus.export(Gio.DBus.session, '/org/shadowassistant/TestHelper');\n    }\n\n    disable() {\n        this._dbus.unexport();\n        this._dbus = null;\n    }\n\n    SetClipboard(text) {\n        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);\n    }\n\n    ActivateInputSource(id) {\n        const manager = Keyboard.getInputSourceManager();\n        const source = Object.values(manager.inputSources).find(s => s.id === id);\n        if (!source)\n            throw new Error(`no input source ${id}`);\n        source.activate(true);\n    }\n}\nEOF\ncat > tests/fixtures/gnome/window.js <<'EOF'\n// Test only: a GTK 4 window titled ARGV[0] that renames itself to\n// \"ARGV[0] renamed\" after ARGV[1] milliseconds (tests/gnome_e2e.rs).\nimport Gtk from 'gi://Gtk?version=4.0';\nimport GLib from 'gi://GLib';\n\nconst [title, renameAfterMs] = ARGV;\nconst app = new Gtk.Application({application_id: 'org.shadowassistant.TestWindow'});\napp.connect('activate', () => {\n    const window = new Gtk.ApplicationWindow({application: app, title});\n    window.present();\n    GLib.timeout_add(GLib.PRIORITY_DEFAULT, Number(renameAfterMs), () => {\n        window.set_title(`${title} renamed`);\n        return GLib.SOURCE_REMOVE;\n    });\n});\napp.run([]);\nEOF\ncat > tests/fixtures/gnome/screensaver.py <<'EOF'\n\"\"\"Test only: stands in for GNOME Shell's org.gnome.ScreenSaver on the private\nbus of tests/gnome_e2e.rs. The private headless shell has no login session\n(on purpose, so it cannot touch the real session's lock state), so it does\nnot provide the lock screen itself. Lock() emits ActiveChanged(true), as\nGNOME Shell does when the screen locks.\"\"\"\n\nfrom gi.repository import Gio, GLib\n\nXML = \"\"\"\n<node>\n  <interface name=\"org.gnome.ScreenSaver\">\n    <method name=\"Lock\"/>\n    <method name=\"GetActive\"><arg type=\"b\" direction=\"out\"/></method>\n    <signal name=\"ActiveChanged\"><arg type=\"b\"/></signal>\n  </interface>\n</node>\"\"\"\nNODE = Gio.DBusNodeInfo.new_for_xml(XML)\nactive = False\n\n\ndef on_call(conn, sender, path, iface, method, params, invocation):\n    global active\n    if method == \"GetActive\":\n        invocation.return_value(GLib.Variant(\"(b)\", (active,)))\n    elif method == \"Lock\":\n        active = True\n        invocation.return_value(None)\n        conn.emit_signal(None, path, iface, \"ActiveChanged\", GLib.Variant(\"(b)\", (True,)))\n\n\ndef on_bus(conn, _name):\n    conn.register_object(\"/org/gnome/Screen
+… [279 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+ok
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:32:42.320Z</sub>
+
+Now the test itself. A `PrivateGnome` harness runs the private GNOME Shell in its own systemd scope, and every program the test starts gets that GNOME's environment:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/tests/gnome_e2e.rs",
+  "content": "//! brain on GNOME (stock Ubuntu), against a real GNOME Shell: a private,\n//! headless one, started for the test in its own D-Bus session, runtime\n//! directory and home, inside its own systemd scope. The desktop you are\n//! using is not touched, whatever it is.\n//!\n//! brain's GNOME Shell extension is installed into that private home, and a\n//! real `brain run` (desktop detection, GSettings, the extension's signals)\n//! must follow, in its log:\n//!\n//! * the focus moving to a GTK window (app id from its Wayland app id) and to\n//!   Kate (app id from its desktop file), and the GTK window's rename;\n//! * a layout switch to Hebrew, which brain applies to key resolution;\n//! * the screen lock, which pauses recording (from a stand-in for GNOME's\n//!   lock service: the private shell has no login session, on purpose, so\n//!   it cannot reach the real session's lock state);\n//!\n//! and the extension must hand out the clipboard. A headless shell has no\n//! keyboard, so a test-only helper extension sets the clipboard and switches\n//! the layout. Ignored by default; it needs gnome-shell, gjs, python3-gi,\n//! Kate, and a user in the `input` group (brain reads the real keyboards,\n//! but nothing is typed):\n//!\n//!   cargo test --release --test gnome_e2e -- --ignored --nocapture\n\nmod common;\n\nuse common::{Kill, assert_no_brain_on};\nuse std::path::{Path, PathBuf};\nuse std::process::{Child, Command, Stdio};\nuse std::time::{Duration, Instant};\n\nconst EXTENSION: &str = \"brain@shadowassistant\";\nconst HELPER: &str = \"brain-test-helper@shadowassistant\";\nconst DISPLAY: &str = \"brain-test-0\";\n\nfn repo(path: &str) -> PathBuf {\n    Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(path)\n}\n\nfn copy_dir(from: &Path, to: &Path) {\n    std::fs::create_dir_all(to).unwrap();\n    for e in std::fs::read_dir(from).unwrap() {\n        let e = e.unwrap();\n        std::fs::copy(e.path(), to.join(e.file_name())).unwrap();\n    }\n}\n\nfn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {\n    let t = Instant::now();\n    while !done() {\n        assert!(t.elapsed() < timeout, \"timed out waiting for {what}\");\n        std::thread::sleep(Duration::from_millis(100));\n    }\n}\n\n/// A private headless GNOME Shell with brain's extension enabled, stopped\n/// (with everything it started) when dropped.\nstruct PrivateGnome {\n    dir: tempfile::TempDir,\n    unit: String,\n    shell: Child,\n}\n\nimpl PrivateGnome {\n    fn start() -> Self {\n        let dir = tempfile::tempdir().unwrap();\n        let t = dir.path();\n        let home = t.join(\"home\");\n        let extensions = home.join(\".local/share/gnome-shell/extensions\");\n        copy_dir(\n            &repo(\"packaging/gnome-extension\").join(EXTENSION),\n            &extensions.join(EXTENSION),\n        );\n        copy_dir(\n            &repo(\"tests/fixtures/gnome\").join(HELPER),\n            &extensions.join(HELPER),\n        );\n        // GSettings in a plain file (GSETTINGS_BACKEND=keyfile), not dconf.\n        let settings = home.join(\".config/glib-2.0/settings\");\n        std::fs::create_dir_all(&settings).unwrap();\n        std::fs::write(\n            settings.join(\"keyfile\"),\n            format!(\n                \"[org/gnome/shell]\\nenabled-extensions=['{EXTENSION}', '{HELPER}']\\n\\n\\\n                 [org/gnome/desktop/input-sources]\\nsources=[('xkb', 'us'), ('xkb', 'il')]\\n\"\n            ),\n        )\n        .unwrap();\n        let run = t.join(\"run\");\n        std::fs::create_dir_all(&run).unwrap();\n        std::fs::set_permissions(&run, std::os::unix::fs::PermissionsExt::from_mode(0o700))\n            .unwrap();\n        // A bus that starts no services: nothing but what the test runs.\n        std::fs::create_dir_all(t.join(\"services\")).unwrap();\n        std::fs::write(\n            t.join(\"bus.conf\"),\n    
+… [10517 more characters in the raw transcript]
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -30; timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -E 'test |test result|panicked|timed out|left|right|assert' | head -20; echo \"leftover gnome: $(ps -eo args | grep -c '[g]nome-shell --headless') scopes: $(systemctl --user list-units --type=scope --no-pager | grep -c brain-gnome-test)\"",
+  "description": "Lint and run the GNOME end-to-end test",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/tests/gnome_e2e.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+thread 'brain_follows_a_real_gnome_shell' (837035) panicked at tests/gnome_e2e.rs:51:9:
+timed out waiting for focus on Kate
+test brain_follows_a_real_gnome_shell ... FAILED
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.64s
+error: test failed, to rerun pass `--test gnome_e2e`
+leftover gnome: 0 scopes: 0
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The test run timed out on Kate, and since the temp folder is deleted on failure the logs were lost. The harness will now print the tail of every log and brain's focus events before cleaning up.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/gnome_e2e.rs'; s=open(p).read()\nold=\"\"\"impl Drop for PrivateGnome {\n    fn drop(&mut self) {\n        let _ = Command::new(\"systemctl\")\"\"\"\nnew=\"\"\"impl Drop for PrivateGnome {\n    fn drop(&mut self) {\n        if std::thread::panicking() {\n            // The directory is about to go: show what happened in it.\n            for name in [\"brain.log\", \"shell.log\", \"window.log\", \"kate.log\", \"screensaver.log\"] {\n                let text = std::fs::read_to_string(self.path(name)).unwrap_or_default();\n                let tail: Vec<&str> = text.lines().rev().take(15).collect();\n                eprintln!(\"--- {name} (last lines):\");\n                tail.iter().rev().for_each(|l| eprintln!(\"{l}\"));\n            }\n            eprintln!(\"--- brain's focus events:\");\n            for e in events(&self.path(\"data\")) {\n                if e[\"type\"] == \"focus\" {\n                    eprintln!(\"{e}\");\n                }\n            }\n        }\n        let _ = Command::new(\"systemctl\")\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt && timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -vE 'dbus-daemon|^\\s*$' | sed -n '/panicked/,$p' | grep -vE 'Activat' | head -70",
+  "description": "Rerun the GNOME test with logs printed on failure",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+thread 'brain_follows_a_real_gnome_shell' (837845) panicked at tests/gnome_e2e.rs:51:9:
+timed out waiting for focus on Kate
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--- brain.log (last lines):
+brain: keyboard layout switched to us (#0)
+brain: capturing from 1 keyboard(s), desktop GNOME, focus tracking via the GNOME Shell extension, layout us,il; data in /tmp/.tmpq2sZVo/data
+brain: received signal 15, stopping
+--- shell.log (last lines):
+(gnome-shell:837847): GNOME Shell-CRITICAL **: 12:34:29.535: Gio.DBusError: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.Shell.CalendarServer was not provided by any .service files
+Stack trace:
+  asyncCallback@resource:///org/gnome/gjs/modules/core/overrides/Gio.js:115:23
+  @resource:///org/gnome/shell/ui/init.js:20:20
+GNOME Shell-Message: 12:34:29.592: Failed to register AuthenticationAgent
+** Message: 12:34:29.657: Failed to start camera monitor
+(gnome-shell:837847): Gjs-WARNING **: 12:34:29.703: Type GITypeInfo of property NM.Object::client does not match return type GITypeInfo of getter get_client. Falling back to slow path
+GNOME Shell-Message: 12:34:30.653: GNOME Shell started at Wed Nov 18 2026 12:34:29 GMT+0200 (Israel Standard Time)
+GNOME Shell-Message: 12:34:30.654: Registering display with GDM
+GNOME Shell-Message: 12:34:30.665: Error registering display with GDM: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.gnome.DisplayManager was not provided by any .service files
+--- window.log (last lines):
+--- kate.log (last lines):
+--- screensaver.log (last lines):
+/home/juan/Documents/shadow-assistant/tests/fixtures/gnome/screensaver.py:32: DeprecationWarning: Gio.DBusConnection.register_object is deprecated
+  conn.register_object("/org/gnome/ScreenSaver", NODE.interfaces[0], on_call, None, None)
+--- brain's focus events:
+{"app":"org.shadowassistant.TestWindow","ts":"2026-11-18T10:34:30.633Z","type":"focus","window":"brain gnome test"}
+{"app":"org.shadowassistant.TestWindow","renamed":true,"ts":"2026-11-18T10:34:31.609Z","type":"focus","window":"brain gnome test renamed"}
+{"app":"org.kde.kate","ts":"2026-11-18T10:34:52.902Z","type":"focus","window":"brain-gnome-kate.txt  — Kate"}
+test brain_follows_a_real_gnome_shell ... FAILED
+failures:
+failures:
+    brain_follows_a_real_gnome_shell
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.63s
+error: test failed, to rerun pass `--test gnome_e2e`
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Kate's focus event came 21 seconds late because it waits on KDE services that never answer on a bare private bus, so I'm switching to a second GTK window with a `.desktop` file in the private home instead. I'll also drop the "switched to us" line brain logs at startup.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('tests/fixtures/gnome/window.js',[\n(\"\"\"// Test only: a GTK 4 window titled ARGV[0] that renames itself to\n// \"ARGV[0] renamed\" after ARGV[1] milliseconds (tests/gnome_e2e.rs).\"\"\",\"\"\"// Test only: a GTK 4 window of app ARGV[2], titled ARGV[0], that renames\n// itself to \"ARGV[0] renamed\" after ARGV[1] milliseconds (tests/gnome_e2e.rs).\"\"\"),\n(\"\"\"const [title, renameAfterMs] = ARGV;\nconst app = new Gtk.Application({application_id: 'org.shadowassistant.TestWindow'});\"\"\",\"\"\"const [title, renameAfterMs, appId] = ARGV;\nconst app = new Gtk.Application({application_id: appId});\"\"\"),\n])\np='tests/gnome_e2e.rs'; s=open(p).read()\ns=s.replace(\"\"\"//! * the focus moving to a GTK window (app id from its Wayland app id) and to\n//!   Kate (app id from its desktop file), and the GTK window's rename;\"\"\",\"\"\"//! * the focus moving to a GTK window without a desktop file (its app id is\n//!   the window's Wayland app id) and to one with a desktop file (the app id\n//!   is the desktop file's name, as for installed apps), and a rename;\"\"\")\ns=s.replace(\"\"\"//! the layout. Ignored by default; it needs gnome-shell, gjs, python3-gi,\n//! Kate, and a user in the `input` group (brain reads the real keyboards,\n//! but nothing is typed):\"\"\",\"\"\"//! the layout. Ignored by default; it needs gnome-shell, gjs, python3-gi and\n//! a user in the `input` group (brain reads the real keyboards, but nothing\n//! is typed):\"\"\")\nold=s[s.index(\"    // Focus and rename, from a GTK window (no desktop file: its app id).\"):s.index(\"    // Super+Space to Hebrew\")]\nnew='''    // Focus and rename, from a GTK window without a desktop file.\n    let gtk_window = |title: &str, app_id: &str, log: &str| {\n        let mut c = gnome.command(\"gjs\");\n        c.args([\"-m\"])\n            .arg(repo(\"tests/fixtures/gnome/window.js\"))\n            .args([title, \"1500\", app_id]);\n        gnome.spawn(c, log)\n    };\n    let plain = gtk_window(\"brain gnome test\", \"org.shadowassistant.TestWindow\", \"window.log\");\n    wait_until(\"focus on the GTK window\", Duration::from_secs(10), || {\n        has_focus(&data, \"org.shadowassistant.TestWindow\", \"brain gnome test\", false)\n    });\n    wait_until(\"the GTK window's rename\", Duration::from_secs(10), || {\n        has_focus(&data, \"org.shadowassistant.TestWindow\", \"brain gnome test renamed\", true)\n    });\n\n    // Focus on an app with a desktop file: the app id is the file's name.\n    let applications = gnome.path(\"home/.local/share/applications\");\n    std::fs::create_dir_all(&applications).unwrap();\n    std::fs::write(\n        applications.join(\"org.shadowassistant.TestApp.desktop\"),\n        \"[Desktop Entry]\\\\nType=Application\\\\nName=brain test app\\\\nExec=true\\\\n\",\n    )\n    .unwrap();\n    let installed = gtk_window(\"brain test app\", \"org.shadowassistant.TestApp\", \"app.log\");\n    wait_until(\"focus on the app with a desktop file\", Duration::from_secs(10), || {\n        has_focus(&data, \"org.shadowassistant.TestApp\", \"brain test app\", false)\n    });\n\n'''\ns=s.replace(old,new)\ns=s.replace(\"drop((kate, window, screensaver));\",\"drop((installed, plain, screensaver));\")\ns=s.replace('for name in [\"brain.log\", \"shell.log\", \"window.log\", \"kate.log\", \"screensaver.log\"] {','for name in [\"brain.log\", \"shell.log\", \"window.log\", \"app.log\", \"screensaver.log\"] {')\nopen(p,'w').write(s)\nedit('src/capture/linux/gnome.rs',[\n(\"\"\"    if let Ok(id) = call::<String>(conn, \"InputSource\") {\n        lock(&state).switch_to(&id, &control);\n    }\"\"\",\"\"\"    if let Ok(id) = call::<String>(conn, \"InputSource\") {\n        lock(&state).switch_to(&id, &control, false);\n    }\"\"\"),\n(\"\"\"       
+… [1898 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 59, in <module>
+  File "<stdin>", line 4, in edit
+AssertionError: ('src/capture/linux/gnome.rs', '        if let Ok(id) = msg.body().deserialize::<String>() {\n            lock(&s', 0)
+thread 'brain_follows_a_real_gnome_shell' (838701) panicked at tests/gnome_e2e.rs:52:9:
+timed out waiting for focus on the app with a desktop file
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.61s
+thread 'brain_follows_a_real_gnome_shell' (839320) panicked at tests/gnome_e2e.rs:52:9:
+timed out waiting for focus on the GTK window
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.73s
+thread 'brain_follows_a_real_gnome_shell' (839833) panicked at tests/gnome_e2e.rs:52:9:
+timed out waiting for focus on the GTK window
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.73s
+leftover gnome: 0 scopes: 0 gjs: 0
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+My edit to `gnome.rs` didn't apply because rustfmt had reflowed those lines, and the test runs failed as well. I'm fixing the edit first, then rerunning once to get the full failure output.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'switch_to' src/capture/linux/gnome.rs",
+  "description": "Find the switch_to call sites as formatted"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+170:        lock(&state).switch_to(&id, &control);
+181:                lock(&s).switch_to(&id, &c);
+206:            st.switch_to(&id, &control);
+220:    fn switch_to(&mut self, id: &str, control: &ControlHandle) {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/capture/linux/gnome.rs'; s=open(p).read()\nfor old,new in [(\"lock(&state).switch_to(&id, &control);\",\"lock(&state).switch_to(&id, &control, false);\"),\n                (\"lock(&s).switch_to(&id, &c);\",\"lock(&s).switch_to(&id, &c, true);\"),\n                (\"st.switch_to(&id, &control);\",\"st.switch_to(&id, &control, true);\"),\n                (\"\"\"    /// Activates the XKB source `id` (\"us\", \"il\", \"us+intl\"): loads the\n    /// keymap holding it if another one is loaded, then selects it. Input\n    /// methods (IBus) are not XKB layouts and are ignored.\n    fn switch_to(&mut self, id: &str, control: &ControlHandle) {\"\"\",\"\"\"    /// Activates the XKB source `id` (\"us\", \"il\", \"us+intl\"): loads the\n    /// keymap holding it if another one is loaded, then selects it (saying so\n    /// on stderr if `announce`). Input methods (IBus) are not XKB layouts and\n    /// are ignored.\n    fn switch_to(&mut self, id: &str, control: &ControlHandle, announce: bool) {\"\"\"),\n                (\"\"\"        eprintln!(\"brain: keyboard layout switched to {id} (#{index})\");\n        control.send(Control::SetLayout(group));\"\"\",\"\"\"        if announce {\n            eprintln!(\"brain: keyboard layout switched to {id} (#{index})\");\n        }\n        control.send(Control::SetLayout(group));\"\"\")]:\n    assert s.count(old)==1,old[:60]; s=s.replace(old,new)\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -vE 'dbus-daemon|Activat|^\\s*$' | sed -n '/panicked/,$p' | grep -vE 'CalendarServer|Stack trace|asyncCallback|init.js|NM.Object|camera|AuthenticationAgent|GDM|Gjs-WARNING' | head -50",
+  "description": "Fix the announce edit; rerun with failure details",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+thread 'brain_follows_a_real_gnome_shell' (840839) panicked at tests/gnome_e2e.rs:52:9:
+timed out waiting for focus on the app with a desktop file
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+--- brain.log (last lines):
+brain: capturing from 1 keyboard(s), desktop GNOME, focus tracking via the GNOME Shell extension, layout us,il; data in /tmp/.tmpkf4mBe/data
+brain: received signal 15, stopping
+--- shell.log (last lines):
+GNOME Shell-Message: 12:36:49.380: GNOME Shell started at Wed Nov 18 2026 12:36:48 GMT+0200 (Israel Standard Time)
+--- window.log (last lines):
+--- kate.log (last lines):
+--- screensaver.log (last lines):
+/home/juan/Documents/shadow-assistant/tests/fixtures/gnome/screensaver.py:32: DeprecationWarning: Gio.DBusConnection.register_object is deprecated
+  conn.register_object("/org/gnome/ScreenSaver", NODE.interfaces[0], on_call, None, None)
+--- brain's focus events:
+{"app":"org.shadowassistant.TestWindow","ts":"2026-11-18T10:36:49.277Z","type":"focus","window":"brain gnome test"}
+{"app":"org.shadowassistant.TestWindow","renamed":true,"ts":"2026-11-18T10:36:50.230Z","type":"focus","window":"brain gnome test renamed"}
+{"app":"unknown","ts":"2026-11-18T10:37:01.526Z","type":"focus","window":""}
+test brain_follows_a_real_gnome_shell ... FAILED
+failures:
+failures:
+    brain_follows_a_real_gnome_shell
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 15.60s
+error: test failed, to rerun pass `--test gnome_e2e`
+[This command modified 1 file you've previously read: src/capture/linux/gnome.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The focus test failed because GNOME's focus-stealing prevention blocked the new window, and the startup Activities overview likely caused the earlier flakiness. I'm adding two helper-extension abilities, hiding the overview and activating a window by title, so the test also covers focus moving between existing windows.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('tests/fixtures/gnome/brain-test-helper@shadowassistant/extension.js',[\n(\"\"\"// Test only, loaded into the private headless GNOME Shell of\n// tests/gnome_e2e.rs (never installed for real): a headless shell has no\n// keyboard, so nothing could set the clipboard or press Super+Space there.\"\"\",\"\"\"// Test only, loaded into the private headless GNOME Shell of\n// tests/gnome_e2e.rs (never installed for real): a headless shell has no\n// keyboard or mouse, so this does what a user would: leave the overview GNOME\n// opens at startup, click a window, set the clipboard, press Super+Space.\"\"\"),\n(\"\"\"import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';\"\"\",\"\"\"import * as Keyboard from 'resource:///org/gnome/shell/ui/status/keyboard.js';\nimport * as Main from 'resource:///org/gnome/shell/ui/main.js';\"\"\"),\n(\"\"\"    <method name=\"SetClipboard\"><arg type=\"s\" direction=\"in\" name=\"text\"/></method>\"\"\",\"\"\"    <method name=\"Ready\"><arg type=\"b\" direction=\"out\" name=\"ready\"/></method>\n    <method name=\"ActivateWindow\"><arg type=\"s\" direction=\"in\" name=\"title\"/></method>\n    <method name=\"SetClipboard\"><arg type=\"s\" direction=\"in\" name=\"text\"/></method>\"\"\"),\n(\"\"\"        this._dbus.export(Gio.DBus.session, '/org/shadowassistant/TestHelper');\n    }\n\n    disable() {\n        this._dbus.unexport();\n        this._dbus = null;\n    }\n\"\"\",\"\"\"        this._dbus.export(Gio.DBus.session, '/org/shadowassistant/TestHelper');\n        // GNOME opens the overview at startup; new windows get no focus there.\n        this._started = !Main.layoutManager._startingUp;\n        this._startupId = Main.layoutManager.connect('startup-complete', () => {\n            this._started = true;\n            Main.overview.hide();\n        });\n        if (this._started)\n            Main.overview.hide();\n    }\n\n    disable() {\n        Main.layoutManager.disconnect(this._startupId);\n        this._dbus.unexport();\n        this._dbus = null;\n    }\n\n    Ready() {\n        return this._started && !Main.overview.visible;\n    }\n\n    ActivateWindow(title) {\n        const window = global.get_window_actors()\n            .map(actor => actor.get_meta_window())\n            .find(w => w.get_title() === title);\n        if (!window)\n            throw new Error(`no window titled ${title}`);\n        Main.activateWindow(window);\n    }\n\"\"\"),\n])\np='tests/gnome_e2e.rs'; s=open(p).read()\nimport re\ns=re.sub(r'for name in \\[[^\\]]*\\] \\{', 'for name in [\\n                \"brain.log\",\\n                \"shell.log\",\\n                \"window.log\",\\n                \"app.log\",\\n                \"screensaver.log\",\\n            ] {', s, count=1)\nold='''        wait_until(\"the extension in the private GNOME Shell\", Duration::from_secs(30), || {'''\nassert s.count(old)==1\n# insert helper readiness wait after the extension wait block: find end of that statement\ni=s.index(old); j=s.index(\"        });\\n\", i)+len(\"        });\\n\")\ns=s[:j]+'''        wait_until(\"GNOME Shell to finish starting\", Duration::from_secs(30), || {\n            me.call(\n                \"/org/shadowassistant/TestHelper\",\n                \"org.shadowassistant.TestHelper.Ready\",\n                &[],\n            )\n            .is_ok_and(|r| r == \"(true,)\")\n        });\n'''+s[j:]\nold2=s[s.index('    let installed = gtk_window(\"brain test app\"'):s.index(\"    // Super+Space to Hebrew\")]\nnew2='''    let installed = gtk_window(\"brain test app\", \"org.shadowassistant.TestApp\", \"app.log\");\n    // GNOME's focus-stealing prevention keeps the new window from taking\n    // focus by itself; click it (the helper), then go back to the first.\n    let activat
+… [1637 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+Traceback (most recent call last):
+  File "<stdin>", line 60, in <module>
+AssertionError
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.91s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.62s
+leftover gnome: 0 scopes: 0 gjs: 0
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The helper change went in but my test edit didn't, since rustfmt reformatted the line I matched. Hiding only the overview at startup makes the unchanged test pass 3 of 3, so the overview was the culprit; I'm now adding a wait for GNOME startup and a focus-return step to the test.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'the extension in the private GNOME Shell' -A12 tests/gnome_e2e.rs; grep -n 'let installed' -A8 tests/gnome_e2e.rs",
+  "description": "Read the current test text around the edits"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+147:            "the extension in the private GNOME Shell",
+148-            Duration::from_secs(30),
+149-            || {
+150-                me.call(
+151-                    "/org/shadowassistant/GnomeShell",
+152-                    "org.shadowassistant.GnomeShell.Current",
+153-                    &[],
+154-                )
+155-                .is_ok()
+156-            },
+157-        );
+158-        me
+159-    }
+395:    let installed = gtk_window("brain test app", "org.shadowassistant.TestApp", "app.log");
+396-    wait_until(
+397-        "focus on the app with a desktop file",
+398-        Duration::from_secs(10),
+399-        || {
+400-            has_focus(
+401-                &data,
+402-                "org.shadowassistant.TestApp",
+403-                "brain test app",
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/gnome_e2e.rs'; s=open(p).read()\nold=\"\"\"                .is_ok()\n            },\n        );\n        me\n    }\"\"\"\nnew=\"\"\"                .is_ok()\n            },\n        );\n        wait_until(\"GNOME Shell to finish starting\", Duration::from_secs(30), || {\n            me.call(\n                \"/org/shadowassistant/TestHelper\",\n                \"org.shadowassistant.TestHelper.Ready\",\n                &[],\n            )\n            .is_ok_and(|r| r == \"(true,)\")\n        });\n        me\n    }\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\ni=s.index('    let installed = gtk_window(\"brain test app\"')\nj=s.index(\"    // Super+Space to Hebrew\")\ns=s[:i]+'''    let installed = gtk_window(\"brain test app\", \"org.shadowassistant.TestApp\", \"app.log\");\n    wait_until(\"focus on the app with a desktop file\", Duration::from_secs(10), || {\n        has_focus(&data, \"org.shadowassistant.TestApp\", \"brain test app\", false)\n    });\n\n    // Back to the first window, as a click on it would.\n    let back = events(&data).len();\n    gnome\n        .call(\n            \"/org/shadowassistant/TestHelper\",\n            \"org.shadowassistant.TestHelper.ActivateWindow\",\n            &[\"brain gnome test renamed\"],\n        )\n        .unwrap();\n    wait_until(\"focus back on the GTK window\", Duration::from_secs(10), || {\n        events(&data)[back..].iter().any(|e| {\n            e[\"type\"] == \"focus\"\n                && e[\"app\"] == \"org.shadowassistant.TestWindow\"\n                && e[\"window\"] == \"brain gnome test renamed\"\n                && e.get(\"renamed\").is_none()\n        })\n    });\n\n'''+s[j:]\nopen(p,'w').write(s)\nEOF\ngrep -n 'kate.log\\|\"app.log\"' tests/gnome_e2e.rs | head; cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; for i in 1 2 3 4 5; do timeout 200 cargo test --release --test gnome_e2e -- --ignored --nocapture 2>&1 | grep -E 'test result|panicked|timed out|left running'; done; echo \"leftover gnome: $(ps -eo args | grep -c '[g]nome-shell --headless') scopes: $(systemctl --user list-units --type=scope --no-pager | grep -c brain-gnome-test) gjs: $(pgrep -c gjs) py: $(pgrep -fc 'fixtures/gnome/screensave[r]')\"",
+  "description": "Add the startup wait and focus-back step; run five times",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+281:                "kate.log",
+403:    let installed = gtk_window("brain test app", "org.shadowassistant.TestApp", "app.log");
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.14s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.88s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.07s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.27s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.15s
+leftover gnome: 0 scopes: 0 gjs: 0 py: 0
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:38:50.913Z</sub>
+
+5 out of 5 pass in about 5 s each, and nothing is left: no GNOME Shell, scope, gjs or Python process. One leftover reference: the failure-log list still names `kate.log`.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -i '281s/\"kate.log\"/\"app.log\"/' tests/gnome_e2e.rs && sed -n 276,285p tests/gnome_e2e.rs && grep -n -i 'kate' tests/gnome_e2e.rs",
+  "description": "Replace the stale kate.log name in the failure-log list"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+impl Drop for PrivateGnome {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // The directory is about to go: show what happened in it.
+            for name in [
+                "brain.log",
+                "shell.log",
+                "window.log",
+                "kate.log",
+285:                "kate.log",
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -i '285s/\"kate.log\"/\"app.log\"/' tests/gnome_e2e.rs && grep -n -i 'kate' tests/gnome_e2e.rs; echo \"(no kate refs above = ok)\"",
+  "description": "Fix the kate.log reference on the right line"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+(no kate refs above = ok)
+[This command modified 1 file you've previously read: tests/gnome_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:39:02.463Z</sub>
+
+Now the stock-Ubuntu app ids: GNOME Console as a terminal, and the snap's VS Code id `code_code`, with tests:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn classify_known_apps\\|assert_eq!(classify(' src/reconstruct/apps.rs | head -5; grep -n 'is_vscode(\"code\")' -B2 -A6 src/reconstruct/vscode/title.rs | head -14; sed -n 20,30p src/reconstruct/vscode/title.rs",
+  "description": "Locate the app-id tests and VS Code id list"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+187:        assert_eq!(classify("com.mitchellh.ghostty"), AppClass::Terminal);
+188:        assert_eq!(classify("org.kde.konsole"), AppClass::Terminal);
+189:        assert_eq!(classify("org.gnome.Terminal"), AppClass::Terminal);
+190:        assert_eq!(classify("google-chrome"), AppClass::Browser);
+191:        assert_eq!(classify("firefox_firefox"), AppClass::Browser);
+440-    #[test]
+441-    fn vscode_app_ids() {
+442:        assert!(is_vscode("code"));
+443-        assert!(is_vscode("Code"));
+444-        assert!(is_vscode("code-url-handler"));
+445-        assert!(is_vscode("com.visualstudio.code"));
+446-        assert!(is_vscode("com.microsoft.VSCode"));
+447-        assert!(!is_vscode("org.kde.kate"));
+448-        assert!(!is_vscode("google-chrome"));
+    "com.vscodium.codium",
+];
+
+/// App-name suffixes VS Code puts last in its title, longest first so
+/// "Visual Studio Code - Insiders" wins over "Visual Studio Code".
+const APP_NAMES: &[&str] = &[
+    "Visual Studio Code - Insiders",
+    "Visual Studio Code",
+    "Code - OSS",
+    "VSCodium",
+];
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/reconstruct/apps.rs',[\n(\"\"\"    \"ptyxis\",\n    \"kgx\", // GNOME Console\"\"\",\"\"\"    \"ptyxis\",  // Ubuntu's default terminal (org.gnome.Ptyxis)\n    \"console\", // GNOME Console (org.gnome.Console)\n    \"kgx\",     // GNOME Console's older id\"\"\"),\n(\"\"\"        assert_eq!(classify(\"org.gnome.Terminal\"), AppClass::Terminal);\"\"\",\"\"\"        assert_eq!(classify(\"org.gnome.Terminal\"), AppClass::Terminal);\n        assert_eq!(classify(\"org.gnome.Ptyxis\"), AppClass::Terminal);\n        assert_eq!(classify(\"org.gnome.Console\"), AppClass::Terminal);\n        // KDE's script console is not a shell: \"interactiveconsole\" is one token.\n        assert_eq!(\n            classify(\"org.kde.plasma-interactiveconsole\"),\n            AppClass::Generic\n        );\"\"\"),\n])\nedit('src/reconstruct/vscode/title.rs',[\n(\"\"\"/// App ids VS Code reports under KDE/Wayland (desktop file name, or the\n/// resource class when there is none), plus the OSS builds and Flatpak id.\"\"\",\"\"\"/// App ids VS Code reports (desktop file name, or the window class when there\n/// is none) for Microsoft's .deb and snap packages, the OSS builds and the\n/// Flatpak.\"\"\"),\n(\"\"\"    \"com.microsoft.vscode\", // Microsoft's .deb/.rpm package on KDE Wayland\"\"\",\"\"\"    \"com.microsoft.vscode\", // Microsoft's .deb/.rpm package on KDE Wayland\n    \"code_code\",            // the snap (stock Ubuntu's App Center)\"\"\"),\n(\"\"\"        assert!(is_vscode(\"com.microsoft.VSCode\"));\"\"\",\"\"\"        assert!(is_vscode(\"com.microsoft.VSCode\"));\n        assert!(is_vscode(\"code_code\"));\"\"\"),\n])\nEOF\ncargo fmt && cargo test --release --lib -- apps vscode_app_ids 2>&1 | grep -E 'test result|panicked|left|right'",
+  "description": "Add GNOME Console and snap VS Code ids with tests",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 128 filtered out; finished in 0.00s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:39:30.980Z</sub>
+
+Next, installing the extension. A small script does the work, and the Makefile calls it, only when GNOME Shell is present:
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/scripts/gnome-extension.sh",
+  "content": "#!/bin/sh\n# Installs or removes brain's GNOME Shell extension for the current user\n# (no root). brain needs it on GNOME for focus tracking, pastes and layout\n# switches: Wayland gives other programs no way to see the focused window.\n#\n#   sh scripts/gnome-extension.sh install     # copy + enable\n#   sh scripts/gnome-extension.sh uninstall   # disable + remove\n#\n# GNOME on Wayland loads a newly installed extension only after you log out\n# and back in once; brain picks it up as soon as it runs.\nset -eu\n\nUUID=brain@shadowassistant\nSRC=\"$(dirname \"$0\")/../packaging/gnome-extension/$UUID\"\nDEST=\"${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID\"\n\nenabled() { gsettings get org.gnome.shell enabled-extensions; }\n\ncase \"${1:-}\" in\ninstall)\n    mkdir -p \"$DEST\"\n    cp \"$SRC/metadata.json\" \"$SRC/extension.js\" \"$DEST/\"\n    # `gnome-extensions enable` only knows extensions the running shell has\n    # loaded, which a new one is not until the next login: edit the list.\n    list=$(enabled)\n    case \"$list\" in\n    *\"'$UUID'\"*) ;;\n    \"@as []\" | \"[]\") gsettings set org.gnome.shell enabled-extensions \"['$UUID']\" ;;\n    *) gsettings set org.gnome.shell enabled-extensions \"${list%]}, '$UUID']\" ;;\n    esac\n    if [ \"$(gsettings get org.gnome.shell disable-user-extensions)\" = \"true\" ]; then\n        echo \"note: user extensions are turned off in GNOME (Extensions app); brain's needs them on\"\n    fi\n    echo \"installed $DEST; log out and back in once so GNOME Shell loads it\"\n    ;;\nuninstall)\n    list=$(enabled)\n    new=$(printf '%s' \"$list\" | sed \"s/, '$UUID'//; s/'$UUID', //; s/'$UUID'//\")\n    [ \"$new\" = \"$list\" ] || gsettings set org.gnome.shell enabled-extensions \"$new\"\n    rm -rf \"$DEST\"\n    echo \"removed $DEST\"\n    ;;\n*)\n    echo \"usage: sh $0 install|uninstall\" >&2\n    exit 1\n    ;;\nesac\n"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/scripts/gnome-extension.sh (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:39:42.242Z</sub>
+
+Testing the script against a private, file-based settings store in a temporary home, so your real GNOME settings are never touched:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=$CLAUDE_JOB_DIR/tmp/ext; rm -rf $T; mkdir -p $T; run() { env -i PATH=/usr/bin:/bin HOME=$T XDG_CONFIG_HOME=$T/.config XDG_DATA_HOME=$T/share GSETTINGS_BACKEND=keyfile \"$@\"; }; list() { run gsettings get org.gnome.shell enabled-extensions; }; echo \"start: $(list)\"; run sh scripts/gnome-extension.sh install; echo \"after install: $(list)\"; ls $T/share/gnome-shell/extensions/brain@shadowassistant; run sh scripts/gnome-extension.sh install >/dev/null; echo \"install twice: $(list)\"; run gsettings set org.gnome.shell enabled-extensions \"['a@x', 'brain@shadowassistant', 'b@y']\"; run sh scripts/gnome-extension.sh uninstall; echo \"uninstall middle: $(list)\"; run sh scripts/gnome-extension.sh install >/dev/null; echo \"install after others: $(list)\"; run sh scripts/gnome-extension.sh uninstall >/dev/null; run gsettings set org.gnome.shell enabled-extensions \"['brain@shadowassistant']\"; run sh scripts/gnome-extension.sh uninstall >/dev/null; echo \"uninstall only: $(list)\"; ls $T/share/gnome-shell/extensions/ 2>&1; rm -rf $T",
+  "description": "Test the extension install script on a private settings file"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+start: @as []
+installed /home/juan/.claude/jobs/64f49a65/tmp/ext/share/gnome-shell/extensions/brain@shadowassistant; log out and back in once so GNOME Shell loads it
+after install: ['brain@shadowassistant']
+extension.js
+metadata.json
+install twice: ['brain@shadowassistant']
+removed /home/juan/.claude/jobs/64f49a65/tmp/ext/share/gnome-shell/extensions/brain@shadowassistant
+uninstall middle: ['a@x', 'b@y']
+install after others: ['a@x', 'b@y', 'brain@shadowassistant']
+uninstall only: @as []
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:39:54.092Z</sub>
+
+Every case is correct: empty list, installing twice, removing from the middle, appending after other extensions, and removing the only entry. Now the Makefile and the service unit:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('Makefile',[\n(\"\"\"#   make                    build (release) and install to $(BINDIR)\n#   make build              build only\"\"\",\"\"\"#   make                    build (release) and install to $(BINDIR), plus\n#                           the GNOME Shell extension when GNOME is installed\n#   make build              build only\n#   make install-gnome-extension    the GNOME Shell extension only (needed\n#                           for focus tracking on GNOME; log out and in once)\"\"\"),\n(\"\"\"#   make uninstall          remove the installed binary\"\"\",\"\"\"#   make uninstall          remove the installed binary (and the extension)\"\"\"),\n(\"\"\".PHONY: all build install uninstall install-service uninstall-service\"\"\",\"\"\".PHONY: all build install uninstall install-service uninstall-service \\\\\n\tinstall-gnome-extension uninstall-gnome-extension\"\"\"),\n(\"\"\"install: build\n\tsudo install -m 0755 $(BIN) $(BINDIR)/brain\n\nuninstall:\n\tsudo rm -f $(BINDIR)/brain\"\"\",\"\"\"install: build\n\tsudo install -m 0755 $(BIN) $(BINDIR)/brain\n\t@if command -v gnome-shell >/dev/null; then $(MAKE) --no-print-directory install-gnome-extension; fi\n\nuninstall:\n\tsudo rm -f $(BINDIR)/brain\n\t@if [ -d \"$(GNOME_EXT_DIR)\" ]; then $(MAKE) --no-print-directory uninstall-gnome-extension; fi\n\n# brain's GNOME Shell extension, for the current user (no sudo).\nGNOME_EXT_DIR := $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/gnome-shell/extensions/brain@shadowassistant\n\ninstall-gnome-extension:\n\tsh scripts/gnome-extension.sh install\n\nuninstall-gnome-extension:\n\tsh scripts/gnome-extension.sh uninstall\"\"\"),\n])\nedit('packaging/brain.service',[\n(\"\"\"# systemd *user* service: runs `brain run` as you, inside your desktop\n# session (it needs your session D-Bus for KWin focus, Klipper, screen lock\n# and keyboard layouts). No root: keyboards are read through the `input`\n# group.\"\"\",\"\"\"# systemd *user* service: runs `brain run` as you, inside your desktop\n# session (it needs your session D-Bus for focus tracking, the clipboard,\n# screen lock and keyboard layouts: KWin and Klipper on KDE Plasma, brain's\n# GNOME Shell extension on GNOME). No root: keyboards are read through the\n# `input` group.\"\"\"),\n(\"\"\"# Start with the Plasma session, after the compositor, and stop at logout.\nPartOf=graphical-session.target\nAfter=graphical-session.target plasma-kwin_wayland.service\"\"\",\"\"\"# Start with the desktop session, after the compositor (KWin or GNOME\n# Shell; a unit that does not exist is ignored), and stop at logout.\nPartOf=graphical-session.target\nAfter=graphical-session.target plasma-kwin_wayland.service org.gnome.Shell@wayland.service\"\"\"),\n(\"\"\"# SIGTERM stops brain cleanly (final ingest, KWin script unloaded).\"\"\",\"\"\"# SIGTERM stops brain cleanly (final ingest, KWin script unloaded on KDE).\"\"\"),\n])\nEOF\nmake -n install | head -5; systemd-analyze --user verify packaging/brain.service 2>&1 | head -5; echo \"verify exit: $?\"",
+  "description": "Hook the extension into make install; update the service unit"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+cargo build --release
+sudo install -m 0755 target/release/brain /usr/bin/brain
+if command -v gnome-shell >/dev/null; then make --no-print-directory install-gnome-extension; fi
+sh scripts/gnome-extension.sh install
+/usr/lib/systemd/user/spice-vdagent.service:23: Unknown key 'StandardError' in section [Install], ignoring.
+verify exit: 0
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The service unit verifies cleanly, though an unrelated system unit throws one warning. Since GNOME Shell is now installed here, a `make install` will also add the extension to GNOME's enabled list, which is harmless under KDE. Next I'm going through the README passages that describe the platform.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,50p README.md; grep -n 'kwin/\\|Klipper\\|KWin\\|Plasma\\|KDE' README.md | cut -c1-120",
+  "description": "Read README platform passages"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+# brain — a shadow assistant for Linux
+
+`brain` runs on your computer, follows what you type in each application and
+lets you search it later.
+
+```
+brain run                      # capture keystrokes + focus changes, store them
+brain query search "<words>"   # full-text search over writing sessions
+brain query text --app A       # what was typed into an app, reconstructed
+```
+
+> **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
+> the AI transcripts are in [ai-logs/](ai-logs/).
+
+## Supported OS
+
+Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
+works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
+desktops, keys are recorded under the app `unknown`. The optional VS Code
+tier 2 (`--vscode-replay`) replays into VS Code when a file was not saved,
+which needs VS Code installed (`/usr/bin/code`).
+
+## Build
+
+```sh
+# Rust toolchain (https://rustup.rs), then:
+cargo build --release
+# binary: target/release/brain
+
+# or build and install to /usr/bin/brain (asks for sudo for the copy only):
+make
+```
+
+SQLite is bundled. libxkbcommon is loaded from the runtime library
+`libxkbcommon.so.0` that every Wayland desktop ships, so no `-dev`
+packages are needed.
+
+## Permissions
+
+`brain` reads keyboards directly from `/dev/input/event*` (read-only,
+never grabbed, so it cannot add input lag). Your user must be in the `input`
+group:
+
+```sh
+sudo usermod -aG input "$USER"   # then log out and back in
+```
+
+Note that the `input` group can read every input device. That is the price of
+display-server-independent capture (see PLAN.md for the alternatives).
+
+17:Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
+18:works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
+67:`brain` can run as a **systemd user service**: it starts with your Plasma
+98:| `kwin/`        | generated KWin focus-tracking script                   |
+232:  continues: a change of the *same* window's title (KWin tells a title
+318:* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way
+321:  input lag. Focus (app + window title) comes from a small KWin script
+326:  assignment's example event. Key repeat is regenerated on KDE's schedule.
+327:* **Held keys** are logged with the repeats KDE's schedule produces
+339:  read from Klipper at that moment and logged, up to 64 KiB.
+439:  unloads the KWin script the killed run left behind, by its name
+481:path as the KDE menu or closing the lid); no automated test does it:
+548:    session. The real-keyboard test caught it; KWin now reports whether a
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 314,345p README.md; sed -n 446,478p README.md",
+  "description": "Read README decisions and tests sections"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+## Decisions and edge cases
+
+**Platform and capture**
+* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way
+  to observe other apps' keystrokes, so `brain` reads the kernel's input
+  devices (evdev) passively: read-only, never grabbed, so it cannot add
+  input lag. Focus (app + window title) comes from a small KWin script
+  that calls `brain` over D-Bus. PLAN.md compares the alternatives.
+* **Keys are resolved at capture time** with libxkbcommon and your real
+  layouts (us/il, Alt+Shift switching, layout changes from the tray), so
+  the log holds the characters the app received (`"ש"`, `"H"`), as in the
+  assignment's example event. Key repeat is regenerated on KDE's schedule.
+* **Held keys** are logged with the repeats KDE's schedule produces
+  (600 ms delay, then 25 Hz), exactly. The app may still have received one
+  more or one fewer character per hold: on Wayland each app runs its own
+  repeat timer, and Qt apps use timers that may fire up to 5% early or late
+  (a 600 ms delay fires anywhere in ~570–630 ms). Measured against Kate, the
+  same 620 ms hold gave 1, 2 or 3 characters across runs; brain's
+  reconstruction stays within one character per hold (two for holds over
+  2 s). `tests/repeat_e2e.rs` measures this against a real Kate window.
+* **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
+  way applications match them; this also makes paste detection work in
+  Hebrew.
+* **Paste** (Ctrl+V, Ctrl+Shift+V, Shift+Insert): the clipboard text is
+  read from Klipper at that moment and logged, up to 64 KiB.
+* **Screen lock pauses capture**, so the unlock password is never logged.
+* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
+  keyboards are reopened. Tested with a real suspend.
+* **The mouse is not captured.** `brain` reads keyboards only. A mouse
+  click can move the text cursor, but its position on screen tells `brain`
+  nothing about where in the text the cursor went, so reconstruction cannot
+```sh
+cargo test --release      # unit tests (~130) and the default integration tests:
+                          #   crash_safety  25 random kill -9s under load; sessions,
+                          #                 documents and checkpoints must equal a
+                          #                 clean rebuild from the log
+                          #   query_cli     the query commands through the binary,
+                          #                 incl. thousands of queries while run writes
+                          #   perf_budget   ≤ 1 % CPU and ≤ 32 MB while typing
+                          #   tier2_e2e     VS Code saved-file diffs and shortcut-only
+                          #                 sessions (no VS Code needed)
+                          #   two_instances two runs on separate folders stay apart;
+                          #                 a second run on the same folder is refused
+```
+
+Tests against real software are opt-in (`-- --ignored`):
+
+```sh
+# Type through a virtual keyboard in
+… [1034 more characters in the raw transcript]
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"## Supported OS\n\nUbuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture\nworks on any Linux. Focus tracking needs KWin (tested on Wayland). On other\ndesktops, keys are recorded under the app `unknown`. The optional VS Code\ntier 2 (`--vscode-replay`) replays into VS Code when a file was not saved,\nwhich needs VS Code installed (`/usr/bin/code`).\"\"\",\"\"\"## Supported OS\n\nUbuntu (tested on 26.04), on Wayland, with either desktop:\n\n| Desktop | Focus tracking | Paste text | Screen lock | Layouts |\n|---|---|---|---|---|\n| **KDE Plasma 6** (Kubuntu, or Ubuntu with Plasma) | KWin script, loaded by brain itself | Klipper | `org.freedesktop.ScreenSaver` | kxkbrc, Alt+Shift and tray switches |\n| **GNOME** (stock Ubuntu) | brain's GNOME Shell extension (`make install`, then log out and in once) | the extension | `org.gnome.ScreenSaver` | GNOME's input sources, Super+Space switches |\n\nKey capture itself works on any Linux. On another desktop, `brain run`\nwarns and still captures keys, attributed to the app `unknown`, without\npaste text, and detects the lock screen only if the desktop implements\n`org.freedesktop.ScreenSaver`, so **an unlock password may be recorded\nthere**. The optional VS Code tier 2 (`--vscode-replay`) works on both\ndesktops; it replays into VS Code when a file was not saved, which needs\nVS Code installed (`/usr/bin/code`, or the snap).\"\"\"),\n(\"\"\"Note that the `input` group can read every input device. That is the price of\ndisplay-server-independent capture (see PLAN.md for the alternatives).\"\"\",\"\"\"Note that the `input` group can read every input device. That is the price of\ndisplay-server-independent capture (see PLAN.md for the alternatives).\n\n**On GNOME**, brain also needs its GNOME Shell extension: Wayland gives\nprograms no way to see the focused window, and on KDE brain loads a KWin\nscript for that by itself, but GNOME only loads extensions at login.\n`make install` installs and enables it for your user when GNOME is\ninstalled (or `make install-gnome-extension` alone); log out and back in\nonce. Until then brain warns and files keys under `unknown`. The extension\nanswers brain's clipboard reads at a paste, and any program in your session\ncould ask it the same, as with KDE's Klipper.\"\"\"),\n(\"\"\"`brain` can run as a **systemd user service**: it starts with your Plasma\nsession,\"\"\",\"\"\"`brain` can run as a **systemd user service**: it starts with your desktop\nsession,\"\"\"),\n(\"\"\"| `kwin/`        | generated KWin focus-tracking script                   |\"\"\",\"\"\"| `kwin/`        | generated KWin focus-tracking script (KDE only)        |\"\"\"),\n(\"\"\"* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way\n  to observe other apps' keystrokes, so `brain` reads the kernel's input\n  devices (evdev) passively: read-only, never grabbed, so it cannot add\n  input lag. Focus (app + window title) comes from a small KWin script\n  that calls `brain` over D-Bus. PLAN.md compares the alternatives.\n* **Keys are resolved at capture time** with libxkbcommon and your real\n  layouts (us/il, Alt+Shift switching, layout changes from the tray), so\n  the log holds the characters the app received (`\"ש\"`, `\"H\"`), as in the\n  assignment's example event. Key repeat is regenerated on KDE's schedule.\n* **Held keys** are logged with the repeats KDE's schedule produces\n  (600 ms delay, then 25 Hz), exactly.\"\"\",\"\"\"* **Linux, KDE Plasma 6 and GNOME on Wayland.** Wayland gives applications\n  no way to observe other apps' keystrokes, so `brain` reads the kernel's\n  input devices (evdev) passively: read-only, never grabbed, so it cannot\n  add input lag. Focus (app + window title) comes from insid
+… [2264 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+11
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two more README spots need fixing: the session rules credit only KWin with distinguishing a title change from window activation, though the GNOME extension does this too. I'm also correcting the "Where the agent failed" section, which still has this round's slip about a probe that left a portal process running.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 236,242p README.md; python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"  continues: a change of the *same* window's title (KWin tells a title\n  change from a window activation)\"\"\",\"\"\"  continues: a change of the *same* window's title (the KWin script and\n  the GNOME extension tell a title change from a window activation)\"\"\"),\n(\"\"\"    The owner noticed it. Every test now uses such a guard and checks that\n    nothing is left running.\n\"\"\",\"\"\"    The owner noticed it. Every test now uses such a guard and checks that\n    nothing is left running.\n\"\"\"),\n])\ns=open('README.md').read()\ns=s.rstrip('\\n')+\"\"\"\n16. **A probe that left a process behind.** Trying a headless GNOME Shell\n    in a private D-Bus session, a desktop portal that bus had started\n    outlived the run. It found and stopped it; the GNOME test now runs the\n    private shell in its own systemd scope, gives its bus no services to\n    start, and checks that nothing on that bus survives.\n\"\"\"\nopen('README.md','w').write(s)\nEOF\ntail -8 README.md",
+  "description": "Fix the rename wording; add the probe slip to agent failures"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+`"oat milk\n- קפה x2"`. In Konsole, `git stauts⌫⌫⌫tus⏎`, `↑ -s⏎`,
+`rm -rf build` Ctrl+C, `echo "שלום" > out.txt⏎` give
+`"git status\ngit status -s\nrm -rf build\necho \"שלום\" > out.txt"`.
+
+## Sessions and reconstruction
+
+Ingest (inside `brain run`, about once a second) turns the log into
+    must exist on disk; the owner tried a new untitled file, which tier 2
+    always skips. The owner pointed it out, and it then listed every
+    condition the replay needs.
+16. **A probe that left a process behind.** Trying a headless GNOME Shell
+    in a private D-Bus session, a desktop portal that bus had started
+    outlived the run. It found and stopped it; the GNOME test now runs the
+    private shell in its own systemd scope, gives its bus no services to
+    start, and checks that nothing on that bus survives.
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:40:57.306Z</sub>
+
+Now PLAN.md. Several places still describe KDE as the only desktop:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'KDE Plasma 6 / Wayland\\|KWin script ──\\|GNOME Shell extension |\\|Decision: a KWin script\\|^\\*\\*Screen lock\\|^\\*\\*Paste\\|KDE Plasma\\s*$\\|KDE Plasma is one\\|KWin integration\\|Desktop scope\\|be a Shell extension\\|real_keyboard_e2e. type\\|Opt-in tests' PLAN.md | cut -c1-150",
+  "description": "Find PLAN passages that need GNOME"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+1:# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 / Wayland)
+17: KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
+145:| GNOME Shell extension | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install | Event-driven 
+148:**Decision: a KWin script that pushes focus changes into brain over D-Bus.**
+169:**Screen lock.** `org.freedesktop.ScreenSaver` `ActiveChanged` (and
+174:**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read from
+201:  resolution needs (layouts, layout switches, repeat schedule). KDE Plasma
+559:- **KWin integration** only reads window metadata and calls one D-Bus
+587:- **Opt-in tests against real software**: `repeat_e2e` and
+588:  `real_keyboard_e2e` type through a uinput keyboard into real Kate windows
+637:- **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
+638:  be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 145,182p PLAN.md; sed -n 198,206p PLAN.md; sed -n 556,562p PLAN.md; sed -n 585,600p PLAN.md; sed -n 635,642p PLAN.md",
+  "description": "Read the exact PLAN passages"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+| GNOME Shell extension | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install | Event-driven | The GNOME port of our design; out of scope |
+| `/proc` + compositor-agnostic heuristics | No | — | — | — | No way to know focus from process state |
+
+**Decision: a KWin script that pushes focus changes into brain over D-Bus.**
+(`src/capture/linux/kde.rs`, `kwin_focus.js`)
+
+- `brain run` claims `org.shadowassistant.Brain.p<pid>` on the session bus
+  and exports one method, `Activated(desktopFile, resourceClass, caption,
+  renamed)`.
+  It writes a small script and loads it through KWin's own
+  `org.kde.KWin /Scripting` interface. The script reports
+  `workspace.windowActivated` (`renamed = false`) and the active window's
+  `captionChanged` (`renamed = true`), and the current window right away.
+  Focus events in the log carry `"renamed": true` for title changes. Calls
+  from anyone but KWin's bus name are ignored.
+- The app id is the window's desktop file name (`org.kde.kate`,
+  `google-chrome`, `com.microsoft.VSCode`), falling back to the X11
+  resource class. Every key is stamped with the current app and window
+  title, so each log line is self-describing.
+- If KWin restarts (`NameOwnerChanged`), or is not up yet when brain starts
+  as a service, the script is loaded as soon as KWin's name appears. A
+  script left loaded by a `brain run` killed with -9 is unloaded by the next
+  start.
+
+**Screen lock.** `org.freedesktop.ScreenSaver` `ActiveChanged` (and
+`GetActive` at start): while locked, keys are still read (to keep modifier
+state right) but nothing is logged, so the unlock password never is. `lock`
+and `unlock` are logged, and the focus is re-stated after unlock.
+
+**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read from
+Klipper (`getClipboardContents`, 300 ms timeout, up to 64 KiB) and logged as a
+`paste` event right after the key. Copying alone is never recorded.
+
+**Sleep/wake.** logind's `PrepareForSleep` on the system bus: `sleep` and
+`wake` are logged, and on wake every keyboard is closed and reopened (held
+keys released). Tested with a real suspend through `systemctl suspend`.
+
+### 2.4 The platform layer
+  Everything else comes from a **`Desktop`** backend chosen at start from
+  `XDG_CURRENT_DESKTOP` (or the compositor's name on the session bus):
+  focus, clipboard, screen lock, and the keyboard settings the key
+  resolution needs (layouts, layout switches, repeat schedule). KDE Plasma
+  is one backend. A desktop without one still gets keys, attributed to
+  `unknown`, with a warning that its screen lock may not be detected.
+- The **synthetic** test source is another `Platform`.
+- `Cargo.toml` lists evdev and zbus as Linux-only dependencies, and a build
+  for another OS stops with a message pointing at the platform layer.
+  prompts (sudo in a terminal, web logins) cannot be told apart from typing
+  by key events alone (section 10).
+- **Clipboard**: read only on a paste shortc
+… [1652 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('PLAN.md',[\n(\"\"\"# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 / Wayland)\"\"\",\"\"\"# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 and GNOME, Wayland)\"\"\"),\n(\"\"\"| GNOME Shell extension | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install | Event-driven | The GNOME port of our design; out of scope |\"\"\",\"\"\"| GNOME Shell extension (chosen for GNOME) | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install; GNOME on Wayland loads a new one only at login | Event-driven | The GNOME port of the KWin design; `org.gnome.Shell.Eval` is disabled since GNOME 41 and `org.gnome.Shell.Introspect` is reserved for privileged callers, so an extension is the supported way |\"\"\"),\n(\"\"\"- If KWin restarts (`NameOwnerChanged`), or is not up yet when brain starts\n  as a service, the script is loaded as soon as KWin's name appears. A\n  script left loaded by a `brain run` killed with -9 is unloaded by the next\n  start.\n\"\"\",\"\"\"- If KWin restarts (`NameOwnerChanged`), or is not up yet when brain starts\n  as a service, the script is loaded as soon as KWin's name appears. A\n  script left loaded by a `brain run` killed with -9 is unloaded by the next\n  start.\n\n**On GNOME: brain's GNOME Shell extension.**\n(`packaging/gnome-extension/`, `src/capture/linux/gnome.rs`)\n\n- GNOME cannot load code at runtime the way KWin can (on Wayland, a new\n  extension needs a login), so the extension is installed once\n  (`make install`) and stays. It exports an object on GNOME Shell's own\n  session-bus connection: a `Focus(desktopFile, windowClass, title,\n  renamed)` signal on `notify::focus-window` and on the focused window's\n  `notify::title`, `InputSourceChanged`/`InputSourcesChanged` signals from\n  the Shell's input-source manager, and `Current`, `InputSource` and\n  `Clipboard` methods. brain accepts the signals only from the owner of\n  `org.gnome.Shell` and calls the methods on it, so no other program can\n  pose as the extension, and several `brain run`s can listen at once.\n- The app id is the window's desktop file (via `Shell.WindowTracker`), else\n  its Wayland app id, as on KDE. Ubuntu's snaps report ids such as\n  `firefox_firefox` and `code_code`.\n- Keyboard settings come from GSettings: the XKB input sources and options,\n  and the repeat delay and interval. GNOME (mutter) loads at most four\n  layouts per keymap and splits longer lists into groups of four; brain\n  mirrors that when following a switch.\n- Without the extension (not installed, or GNOME not yet restarted), brain\n  warns and captures keys under `unknown`; it picks the extension's signals\n  up as soon as it runs.\n\"\"\"),\n(\"\"\"**Screen lock.** `org.freedesktop.ScreenSaver` `ActiveChanged` (and\n`GetActive` at start): while locked,\"\"\",\"\"\"**Screen lock.** `ActiveChanged` (and `GetActive` at start) of\n`org.freedesktop.ScreenSaver` on KDE, `org.gnome.ScreenSaver` on GNOME\n(sent by GNOME Shell): while locked,\"\"\"),\n(\"\"\"**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read from\nKlipper (`getClipboardContents`, 300 ms timeout, up to 64 KiB) and logged as a\n`paste` event right after the key. Copying alone is never recorded.\"\"\",\"\"\"**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read\n(300 ms timeout, up to 64 KiB) and logged as a `paste` event right after the\nkey: from Klipper's `getClipboardContents` on KDE, from the extension's\n`Clipboard` method (`St.Clipboard`) on GNOME. Copying alone is never\nrecorded.\"\"\"),\n(\"\"\"  resolution needs (layouts, layout switches, repeat schedule). KDE Plasma\n  is one backend. A desktop without one still gets ke
+… [2687 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+````
+```
+ keyboards ──► input thread ──► Recorder ──► events.jsonl  (append-only, ground truth)
+ (evdev,         │ xkbcommon      ▲ app + window                │ ~1 s
+  passive)       │ key repeat     │ from KWin                   ▼
+                 ▼                │                       ingest thread ──► brain.db (SQLite WAL)
+ KWin script / GNOME ext ─D-Bus───┘                         │ sessions        sessions + FTS5 (trigram)
+ Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+                                                              checkpoints     log_checkpoints
+                    tier 2 worker (opt-in): VS Code diff / replay ──┘
+ brain query search ──► brain.db (read-only snapshot)
+ brain query text   ──► log_checkpoints → events.jsonl
+```
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('PLAN.md',[\n(\"\"\"  passive)       │ key repeat     │ from KWin                   ▼\"\"\",\"\"\"  passive)       │ key repeat     │ from the desktop            ▼\"\"\"),\n(\"\"\" Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state\"\"\",\"\"\" clipboard (paste text), screen lock, sleep, layouts ───────┘ reconstruction  context_state\"\"\"),\n])\nedit('CLAUDE.md',[\n(\"\"\"## Target platform\n\nUbuntu, **KDE Plasma 6 on Wayland** (KWin). Not GNOME. Keys come from evdev\n(`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon\n(`libxkbcommon.so.0`, linked by file name, so no `-dev` package is needed).\nFocus comes from a KWin script calling back over D-Bus.\"\"\",\"\"\"## Target platform\n\nUbuntu on Wayland with **KDE Plasma 6** (KWin) or **GNOME** (stock\nUbuntu), behind the platform layer (`src/capture/platform.rs`,\n`src/capture/linux/desktop.rs`). Keys come from evdev\n(`/dev/input/event*`, user in the `input` group), resolved with\nlibxkbcommon (`libxkbcommon.so.0`, linked by file name, so no `-dev`\npackage is needed). Focus comes from inside the compositor: a KWin script\nbrain loads on KDE, brain's GNOME Shell extension\n(`packaging/gnome-extension/`, installed by `make install`) on GNOME.\"\"\"),\n(\"\"\"- Search is substring matching (FTS5 trigram, case- and accent-insensitive),\"\"\",\"\"\"- Platforms: capture sits behind `Platform` / `Desktop` interfaces; only\n  KDE Plasma and GNOME on Ubuntu are supported for now. Other desktops get\n  keys under `unknown` with a warning that the lock screen may not be\n  detected (owner's choice: warn and continue, not refuse). On GNOME the\n  extension's `Clipboard` method may answer anyone, like Klipper (owner's\n  call). Tier 2 needs nothing desktop-specific.\n- Search is substring matching (FTS5 trigram, case- and accent-insensitive),\"\"\"),\n(\"\"\"  kde.rs, kwin_focus.js  KDE Plasma: KWin focus, Klipper, lock, layouts, repeat\"\"\",\"\"\"  kde.rs, kwin_focus.js  KDE Plasma: KWin focus, Klipper, lock, layouts, repeat\n  gnome.rs               GNOME: the extension's signals, its clipboard, lock,\n                         GSettings layouts and repeat\"\"\"),\n(\"\"\"- `brain run`s on separate data directories are supported side by side\"\"\",\"\"\"- `tests/gnome_e2e.rs` (`#[ignore]`) starts a private headless GNOME Shell\n  in its own D-Bus session, home and systemd scope (never the user's\n  desktop); its private shell must not get a login session, so it cannot\n  touch the real session's lock state. Run it after changing gnome.rs or\n  the extension.\n- `brain run`s on separate data directories are supported side by side\"\"\"),\n])\nEOF\ngrep -n 'packaging/\\|scripts/' CLAUDE.md | head; cargo fmt --check && echo fmt-ok",
+  "description": "Finish PLAN diagram; update CLAUDE.md for GNOME"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+22:(`packaging/gnome-extension/`, installed by `make install`) on GNOME. Tests that run by
+149:  `scripts/setup-test-permissions.sh`, and nobody touching the keyboard or
+fmt-ok
+[This command modified 1 file you've previously read: PLAN.md. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 13,28p CLAUDE.md",
+  "description": "Check the CLAUDE.md platform paragraph wrapping"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+## Target platform
+
+Ubuntu on Wayland with **KDE Plasma 6** (KWin) or **GNOME** (stock
+Ubuntu), behind the platform layer (`src/capture/platform.rs`,
+`src/capture/linux/desktop.rs`). Keys come from evdev
+(`/dev/input/event*`, user in the `input` group), resolved with
+libxkbcommon (`libxkbcommon.so.0`, linked by file name, so no `-dev`
+package is needed). Focus comes from inside the compositor: a KWin script
+brain loads on KDE, brain's GNOME Shell extension
+(`packaging/gnome-extension/`, installed by `make install`) on GNOME. Tests that run by
+default must not need hardware, a desktop or privileges: use
+`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only
+the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
+
+## Hard requirements (from the assignment) — never regress these
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='CLAUDE.md'; s=open(p).read()\nold=\"\"\"(`packaging/gnome-extension/`, installed by `make install`) on GNOME. Tests that run by\ndefault must not need hardware, a desktop or privileges: use\n`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only\nthe opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.\"\"\"\nnew=\"\"\"(`packaging/gnome-extension/`, installed by `make install`) on GNOME.\n\nTests that run by default must not need hardware, a desktop or privileges:\nuse `brain run --synthetic RATE` (hidden flag) to drive the real pipeline.\nOnly the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate, VS Code or a\nGNOME Shell.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt --check && echo fmt-ok; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -E '^warning' -A5 | head; cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Rewrap CLAUDE.md; lint, docs and full default suite",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fmt-ok
+0
+     Running unittests src/lib.rs 
+test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.85s
+     Running tests/gnome_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+[This command modified 1 file you've previously read: CLAUDE.md. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+All default tests pass, and the GNOME backend, extension, install script and docs are written. I'm now rerunning the KDE and GNOME real-desktop tests before committing.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "[ \"$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\" = \"false\" ] && echo unlocked && cargo test --release --test real_keyboard_e2e --test repeat_e2e --test two_instances --test gnome_e2e -- --ignored --nocapture --test-threads=1 2>&1 | grep -E 'kate [AB]|^a: |test result|panicked|timed out'; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') gnome=$(ps -eo args | grep -c '[g]nome-shell --headless') scopes=$(systemctl --user list-units --type=scope --no-pager | grep -c brain-gnome-test) layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"",
+  "description": "Run KDE desktop tests and the GNOME end-to-end test",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+unlocked
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.11s
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.11s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.45s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.28s
+leftover: brain=0 kate=0 gnome=0 scopes=0 layout=0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T10:44:46.435Z</sub>
+
+All four real-desktop suites pass (GNOME, the two Kate tests, two instances), with nothing left behind. Last, the VS Code tier-2 tests, since the VS Code id list changed:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'test result|panicked'; git add -A && git status --short",
+  "description": "Run the VS Code tier 2 replay tests; stage changes",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 47.22s
+M  CLAUDE.md
+M  Makefile
+M  PLAN.md
+M  README.md
+M  packaging/brain.service
+A  packaging/gnome-extension/brain@shadowassistant/extension.js
+A  packaging/gnome-extension/brain@shadowassistant/metadata.json
+A  scripts/gnome-extension.sh
+M  src/capture/linux/desktop.rs
+A  src/capture/linux/gnome.rs
+M  src/capture/linux/kde.rs
+M  src/capture/linux/mod.rs
+M  src/reconstruct/apps.rs
+M  src/reconstruct/vscode/title.rs
+A  tests/fixtures/gnome/brain-test-helper@shadowassistant/extension.js
+A  tests/fixtures/gnome/brain-test-helper@shadowassistant/metadata.json
+A  tests/fixtures/gnome/screensaver.py
+A  tests/fixtures/gnome/window.js
+A  tests/gnome_e2e.rs
+```
+
+</details>
+
