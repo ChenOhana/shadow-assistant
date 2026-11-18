@@ -36406,3 +36406,684 @@ eac3b8e Add a debug build target to the Makefile
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> 2>&1 | tail -3; git status --short | head; echo \"email hits: $(grep -rci '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; echo \"key hits: $(grep -rcE 'sk-ant-[A-Za-z0-9_-]{16,}' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"",
+  "description": "Refresh the AI logs and check them for the email and keys"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+agent-aa6364f0e0124dab2.jsonl -> ai-logs/raw/subagent-aa6364f0e0124dab2.jsonl (539 KiB), subagent-aa6364f0e0124dab2.md (23 KiB)
+agent-a8e3c9e477e3774ff.jsonl -> ai-logs/raw/subagent-a8e3c9e477e3774ff.jsonl (1266 KiB), subagent-a8e3c9e477e3774ff.md (170 KiB)
+agent-a14863ef2dc743064.jsonl -> ai-logs/raw/subagent-a14863ef2dc743064.jsonl (111 KiB), subagent-a14863ef2dc743064.md (8 KiB)
+ M ai-logs/raw/session-2.jsonl
+ M ai-logs/session-2.md
+email hits: 0
+key hits: 0
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add ai-logs && git commit -qm \"Refresh AI logs\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline -3 && git status -sb | head -1",
+  "description": "Commit the log refresh and push to origin"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fb2982c Refresh AI logs
+eac3b8e Add a debug build target to the Makefile
+cfc5dd3 Refresh AI logs
+## main...origin/main
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T19:49:20.380Z</sub>
+
+I pushed the Makefile change to `main` on GitHub, so local and remote are in sync.
+
+- `eac3b8e` adds the `build-debug` target.
+- `fb2982c` refreshes the `ai-logs`, as I've done before each push. I checked the refreshed logs: your email and API keys appear 0 times.
+
+`src/main.rs.preview.rs` is no longer in the working tree, so there's nothing left to clean up.
+
+## User  <sub>2026-11-18T19:56:09.761Z</sub>
+
+what about your worktree in .claude folder?
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls -la .claude 2>&1; ls -la .claude/worktrees 2>&1; git worktree list; git branch -a; grep -n \"claude\" .gitignore",
+  "description": "Inspect .claude folder, worktrees and branches"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+total 12
+drwxrwxr-x  3 juan juan 4096 Nov 15 23:07 .
+drwxrwxr-x 11 juan juan 4096 Nov 18 14:56 ..
+drwxrwxr-x  3 juan juan 4096 Nov 15 23:07 worktrees
+total 12
+drwxrwxr-x 3 juan juan 4096 Nov 15 23:07 .
+drwxrwxr-x 3 juan juan 4096 Nov 15 23:07 ..
+drwxrwxr-x 5 juan juan 4096 Nov 15 23:30 agent-a8e3c9e477e3774ff
+/home/juan/Documents/shadow-assistant                                           fb2982c [main]
+/home/juan/Documents/shadow-assistant/.claude/worktrees/agent-a8e3c9e477e3774ff 2d89872 [worktree-agent-a8e3c9e477e3774ff]
+* main
++ worktree-agent-a8e3c9e477e3774ff
+  remotes/origin/main
+4:/.claude
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "W=.claude/worktrees/agent-a8e3c9e477e3774ff; git -C $W status --short | head; echo \"---unmerged commits:\"; git log --oneline main..worktree-agent-a8e3c9e477e3774ff; echo \"---merge-base:\"; git merge-base main worktree-agent-a8e3c9e477e3774ff; git log -1 --format='%h %ad %s' 2d89872; du -sh $W; ls $W",
+  "description": "Check the worktree for uncommitted or unmerged work"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ M src/lib.rs
+?? src/reconstruct/
+?? tests/vscode_replay.rs
+---unmerged commits:
+---merge-base:
+2d89872db6c2047644ba777ec4afccb5ffc2ceda
+2d89872 Sun Nov 15 22:42:56 2026 +0200 Add Makefile to build and install brain
+1.4G	.claude/worktrees/agent-a8e3c9e477e3774ff
+CLAUDE.md
+Cargo.lock
+Cargo.toml
+Makefile
+README.md
+src
+target
+tests
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "W=.claude/worktrees/agent-a8e3c9e477e3774ff; git -C $W diff src/lib.rs; find $W/src/reconstruct $W/tests/vscode_replay.rs -type f | sed \"s|$W/||\" | while read f; do if [ -f \"$f\" ]; then echo \"$f: in main, $(diff -q $W/$f $f >/dev/null && echo identical || echo differs)\"; else echo \"$f: NOT in main\"; fi; done",
+  "description": "Compare the worktree's uncommitted files with main"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+diff --git a/src/lib.rs b/src/lib.rs
+index 792631c..1111900 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -8,5 +8,6 @@ pub mod datadir;
+ pub mod event;
+ pub mod eventlog;
+ pub mod ingest;
++pub mod reconstruct;
+ pub mod store;
+ pub mod timefmt;
+tests/vscode_replay.rs: in main, differs
+src/reconstruct/mod.rs: in main, differs
+src/reconstruct/vscode/mod.rs: in main, differs
+src/reconstruct/vscode/keys.rs: in main, differs
+src/reconstruct/vscode/cdp.rs: in main, identical
+src/reconstruct/vscode/title.rs: in main, differs
+src/reconstruct/vscode/diff.rs: in main, differs
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T19:56:29.879Z</sub>
+
+It's a leftover from Nov 15: the worktree of the subagent that wrote the first version of VS Code tier 2. It was never cleaned up. It isn't tracked or pushed, since `.gitignore` excludes `/.claude`, but it does take space on your disk.
+
+- **Location:** `.claude/worktrees/agent-a8e3c9e477e3774ff`, taking 1.4 GB, mostly its own `target/` build folder.
+- **Git still registers it:** `git worktree list` shows it, and it holds the local branch `worktree-agent-a8e3c9e477e3774ff`, which was never pushed.
+- **No commits of its own:** the branch still points at `2d89872` ("Add Makefile…"), which is already in `main`.
+- **Its uncommitted files are an early draft of what's now in `main`:** the `pub mod reconstruct;` line in `lib.rs`, plus `src/reconstruct/` and `tests/vscode_replay.rs`. Each of those files exists in `main` in a later version, and `cdp.rs` is unchanged. Nothing in the worktree is missing from `main`.
+
+The cleanup would be:
+
+```sh
+git worktree remove --force .claude/worktrees/agent-a8e3c9e477e3774ff
+git branch -D worktree-agent-a8e3c9e477e3774ff
+```
+
+`--force` is needed because of those uncommitted draft files, and it deletes them for good. That's 1.4 GB freed and the extra branch gone. Should I run it?
+
+## User  <sub>2026-11-18T19:57:06.830Z</sub>
+
+clean it
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git worktree remove --force .claude/worktrees/agent-a8e3c9e477e3774ff && git branch -D worktree-agent-a8e3c9e477e3774ff && rmdir .claude/worktrees .claude 2>/dev/null; git worktree list; git branch -a; ls -a .claude 2>&1 | head -2; git status -sb | head -1",
+  "description": "Remove the stale worktree and its branch"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+Deleted branch worktree-agent-a8e3c9e477e3774ff (was 2d89872).
+/home/juan/Documents/shadow-assistant fb2982c [main]
+* main
+  remotes/origin/main
+ls: cannot access '.claude': No such file or directory
+## main...origin/main
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T19:57:16.258Z</sub>
+
+I removed the leftover worktree and freed about 1.4 GB.
+
+- The worktree and its draft files are deleted.
+- The branch `worktree-agent-a8e3c9e477e3774ff` is deleted too; it pointed at `2d89872`, which is already in `main`.
+- With nothing left inside it, I removed the `.claude/` folder as well.
+- `git worktree list` now shows only the main checkout, and the only branches are `main` and `origin/main`.
+- `main` is in sync with GitHub, and nothing needed committing.
+
+## User  <sub>2026-11-18T20:34:09.772Z</sub>
+
+ai logs readme is not updated please update it with the correct information
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ls ai-logs ai-logs/raw | head -50; cat ai-logs/README.md",
+  "description": "List ai-logs contents and read its README"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+ai-logs:
+README.md
+design-doc.md
+raw
+session-1.md
+session-2.md
+subagent-a14863ef2dc743064.md
+subagent-a8e3c9e477e3774ff.md
+subagent-aa6364f0e0124dab2.md
+
+ai-logs/raw:
+session-1.jsonl
+session-2.jsonl
+subagent-a14863ef2dc743064.jsonl
+subagent-a8e3c9e477e3774ff.jsonl
+subagent-aa6364f0e0124dab2.jsonl
+# AI logs
+
+Everything the AI did on this project, as recorded.
+
+| File | What |
+|---|---|
+| `design-doc.md` | The design doc written with Claude on claude.ai before implementation ([live doc](https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9)). The design conversation itself lives on claude.ai. |
+| `session-1.md`, `session-2.md` | The Claude Code implementation session (one session, split in two when its context was compacted). |
+| `subagent-aa6364f0e0124dab2.md` | Background agent that drafted PLAN.md. |
+| `subagent-a8e3c9e477e3774ff.md` | Parallel agent that built the VS Code tier 2 adapter (`src/reconstruct/vscode/`). |
+| `raw/*.jsonl` | The complete raw transcripts the Markdown files are rendered from. |
+
+The Markdown files truncate long tool inputs and outputs; the raw JSONL
+files are complete. In both, the owner's email address is replaced with
+`<redacted>`. Regenerate with:
+
+```sh
+python3 -I scripts/export-ai-logs.py --redact <email> --redact <email-local-part>
+```
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,80p scripts/export-ai-logs.py; grep -n \"def \\|session-\\|subagent-\\|compact\" scripts/export-ai-logs.py | sed -n 1,60p",
+  "description": "Read the exporter to see how files are named and masked"
+}
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cd /home/juan/.claude/projects/-home-juan-Documents-shadow-assistant && ls -la *.jsonl */subagents 2>/dev/null | head; for f in */subagents/*.jsonl; do echo \"== $f\"; head -c 1500 \"$f\" | python3 -c \"import sys,json; l=sys.stdin.readline(); d=json.loads(l); m=d.get('message',{}); c=m.get('content'); print((c if isinstance(c,str) else json.dumps(c))[:600])\" 2>&1; done; ls */subagents/*.meta.json 2>/dev/null && cat */subagents/*.meta.json",
+  "description": "Check source transcripts and what each subagent was asked"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+#!/usr/bin/env python3
+"""Export the Claude Code transcripts of this project into ai-logs/.
+
+For every session transcript (and each subagent transcript under it):
+  ai-logs/raw/<name>.jsonl   the complete raw JSONL, redacted
+  ai-logs/<name>.md          a readable rendering: user and assistant
+                             messages, tool calls and (truncated) results
+
+Redaction replaces the given strings (e.g. an email address) everywhere,
+case-insensitively, in both outputs, and always masks anything shaped like
+an Anthropic API key or token (`sk-ant-...`) and every 10-character piece
+of such a key found anywhere (a session may quote part of it), so a key
+pasted into a session never reaches the repository.
+
+Usage (from the repository root):
+  python3 -I scripts/export-ai-logs.py --redact you@example.com \
+      [--src ~/.claude/projects/<project>] [--out ai-logs]
+"""
+
+import argparse
+import json
+import re
+from pathlib import Path
+
+MAX_TOOL_INPUT = 4000
+MAX_TOOL_RESULT = 3000
+
+
+# Always masked, whatever --redact says: Anthropic keys and tokens.
+KEY_SHAPE = re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}")
+# A key's pieces this long are masked too, wherever they appear (a session
+# may quote part of a key, for example in a search for it).
+KEY_PIECE = 10
+
+
+def key_pieces(texts):
+    """Every KEY_PIECE-character stretch of every key found in `texts`."""
+    pieces = set()
+    for text in texts:
+        for key in KEY_SHAPE.findall(text):
+            body = key[len("sk-ant-"):]
+            pieces |= {body[i:i + KEY_PIECE] for i in range(len(body) - KEY_PIECE + 1)}
+    return pieces
+
+
+def redactor(secrets, pieces=()):
+    pats = [KEY_SHAPE] + [re.compile(re.escape(s), re.IGNORECASE) for s in secrets if s]
+    if pieces:
+        pats.append(re.compile("|".join(map(re.escape, sorted(pieces, key=len, reverse=True)))))
+
+    def apply(text):
+        for p in pats:
+            text = p.sub("<redacted>", text)
+        return text
+
+    return apply
+
+
+def clip(text, limit):
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n… [{len(text) - limit} more characters in the raw transcript]"
+
+
+def fence(text):
+    # A fence longer than any backtick run inside the text.
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}\n{text}\n{ticks}"
+
+
+def block_text(content):
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content or []:
+        if isinstance(b, dict) and b.get("type") == "text":
+            parts.append(b.get("text", ""))
+        elif isinstance(b, dict) and b.get("type") == "image":
+            parts.append("[image]")
+36:def key_pieces(texts):
+46:def redactor(secrets, pieces=()):
+51:    def apply(text):
+59:def clip(text, limit):
+65:def fence(text):
+72:def block_text(content):
+84:def render(path, title):
+128:def main():
+146:        jobs.append((s, f"session-{i}", f"Claude Code session, part {i}"))
+151:        jobs.append((a, f"sub
+… [69 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+-rw------- 1 juan juan 21698389 Nov 18 22:34 64f49a65-18b0-4008-b3ba-157601d7795f.jsonl
+-rw------- 1 juan juan  4730892 Nov 18 13:31 70d0be81-1f0e-4efd-9c03-3be2eee3cc36.jsonl
+
+64f49a65-18b0-4008-b3ba-157601d7795f/subagents:
+total 132
+drwxrwxr-x 2 juan juan   4096 Nov 18 15:52 .
+drwxrwxr-x 3 juan juan   4096 Nov 15 23:30 ..
+-rw------- 1 juan juan 114567 Nov 18 15:52 agent-a14863ef2dc743064.jsonl
+-rw-rw-r-- 1 juan juan    291 Nov 18 15:52 agent-a14863ef2dc743064.meta.json
+lrwxrwxrwx 1 juan juan    142 Nov 15 23:30 agent-a8e3c9e477e3774ff.jsonl -> /home/juan/.claude/projects/-home-juan-Documents-shadow-assistant/70d0be81-1f0e-4efd-9c03-3be2eee3cc36/subagents/agent-a8e3c9e477e3774ff.jsonl
+== 64f49a65-18b0-4008-b3ba-157601d7795f/subagents/agent-a14863ef2dc743064.jsonl
+Read https://dev.to/mbayoun95/rust-clean-code-crafting-elegant-efficient-and-maintainable-software-27ce and give me a complete, structured list of every principle or recommendation it makes about clean Rust code. For each one: the principle's name/heading as the article states it, a one-to-two sentence summary of what it recommends, and any concrete rule or example it gives (e.g. naming conventions, function length, error handling approach, use of traits, ownership/borrowing advice, testing, documentation, tooling like clippy/rustfmt). Keep the article's own order. Don't add advice the article
+== 64f49a65-18b0-4008-b3ba-157601d7795f/subagents/agent-a8e3c9e477e3774ff.jsonl
+null
+== 70d0be81-1f0e-4efd-9c03-3be2eee3cc36/subagents/agent-a8e3c9e477e3774ff.jsonl
+null
+== 70d0be81-1f0e-4efd-9c03-3be2eee3cc36/subagents/agent-aa6364f0e0124dab2.jsonl
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sys,json; l=sys.stdin.readline(); d=json.loads(l); m=d.get('message',{}); c=m.get('content'); print((c if isinstance(c,str) else json.dumps(c))[:600])
+                                               ~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/json/decoder.py", line 361, in raw_decode
+    obj, end = self.scan_once(s, idx)
+               ~~~~~~~~~~~~~~^^^^^^^^
+json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 168 (char 167)
+64f49a65-18b0-4008-b3ba-157601d7795f/subagents/agent-a14863ef2dc743064.meta.json
+64f49a65-18b0-4008-b3ba-157601d7795f/subagents/agent-a8e3c9e477e3774ff.meta.json
+70d0be81-1f0e-4efd-9c03-3be2eee3cc36/subagents/agent-a8e3c9e477e3774ff.meta.json
+70d0be81-1f0e-4efd-9c03-3be2eee3cc36/subagents/agent-aa6364f0e0124dab2.meta.json
+{"agentType":"web-fetch","isBuiltIn":true,"description":"Summarize Rust clean code article","toolUseId":"toolu_01Ts1itVttrNppNnpPwmwJWb","spawnDepth":1,"requestShape":"foreground","requestNonInteract
+… [1280 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 128,175p scripts/export-ai-logs.py; for f in ~/.claude/projects/-home-juan-Documents-shadow-assistant/*.jsonl; do python3 -I - \"$f\" <<'EOF'\nimport sys,json\nts=[];c=0;first=None\nfor l in open(sys.argv[1]):\n    try:d=json.loads(l)\n    except:continue\n    if d.get('timestamp'):ts.append(d['timestamp'])\n    if d.get('isCompactSummary'):c+=1\n    if first is None and d.get('type')=='user' and isinstance(d.get('message',{}).get('content'),str): first=d['message']['content'][:150]\nprint(sys.argv[1][-50:], min(ts), max(ts), 'compactions:',c); print('  first:',first)\nEOF\ndone",
+  "description": "Read exporter main and summarize each session's span and compactions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+def main():
+    ap = argparse.ArgumentParser()
+    # Claude Code keeps a project's transcripts under a folder named after
+    # the project's path, with "/" replaced by "-".
+    default_src = Path.home() / ".claude/projects" / str(Path.cwd()).replace("/", "-")
+    ap.add_argument("--src", default=str(default_src))
+    ap.add_argument("--out", default="ai-logs")
+    ap.add_argument("--redact", action="append", default=[])
+    args = ap.parse_args()
+    src, out = Path(args.src), Path(args.out)
+    (out / "raw").mkdir(parents=True, exist_ok=True)
+
+    sessions = sorted(src.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    jobs = []
+    # A subagent resumed in a later session part has a copy under each part;
+    # the newest copy is the complete one.
+    agents = {}
+    for i, s in enumerate(sessions, 1):
+        jobs.append((s, f"session-{i}", f"Claude Code session, part {i}"))
+        for a in (src / s.stem / "subagents").glob("*.jsonl"):
+            if a.stem not in agents or a.stat().st_mtime > agents[a.stem].stat().st_mtime:
+                agents[a.stem] = a
+    for stem, a in sorted(agents.items(), key=lambda kv: kv[1].stat().st_mtime):
+        jobs.append((a, f"subagent-{stem.removeprefix('agent-')}", f"Subagent transcript {stem}"))
+    pieces = key_pieces(path.read_text(encoding="utf-8") for path, _, _ in jobs)
+    redact = redactor(args.redact, pieces)
+    for path, name, title in jobs:
+        raw = redact(path.read_text(encoding="utf-8"))
+        raw_out = out / "raw" / f"{name}.jsonl"
+        raw_out.write_text(raw, encoding="utf-8")
+        md = redact(render(raw_out, title))
+        (out / f"{name}.md").write_text(md, encoding="utf-8")
+        print(f"{path.name} -> {raw_out} ({len(raw) // 1024} KiB), {name}.md ({len(md) // 1024} KiB)")
+
+
+if __name__ == "__main__":
+    main()
+sistant/64f49a65-18b0-4008-b3ba-157601d7795f.jsonl 2026-11-15T17:15:18.971Z 2026-11-18T20:34:24.378Z compactions: 3
+  first: <artifact-content-authored-by-others/>
+The summarized conversation included Artifact content written by people other than you, which the summary may r
+sistant/70d0be81-1f0e-4efd-9c03-3be2eee3cc36.jsonl 2026-11-15T16:40:56.520Z 2026-11-15T21:30:51.267Z compactions: 1
+  first: i received a home assignment, see pdf in this folder. I have already built
+  a detailed design attached in this link: https://claude.ai/artifact/UTxCH
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git log --reverse --format='%ad %s' --date=format:'%m-%d %H:%M' | awk '{print}' | grep -v \"Refresh AI logs\" | sed -n '1,400p' | awk 'NR%1==0' | cut -c1-90 | head -150 | wc -l; git log --reverse --format='%ad %s' --date=format:'%m-%d %H:%M' | grep -v \"Refresh AI logs\" | awk '{d=$1; if(d!=p){print \"== \"d; p=d} print \"  \"$0}' | cut -c1-95",
+  "description": "List commits by day to map work to sessions"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+60
+== 11-15
+  11-15 19:14 Add crash-safe capture log, SQLite index and ingest
+  11-15 19:14 Capture keystrokes and focus in 'brain run'
+  11-15 19:14 Add kill -9 crash test, README and agent notes
+  11-15 22:42 Add Makefile to build and install brain
+  11-15 23:09 Resolve shortcuts on the Latin layout
+  11-15 23:09 Ignore touchpad swipes when detecting taps
+  11-15 23:21 Group events into sessions and reconstruct text
+  11-15 23:27 Make the synthetic source switch apps
+  11-15 23:44 Replay VS Code sessions in real VS Code (tier 2)
+  11-15 23:45 Update agent notes for sessions and tier 2
+== 11-16
+  11-16 11:38 Stop capturing the mouse
+  11-16 11:54 Drop backward compatibility code
+  11-16 13:10 Search by substring instead of word stems
+  11-16 13:19 Run brain as a systemd user service
+  11-16 13:34 Suspend through logind in the sleep/wake test
+  11-16 13:39 Strip animated status glyphs from window titles
+  11-16 13:46 Add AI logs, decisions and agent failures
+  11-16 14:02 Follow window titles renamed by typing
+  11-16 14:02 List the VS Code title bugs under agent failures
+  11-16 14:28 Fix extra repeats from held keys and stress test
+  11-16 14:49 Make the real-app repeat test robust
+  11-16 14:50 Reap the Kate launcher in the repeat test
+  11-16 16:48 Keep only global log checkpoints
+  11-16 16:54 Implement brain query search and text
+  11-16 17:33 Add resource budget and real keyboard tests
+  11-16 17:33 Add PLAN.md and finish the README
+  11-16 23:45 Tell window activations from title changes
+  11-16 23:45 Correct the mouse caveat in PLAN.md
+== 11-17
+  11-17 00:07 Show local times and full app ids in queries
+  11-17 11:05 Fix mismatches found in the final review
+  11-17 11:51 Make query text return reconstructed text
+  11-17 12:10 Revert reconstructed query text
+  11-17 12:46 Reconstruct the output of query text
+  11-17 13:09 Tidy docs after the query text change
+  11-17 15:07 Keep the service's data in its state directory
+  11-17 15:34 Find VS Code files opened outside the folder
+  11-17 16:27 Take VS Code session text from the saved file
+  11-17 16:28 List two more agent failures
+  11-17 17:06 Store a saved VS Code file's session as a diff
+  11-17 17:32 Give VS Code shortcut-only edits a session
+  11-17 18:16 Document the sleep/wake check as manual
+  11-17 18:24 Align docs and help with tier 2 as built
+== 11-18
+  11-18 11:21 Test two brain runs side by side
+  11-18 11:37 Show the VS Code replay instance on request
+  11-18 12:18 Put capture behind platform interfaces
+  11-18 12:45 Support stock Ubuntu's GNOME desktop
+  11-18 13:53 Re-report focus and layout when GNOME loads us
+  11-18 14:15 Record why the log is JSONL, not CBOR
+  11-18 14:51 Add query sessions and query apps
+  11-18 14:51 Add brain-chat, an LLM chat over brain's data
+  11-18 15:12 Always mask Anthropic keys in exported AI logs
+  11-18 15:14 Record brain-chat's first live check
+  11-18 15:16 Mask pieces of API keys in exported AI logs
+  11-18 15:33 Show right-to-left text in b
+… [344 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git show --stat 4a0 2>/dev/null | head -0; git log --format=%h -1 --grep=\"Add AI logs, decisions\" | xargs git show --stat | tail -8; grep -rln \"agent failures\\|Agent failures\" --include=*.md . | grep -v ai-logs/session | grep -v ai-logs/subagent | grep -v ai-logs/raw; grep -n \"ai-logs\" README.md PLAN.md CLAUDE.md | head",
+  "description": "Find related docs referencing ai-logs and agent failures"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ ai-logs/raw/subagent-a8e3c9e477e3774ff.jsonl |  257 +
+ ai-logs/raw/subagent-aa6364f0e0124dab2.jsonl |   44 +
+ ai-logs/session-1.md                         | 5970 ++++++++++++++++++++++
+ ai-logs/session-2.md                         | 6826 ++++++++++++++++++++++++++
+ ai-logs/subagent-a8e3c9e477e3774ff.md        | 2702 ++++++++++
+ ai-logs/subagent-aa6364f0e0124dab2.md        |  220 +
+ scripts/export-ai-logs.py                    |  138 +
+ 12 files changed, 19275 insertions(+), 3 deletions(-)
+(eval):1: no matches found: --include=*.md
+CLAUDE.md:9:(copy in `ai-logs/design-doc.md`). `PLAN.md` is the in-repo research and
+README.md:14:> the AI transcripts are in [ai-logs/](ai-logs/).
+README.md:580:caught. Transcripts are in `ai-logs/`.
+PLAN.md:7:original design doc is in `ai-logs/design-doc.md`, and the places where the
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T20:34:44.636Z</sub>
+
+Checked what's in `ai-logs/` against the README; now rewriting it.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n \"^## \\|^### \" README.md | sed -n '1,60p' | grep -i \"decision\\|fail\\|AI\\|agent\"; sed -n 570,582p README.md",
+  "description": "Find README sections on decisions and agent failures"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+254:## Ask in plain language: brain-chat
+369:## Decisions and edge cases
+576:## Where the agent failed
+# after the resume, brain prints how many keyboards it reopened;
+# type something in Kate, wait 30+ s, then:
+grep -E '"state":"(sleep|wake)"' /tmp/brain-sleep/events.jsonl
+brain query text --data-dir /tmp/brain-sleep              # shows the text typed after the resume
+```
+
+## Where the agent failed
+
+This project was built by Claude Code (Opus 5.5) with the owner reviewing
+every stage. These are the mistakes it made, in order, and how they were
+caught. Transcripts are in `ai-logs/`.
+
+1. **Wrong library assumption.** It wrote D-Bus code for zbus 6 with a
+````
+
+</details>
+
+**Tool call: `Write`**
+
+````
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/ai-logs/README.md",
+  "content": "# AI logs\n\nEverything the AI did on this project, as recorded. The design was written\nwith Claude on claude.ai. The implementation was done with Claude Code\n(Opus 5.5) in one conversation from Nov 15 to Nov 18, 2026, with the owner\napproving each stage. The mistakes it made are listed in the main README,\nunder [Where the agent failed](../README.md#where-the-agent-failed).\n\n| File | What |\n|---|---|\n| `design-doc.md` | The design doc written with Claude on claude.ai before implementation ([live doc](https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9)). The design conversation itself lives on claude.ai. |\n| `session-1.md` | The Claude Code conversation's first transcript (Nov 15): reading the assignment and the design, the crash-safe log, SQLite index and ingest, capture of keys and focus on KDE, the crash test, sessions and text reconstruction. It ends at the first context compaction, after the VS Code tier 2 agent was started. |\n| `session-2.md` | The same conversation, continued after that compaction (Nov 15 to 18). It covers the rest: tier 2, substring search, `brain query`, the systemd service, the test suites, PLAN.md and the README, the final reviews, the platform interfaces and GNOME support, `query sessions`/`apps`, brain-chat (with redaction and right-to-left text), the clean-code pass and the Makefile. The context was compacted three more times in it. Each compaction appears as a summary message, and the conversation continues after it. |\n| `subagent-aa6364f0e0124dab2.md` | A background agent that drafted PLAN.md's research and design sections. |\n| `subagent-a8e3c9e477e3774ff.md` | A background agent, forked into its own git worktree, that built the first VS Code tier 2 adapter (`src/reconstruct/vscode/`). The main conversation merged and reworked it, and its worktree has since been removed. |\n| `subagent-a14863ef2dc743064.md` | A web-fetch agent that summarized a Rust clean-code article ([dev.to](https://dev.to/mbayoun95/rust-clean-code-crafting-elegant-efficient-and-maintainable-software-27ce)), for the review that led to the clean-code pass. |\n| `raw/*.jsonl` | The complete raw transcripts the Markdown files are rendered from, under the same names. |\n\nThe Markdown files truncate long tool inputs and outputs; the raw JSONL\nfiles are complete. Both are redacted the same way. The owner's email\naddress becomes `<redacted>`. So does anything shaped like an Anthropic API\nkey (`sk-ant-…`), and so does every 10-character piece of such a key found\nanywhere in the transcripts (a session may quote part of a key). Regenerate\nfrom the repository root with:\n\n```sh\npython3 -I scripts/export-ai-logs.py --redact <email> --redact <email-local-part>\n```\n\nIt reads Claude Code's transcripts of this project\n(`~/.claude/projects/<project path with / as ->/`). It numbers the session\nfiles from oldest to newest, takes each subagent's newest copy (a subagent\nresumed later has a copy under each session), and rewrites everything in\n`ai-logs/` except this README and `design-doc.md`.\n"
+}
+````
+
+<details><summary>Tool result</summary>
+
+```
+The file /home/juan/Documents/shadow-assistant/ai-logs/README.md has been updated successfully. (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -c \"chenohana\" ai-logs/README.md; git add ai-logs/README.md && git commit -qm \"Bring the AI logs README up to date\n\nList the clean-code article subagent, describe what each session\ntranscript covers and that the conversation was compacted several\ntimes, note the tier 2 agent's removed worktree, and document the API\nkey masking and how the exporter names and selects files.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git log --oneline -1",
+  "description": "Check README for the email and commit it"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+cbd43c0 Bring the AI logs README up to date
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T20:35:11.314Z</sub>
+
+I rewrote `ai-logs/README.md` so it matches what's actually in the folder. I checked it against the transcript files and how the export script works.
+
+**What was wrong or missing:**
+- **A transcript wasn't listed:** `subagent-a14863ef2dc743064.md`, the helper agent that summarized the Rust clean-code article for the review.
+- **The sessions were described too loosely.** It's one conversation (Nov 15–18) saved in two transcript files:
+  - `session-1` covers Nov 15, up to the first point where the conversation's context was compacted, shortly after the VS Code tier 2 agent was started.
+  - `session-2` covers everything after. It was compacted three more times; each time appears as a summary message, and the conversation continues after it.
+  - Each now has a short list of the work it contains.
+- **The tier 2 agent's entry:** it now says the agent worked in its own git worktree, that its work was merged and reworked, and that the worktree is gone.
+- **Redaction was incomplete.** The README only mentioned your email. It now also says that API keys, and any 10-character piece of a key, are masked.
+
+**Added:**
+- A one-line overview: the design was made on claude.ai, and the build was done in Claude Code with you approving each stage.
+- A link to "Where the agent failed" in the main README.
+- How the export script picks and names the files.
+- A note that regenerating the logs leaves `README.md` and `design-doc.md` alone, so this rewrite won't be overwritten.
+
+It's committed locally as `cbd43c0`, not pushed. Should I push it?
+
+## User  <sub>2026-11-18T20:35:45.442Z</sub>
+
+push it
+
