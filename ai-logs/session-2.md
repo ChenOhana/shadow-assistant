@@ -24076,3 +24076,415 @@ leftover: brain=0 kate=0 layout=0
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add tests README.md PLAN.md CLAUDE.md && git commit -q -F - <<'EOF'\nTest two brain runs side by side\n\nThe owner decided to support several `brain run`s on separate data\ndirectories (a test run next to the service), with tests only and no\nchange to brain itself.\n\n`tests/two_instances.rs` runs two synthetic captures together: each\nfolder answers its own queries, a third run on a folder in use is\nrefused with a message and leaves the first writing, and a kill -9 of\none leaves the other running. Afterwards nothing exists outside the two\nfolders, each log has only its own start/stop markers, the editor\nsession ended by the restart is only in the killed run's index, and\neach index equals a rebuild of its own log. An opt-in desktop test runs\ntwo real captures against Kate: both log the same focus and keys and\nreconstruct the same text, and a clean stop or kill -9 of one never\nunloads the other's KWin script.\n\nThe rebuild comparison moved from crash_safety into tests/common, and\nreal_keyboard_e2e's layout setup into a shared helper. The docs state\nthe support and one known gap left unfixed by choice: after a kill -9,\nthe stale-script cleanup goes by `brain_focus_<pid>`, so a run that\nreused that pid would lose its script.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2; git status --short | wc -l",
+  "description": "Commit, refresh ai-logs, push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+de800f1 Refresh AI logs
+99ace78 Test two brain runs side by side
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:21:30.766Z</sub>
+
+Running several `brain run`s on separate folders is now supported and tested, with no change to brain itself; nothing under `src/` was touched. It's pushed (`99ace78`), and `ai-logs/` is refreshed.
+
+**`tests/two_instances.rs`** has two tests:
+- **Synthetic** (default, 1.4 s; passed 5 runs out of 5): two runs on folders `a` and `b` work at once, and each folder's own index answers queries. Then:
+  - **Same folder:** a third run on `a` is refused with "another `brain run` is already using…", and `a` keeps writing.
+  - **Kill one:** after `kill -9` of A, B keeps running, and A restarts on its folder.
+  - **Isolation:**
+    - nothing exists outside the two folders;
+    - A's log has `start, start, stop` and B's has `start, stop`;
+    - the editor session closed by the restart is only in A's index;
+    - each database's ingest offset equals its own log's size;
+    - each database matches a rebuild of its own log.
+- **Real desktop** (`#[ignore]`, 8 s; passed while your own `brain run` service was also running, so three captures at once):
+  - both captures log the same Kate focus change and keys, and both reconstruct `hello`;
+  - after A stops cleanly, A's KWin script is unloaded and B's is still loaded, so B keeps seeing focus changes;
+  - after B is killed with `kill -9` and restarted, its leftover script is unloaded and focus tracking still works;
+  - no brain script is left in KWin at the end.
+
+**Test code tidied:**
+- The "index equals a rebuild of its log" check moved from `crash_safety` into `tests/common`, so both tests use the same code.
+- `real_keyboard_e2e`'s keyboard-layout setup became a shared helper. I reran that test and it passes.
+
+**Docs:** the README, PLAN.md and CLAUDE.md now say separate folders can run side by side, each recording everything, and list the new tests. Since you asked for no logic changes, the KWin script-name gap stays and is documented as a limitation. After a `kill -9`, the restart unloads the leftover script by its process-id name. If another run has meanwhile been started with that same reused process id, that run loses focus tracking until it restarts. Adding the start time to the script name would close it, if you ever want it.
+
+All default suites pass, and nothing was left behind. To run the desktop test yourself:
+```sh
+cargo test --release --test two_instances -- --ignored --nocapture
+```
+
+## User  <sub>2026-11-18T09:25:49.397Z</sub>
+
+let's add an option to run the headless tests not headless with a flag so i can see what's happening. tell me what you are going to change first, which files
+
+## Assistant  <sub>2026-11-18T09:26:10.258Z</sub>
+
+Before listing changes, I'll check how the VS Code tests start VS Code and where "headless" is set.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'headless\\|env_clear\\|\\.env(\\|env_remove\\|WAYLAND\\|DISPLAY\\|XDG_RUNTIME\\|DBUS_SESSION' src/reconstruct/vscode/mod.rs | head -30; grep -n 'pub fn new\\|pub fn with_\\|pub struct VsCodeReplayer' -A3 src/reconstruct/vscode/mod.rs | head -30; grep -n 'VsCodeReplayer::new\\|Tier2Worker::spawn' tests/*.rs src -r | head",
+  "description": "Find headless flags, environment handling and constructors"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+11://! - **No display server.** Electron's headless Ozone backend
+12://!   (`--ozone-platform=headless`): nothing is drawn on screen and no Xvfb or
+19://!   (`DBUS_SESSION_BUS_ADDRESS` points nowhere) so nothing pops up on the
+418:        cmd.arg("--ozone-platform=headless")
+437:            // A headless window counts as hidden; without these Chromium
+448:                cmd.env_remove(&k);
+451:        cmd.env_remove("DISPLAY")
+452:            .env_remove("WAYLAND_DISPLAY")
+453:            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
+454:            .env("HOME", &home)
+455:            .env("XDG_CONFIG_HOME", home.join(".config"))
+456:            .env("XDG_DATA_HOME", home.join(".local/share"))
+457:            .env("XDG_CACHE_HOME", home.join(".cache"));
+205:pub struct VsCodeReplayer {
+206-    work_dir: PathBuf,
+207-    inst: Option<Instance>,
+208-    ids: Arc<Mutex<Option<Ids>>>,
+--
+218:    pub fn new(work_dir: PathBuf) -> Self {
+219-        Self {
+220-            work_dir,
+221-            inst: None,
+tests/tier2_e2e.rs:98:    let worker = Tier2Worker::spawn(db_path.clone(), log_path.clone(), vscode_dir, tx).unwrap();
+tests/tier2_e2e.rs:259:    let worker = Tier2Worker::spawn(db_path.clone(), log_path.clone(), vscode_dir, tx).unwrap();
+tests/tier2_e2e.rs:386:            let worker = Tier2Worker::spawn(
+tests/vscode_replay.rs:107:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:127:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:144:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:160:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:179:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:189:    let mut r = VsCodeReplayer::new(tmp.path().join("vscode"));
+tests/vscode_replay.rs:229:    let mut r = VsCodeReplayer::new(work.clone());
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 410,460p src/reconstruct/vscode/mod.rs; grep -n 'fn send_keys\\|delay\\|sleep' src/reconstruct/vscode/mod.rs | head",
+  "description": "Read the VS Code launch arguments"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+                "--",
+            ]);
+            c.arg(&unshare);
+            c
+        } else {
+            Command::new(&unshare)
+        };
+        cmd.args(["--map-current-user", "-n"]).arg(&bin);
+        cmd.arg("--ozone-platform=headless")
+            .arg("--remote-debugging-pipe")
+            .arg(format!("--user-data-dir={}", user_data.display()));
+        match &extensions {
+            Some(dir) => cmd.arg(format!("--extensions-dir={}", dir.display())),
+            None => cmd
+                .arg(format!(
+                    "--extensions-dir={}",
+                    self.work_dir.join("no-extensions").display()
+                ))
+                .arg("--disable-extensions"),
+        };
+        cmd.args([
+            "--disable-workspace-trust",
+            "--skip-welcome",
+            "--skip-release-notes",
+            "--disable-telemetry",
+            "--disable-crash-reporter",
+            "--disable-gpu",
+            // A headless window counts as hidden; without these Chromium
+            // throttles its timers and input handling like a background tab.
+            "--disable-renderer-backgrounding",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--password-store=basic",
+            "--new-window",
+        ]);
+        for (k, _) in std::env::vars_os() {
+            let ks = k.to_string_lossy();
+            if ks.starts_with("VSCODE_") || ks.starts_with("ELECTRON_") {
+                cmd.env_remove(&k);
+            }
+        }
+        cmd.env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY")
+            .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", home.join(".config"))
+            .env("XDG_DATA_HOME", home.join(".local/share"))
+            .env("XDG_CACHE_HOME", home.join(".cache"));
+        let log = std::fs::File::create(self.work_dir.join("vscode.log"))?;
+        cmd.stdin(Stdio::null())
+            .stdout(log.try_clone()?)
+330:        std::thread::sleep(POLL);
+346:            sleep_until(deadline, POLL)?;
+531:                std::thread::sleep(Duration::from_millis(5));
+614:        sleep_until(deadline, Duration::from_millis(100))?;
+641:        sleep_until(deadline, Duration::from_millis(100))?;
+673:        sleep_until(deadline, POLL)?;
+766:        std::thread::sleep(POLL);
+770:fn sleep_until(deadline: Instant, d: Duration) -> Result<()> {
+775:    std::thread::sleep(d);
+811:            std::thread::sleep(SHORTCUT_SETTLE);
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:26:40.686Z</sub>
+
+The visible mode needs one change in brain's own code, because the `--ozone-platform=headless` choice is made where the replayer launches VS Code, not in the tests. Here's the plan.
+
+**How you'd use it**
+```sh
+BRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
+```
+It's an environment variable rather than a command-line flag because `cargo test` passes unknown `--flags` to the test runner, which rejects them. An environment variable is the standard way to pass a switch into tests.
+
+**Files**
+1. **`src/reconstruct/vscode/mod.rs`**, the launch code only (about 10 lines):
+   - When `BRAIN_VSCODE_VISIBLE=1` is set, start VS Code with `--ozone-platform=wayland` instead of `--ozone-platform=headless`, and keep `WAYLAND_DISPLAY` instead of removing it. VS Code then opens as a normal window on your desktop.
+   - Everything else in the sandbox stays: no network (Wayland is a local socket file, so it works without network access), the session bus stays cut, and the CPU and memory caps still apply.
+   - When the variable isn't set, nothing changes. The module doc mentions the variable.
+2. **`tests/vscode_replay.rs`, `tests/tier2_e2e.rs`**: their top comments say how to run them visibly. No test logic changes.
+3. **`README.md`** (Tests section) and **`CLAUDE.md`**: one line each with the command.
+
+No change to `tier2.rs`, capture, or anything else.
+
+**What you'll see**
+- A VS Code window opens and takes focus. Each job opens its file, the keys are typed in, it saves, and the window closes when the test ends. Don't type while it runs: the keys are sent to VS Code directly, not through the keyboard, but your typing could land in that window.
+- It's fast: about 22 ms per key under the CPU cap, so a typical test is over in a couple of seconds once VS Code has started.
+- **Side effect:** the variable also applies to `brain run --vscode-replay` if it's set in that environment. That's handy for watching a real replay; I'll document it.
+- **Alternative:** a constructor option that only the tests set would keep the variable out of brain's code. But it would mean changing `Tier2Worker::spawn` and its caller in `capture/mod.rs` too, so it touches more logic code.
+
+**One decision for you:** do you also want an optional slow-down so you can follow each keystroke, for example `BRAIN_VSCODE_KEY_DELAY_MS=150`? It's one more variable in the same file. I'd also raise the replay timeout by the delay, so slowed tests don't time out. Should I go ahead, with or without the slow-down?
+
+## User  <sub>2026-11-18T09:29:07.722Z</sub>
+
+go ahead with the env variable, no need slow down
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,20p tests/vscode_replay.rs; sed -n 1,10p tests/tier2_e2e.rs",
+  "description": "Read the test file headers"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Tier-2 replay against the real VS Code. Ignored by default (they need
+//! /usr/bin/code and take a few seconds each):
+//!
+//!     cargo test --test vscode_replay -- --ignored --test-threads=1
+
+use brain::event::Mod;
+use brain::reconstruct::vscode::{ReplayEvent, ReplayInput, VsCodeReplayer};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+/// One instance at a time keeps the machine responsive and timings honest.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+const TIMEOUT: Duration = Duration::from_secs(60);
+
+fn key(k: &str) -> ReplayEvent {
+    let shift = k.chars().count() == 1
+        && k.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase() || "~!@#$%^&*()_+{}|:\"<>?".contains(c));
+//! End to end through ingest: a VS Code session in the log is snapshotted
+//! when it opens, marked pending when it closes, replayed by the worker in a
+//! real (sandboxed, headless) VS Code, and its tier 2 text written back.
+//!
+//! The replay tests need /usr/bin/code, so they are ignored by default:
+//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.
+//! The saved-file tests need no VS Code and run with `cargo test`.
+
+use brain::event::{Event, EventKind, Mod, SystemState};
+use brain::eventlog::LogWriter;
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/reconstruct/vscode/mod.rs',[\n(\"\"\"//! - **No display server.** Electron's headless Ozone backend\n//!   (`--ozone-platform=headless`): nothing is drawn on screen and no Xvfb or\n//!   nested compositor is needed.\"\"\",\"\"\"//! - **No display server.** Electron's headless Ozone backend\n//!   (`--ozone-platform=headless`): nothing is drawn on screen and no Xvfb or\n//!   nested compositor is needed. To watch replays, set\n//!   `BRAIN_VSCODE_VISIBLE=1`: VS Code then opens as a normal Wayland window\n//!   (the Wayland socket is a file, so the network namespace does not block\n//!   it); everything else about the sandbox stays the same.\"\"\"),\n(\"\"\"        cmd.args([\"--map-current-user\", \"-n\"]).arg(&bin);\n        cmd.arg(\"--ozone-platform=headless\")\n            .arg(\"--remote-debugging-pipe\")\"\"\",\"\"\"        cmd.args([\"--map-current-user\", \"-n\"]).arg(&bin);\n        let visible = std::env::var_os(VISIBLE_ENV).is_some_and(|v| v == \"1\");\n        cmd.arg(if visible {\n            \"--ozone-platform=wayland\"\n        } else {\n            \"--ozone-platform=headless\"\n        })\n        .arg(\"--remote-debugging-pipe\")\"\"\"),\n(\"\"\"        cmd.env_remove(\"DISPLAY\")\n            .env_remove(\"WAYLAND_DISPLAY\")\n            .env(\"DBUS_SESSION_BUS_ADDRESS\", \"unix:path=/dev/null\")\"\"\",\"\"\"        cmd.env_remove(\"DISPLAY\");\n        if !visible {\n            cmd.env_remove(\"WAYLAND_DISPLAY\");\n        }\n        cmd.env(\"DBUS_SESSION_BUS_ADDRESS\", \"unix:path=/dev/null\")\"\"\"),\n])\ns=open('src/reconstruct/vscode/mod.rs').read()\ni=s.index(\"pub struct VsCodeReplayer {\")\n# insert const before the struct's doc comment block\nj=s.rfind(\"\\n\\n\",0,i)\ns=s[:j]+\"\\n\\n/// Set to `1` to show the replay instance as a normal window (for watching\\n/// tests or replays) instead of running it headless.\\npub const VISIBLE_ENV: &str = \\\"BRAIN_VSCODE_VISIBLE\\\";\"+s[j:]\nopen('src/reconstruct/vscode/mod.rs','w').write(s)\nedit('tests/vscode_replay.rs',[(\"\"\"//!     cargo test --test vscode_replay -- --ignored --test-threads=1\"\"\",\"\"\"//!     cargo test --test vscode_replay -- --ignored --test-threads=1\n//!\n//! To watch VS Code while they run, add `BRAIN_VSCODE_VISIBLE=1` in front\n//! (don't type meanwhile: the window takes focus).\"\"\")])\nedit('tests/tier2_e2e.rs',[(\"\"\"//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`.\"\"\",\"\"\"//! `cargo test --release --test tier2_e2e -- --ignored --test-threads=1`\n//! (with `BRAIN_VSCODE_VISIBLE=1` in front, VS Code is shown instead).\"\"\")])\nedit('README.md',[(\"\"\"# Replay into a real (headless) VS Code, incl. a file opened from outside\n# the window's folder, identified late through VS Code's window state:\ncargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1\"\"\",\"\"\"# Replay into a real (headless) VS Code, incl. a file opened from outside\n# the window's folder, identified late through VS Code's window state:\ncargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1\n# The same, with VS Code shown as a normal window to watch the replays\n# (don't type meanwhile: it takes focus):\nBRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1\"\"\")])\nedit('CLAUDE.md',[(\"\"\"  (`tier2_e2e`'s saved-file tests need no VS Code and run by default).\"\"\",\"\"\"  (`tier2_e2e`'s saved-file tests need no VS Code and run by default).\n  `BRAIN_VSCODE_VISIBLE=1` shows the replay instance as a normal window\n  instead of headless (also for `brain run --vscode-replay`).\"\"\")])\nEOF\ngrep -n 'VISIBLE_ENV' -B4 src/reconstruct/vscode/mod.rs | head -12; cargo fmt && cargo clipp
+… [193 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+206-}
+207-
+208-/// Set to `1` to show the replay instance as a normal window (for watching
+209-/// tests or replays) instead of running it headless.
+210:pub const VISIBLE_ENV: &str = "BRAIN_VSCODE_VISIBLE";
+--
+421-        } else {
+422-            Command::new(&unshare)
+423-        };
+424-        cmd.args(["--map-current-user", "-n"]).arg(&bin);
+425:        let visible = std::env::var_os(VISIBLE_ENV).is_some_and(|v| v == "1");
+0
+[This command modified 4 files you've previously read: README.md, src/reconstruct/vscode/mod.rs, tests/vscode_replay.rs, tests/tier2_e2e.rs. Call Read before editing.]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 200,218p src/reconstruct/vscode/mod.rs",
+  "description": "Check the constant placement"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    }
+}
+
+struct Instance {
+    child: Child,
+    cdp: Cdp,
+}
+
+/// Set to `1` to show the replay instance as a normal window (for watching
+/// tests or replays) instead of running it headless.
+pub const VISIBLE_ENV: &str = "BRAIN_VSCODE_VISIBLE";
+
+pub struct VsCodeReplayer {
+    work_dir: PathBuf,
+    inst: Option<Instance>,
+    ids: Arc<Mutex<Option<Ids>>>,
+    last_used: Instant,
+    job_seq: u64,
+    /// Whether `systemd-run --user --scope` works here (probed once).
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:29:38.907Z</sub>
+
+Now to verify. First the headless runs are unchanged, then one test in visible mode. A VS Code window will appear on your screen for about 25 s:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'test result|FAILED|panicked'; echo \"locked: $(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\"",
+  "description": "Run the headless VS Code tests unchanged",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 48.30s
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 234.13s
+locked: false
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:34:52.685Z</sub>
+
+The headless runs are unchanged: 14 of 14 pass. Now one test in visible mode. While it runs I'll check that VS Code really started as a Wayland window and not headless:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "(for i in $(seq 1 60); do p=$(pgrep -f 'ozone-platform=wayland.*remote-debugging-pipe' | head -1); if [ -n \"$p\" ]; then echo \"visible instance: pid $p, WAYLAND_DISPLAY=$(tr '\\0' '\\n' </proc/$p/environ 2>/dev/null | grep -c '^WAYLAND_DISPLAY=') ozone=$(tr '\\0' ' ' </proc/$p/cmdline | grep -o 'ozone-platform=[a-z]*')\"; break; fi; sleep 0.5; done) & BRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay -- --ignored --test-threads=1 vscode_auto_close_and_auto_indent 2>&1 | grep -E 'test result|FAILED|panicked'; wait; echo \"leftover vscode: $(pgrep -fc 'remote-debugging-pip[e]')\"",
+  "description": "Run one test visibly and confirm a Wayland window instance",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+visible instance: pid 812790, WAYLAND_DISPLAY=1 ozone=ozone-platform=wayland
+ozone-platform=
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 29.03s
+leftover vscode: 1
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:35:34.995Z</sub>
+
+The window started as a real Wayland window and the test passed. The "leftover: 1" is suspicious, though: it's most likely my own shell command matching its search pattern. Checking properly:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "ps -eo pid,args | grep -E '[c]ode.*remote-debugging-pipe|[b]rain-vscode' | cut -c1-120; echo \"(end)\"; systemctl --user list-units --type=scope --no-pager | grep -c brain-vscode",
+  "description": "Recheck for leftover VS Code instances"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ 813102 /usr/bin/zsh -c source /home/juan/.claude/shell-snapshots/snapshot-zsh-1794778271008-qw1a1t.sh 2>/dev/null || tr
+ 813104 /usr/bin/zsh -c source /home/juan/.claude/shell-snapshots/snapshot-zsh-1794778271008-qw1a1t.sh 2>/dev/null || tr
+(end)
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:35:39.693Z</sub>
+
+Only my own shell matched. No VS Code instance or sandbox scope is left. Committing:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'test result|FAILED|panicked' | grep -v 'ok\\.' ; echo \"default suite done\"; git add -A src tests README.md CLAUDE.md && git commit -q -F - <<'EOF'\nShow the VS Code replay instance on request\n\nThe owner wants to watch the VS Code replay tests. With\nBRAIN_VSCODE_VISIBLE=1, the replay instance starts with\n--ozone-platform=wayland and keeps WAYLAND_DISPLAY, so it opens as a\nnormal window; the Wayland socket is a file, so the network namespace,\nthe cut session bus and the CPU/memory caps all stay. Unset, nothing\nchanges. It is an environment variable because `cargo test` hands\nunknown flags to the test harness, which rejects them; it also applies\nto `brain run --vscode-replay`.\n\nChecked: the 14 VS Code tests pass headless as before, and one runs\nvisible with the instance on Wayland and nothing left behind.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\npython3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -2",
+  "description": "Run default suite, commit, refresh ai-logs, push",
+  "timeout": 600000
+}
+```
+
