@@ -16,12 +16,14 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
+/// A brain data directory and the files in it.
 #[derive(Debug, Clone)]
 pub struct DataDir {
     root: PathBuf,
 }
 
 impl DataDir {
+    /// The data directory at `root` (nothing is created yet).
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
     }
@@ -55,15 +57,19 @@ impl DataDir {
         Ok(())
     }
 
+    /// The directory itself.
     pub fn root(&self) -> &Path {
         &self.root
     }
+    /// `events.jsonl`, the capture log.
     pub fn log_path(&self) -> PathBuf {
         self.root.join("events.jsonl")
     }
+    /// `brain.db`, the SQLite index.
     pub fn db_path(&self) -> PathBuf {
         self.root.join("brain.db")
     }
+    /// `run.lock`, held by the running `brain run`.
     pub fn lock_path(&self) -> PathBuf {
         self.root.join("run.lock")
     }
@@ -72,6 +78,7 @@ impl DataDir {
         self.root.join("vscode")
     }
 
+    /// `kwin/`, where the KWin focus script is written (KDE).
     pub fn kwin_dir(&self) -> PathBuf {
         self.root.join("kwin")
     }

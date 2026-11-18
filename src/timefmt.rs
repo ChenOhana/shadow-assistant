@@ -13,10 +13,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Milliseconds since the Unix epoch, UTC.
 pub type Millis = i64;
 
+/// The wall clock, epoch ms.
 pub fn now_ms() -> Millis {
     system_time_ms(SystemTime::now())
 }
 
+/// `t` as epoch ms (0 for times before the epoch).
 pub fn system_time_ms(t: SystemTime) -> Millis {
     match t.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_millis() as Millis,

@@ -16,8 +16,11 @@ use std::collections::{HashMap, HashSet};
 /// Compositor key-repeat settings (the desktop backend reads them).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RepeatConfig {
+    /// Whether held keys repeat at all.
     pub enabled: bool,
+    /// Delay before the first repeat, in ms.
     pub delay_ms: Millis,
+    /// Repeats per second after the delay.
     pub rate_hz: f64,
 }
 
@@ -54,10 +57,12 @@ struct Held {
 }
 
 impl Repeater {
+    /// A repeater on schedule `cfg`, nothing held.
     pub fn new(cfg: RepeatConfig) -> Self {
         Self { cfg, held: None }
     }
 
+    /// A repeating key went down at `ts`: it repeats from `ts + delay`.
     pub fn on_press(&mut self, code: u16, ts: Millis) {
         if self.cfg.enabled {
             self.held = Some(Held {
@@ -67,12 +72,14 @@ impl Repeater {
         }
     }
 
+    /// `code` was released: it stops repeating if it was the one repeating.
     pub fn on_release(&mut self, code: u16) {
         if self.held.is_some_and(|h| h.code == code) {
             self.held = None;
         }
     }
 
+    /// Stops any repeat (a modifier changed, the device went away).
     pub fn cancel(&mut self) {
         self.held = None;
     }
@@ -97,9 +104,13 @@ impl Repeater {
 /// A resolved key event, ready to be recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyOut {
+    /// When the key happened (or the repeat was due), epoch ms.
     pub ts: Millis,
+    /// The character or key name, as the app received it.
     pub key: String,
+    /// Modifiers held.
     pub mods: Vec<Mod>,
+    /// A synthesized repeat.
     pub repeat: bool,
 }
 
@@ -112,6 +123,7 @@ pub struct KeyProcessor {
 }
 
 impl KeyProcessor {
+    /// A processor with keymap `kb` and repeat schedule `repeat`, nothing held.
     pub fn new(kb: Keyboard, repeat: RepeatConfig) -> Self {
         Self {
             kb,
@@ -126,10 +138,12 @@ impl KeyProcessor {
         self.kb = kb;
     }
 
+    /// Selects layout `index` of the keymap (a layout switch on the desktop).
     pub fn set_layout_index(&mut self, index: u32) {
         self.kb.set_layout_index(index);
     }
 
+    /// When the next repeat is due, if a key is repeating: the input loop's poll timeout.
     pub fn deadline(&self) -> Option<Millis> {
         self.repeater.deadline()
     }

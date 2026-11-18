@@ -18,9 +18,11 @@ pub const MAX_PASTE_BYTES: usize = 64 * 1024;
 
 /// Reads the clipboard at paste time.
 pub trait ClipboardSource: Send + Sync {
+    /// The clipboard text, or `None` if it cannot be read in time.
     fn read(&self) -> Option<String>;
 }
 
+/// No clipboard (synthetic input, no desktop): pastes are logged without text.
 pub struct NoClipboard;
 impl ClipboardSource for NoClipboard {
     fn read(&self) -> Option<String> {
@@ -28,9 +30,12 @@ impl ClipboardSource for NoClipboard {
     }
 }
 
+/// What has focus: the app and its window title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Focus {
+    /// The app id (`org.kde.konsole`), or `unknown`.
     pub app: String,
+    /// The window title.
     pub window: String,
 }
 
@@ -52,6 +57,7 @@ struct Inner {
 /// A thread to wake, and which apps' focus changes wake it.
 type FocusWake = (std::thread::Thread, fn(&str) -> bool);
 
+/// The sink every input source writes to: it stamps each key with the focused app and window, appends it to the log in one `write(2)`, reads the clipboard on a paste shortcut, and drops input while the screen is locked.
 pub struct Recorder {
     inner: Mutex<Inner>,
     clipboard: Box<dyn ClipboardSource>,
@@ -63,6 +69,7 @@ pub struct Recorder {
 }
 
 impl Recorder {
+    /// A recorder appending to `log`, reading pastes from `clipboard`.
     pub fn new(log: LogWriter, clipboard: Box<dyn ClipboardSource>) -> Self {
         Self {
             inner: Mutex::new(Inner {
@@ -102,6 +109,7 @@ impl Recorder {
         }
     }
 
+    /// What has focus now.
     pub fn focus(&self) -> Focus {
         self.lock().focus.clone()
     }
@@ -177,6 +185,7 @@ impl Recorder {
         }
     }
 
+    /// Writes a lifecycle marker (start, stop, sleep, wake) under the focused app.
     pub fn system(&self, state: SystemState) {
         let mut g = self.lock();
         let app = g.focus.app.clone();

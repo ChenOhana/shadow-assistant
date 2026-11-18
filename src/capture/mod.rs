@@ -42,17 +42,20 @@ use std::time::Duration;
 /// How often ingest tails the log (and fdatasyncs it).
 pub const INGEST_INTERVAL: Duration = Duration::from_secs(1);
 
+/// How `brain run` runs.
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
     /// Test hook: type a built-in corpus at this many keys per second instead
     /// of reading input devices (see [`linux::synthetic`]). Desktop
     /// integration is off.
     pub synthetic_rate: Option<f64>,
-    /// Reconstruct VS Code sessions by replaying them into a sandboxed VS
-    /// Code (tier 2). Off by default.
+    /// Reconstruct VS Code sessions with the real editor (tier 2): a diff
+    /// of the saved file, otherwise a replay in a sandboxed VS Code. Off by
+    /// default.
     pub vscode_replay: bool,
 }
 
+/// Runs capture, ingest and (optionally) tier 2 until SIGINT, SIGTERM or SIGHUP, then stops in order: input, final ingest.
 pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
     // Block termination signals before any thread exists, so every thread
     // inherits the mask and only `wait_for_signal` on the main thread sees them.

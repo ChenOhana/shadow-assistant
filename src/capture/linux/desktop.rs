@@ -38,10 +38,13 @@ pub trait Desktop {
 
 /// What a desktop backend reports into.
 pub struct DesktopContext<'a> {
+    /// Where focus, lock and paste events go.
     pub recorder: Arc<Recorder>,
     /// The input thread, for layout switches and keymap changes.
     pub input: ControlHandle,
+    /// The system bus, if reachable.
     pub system_bus: Option<Connection>,
+    /// The data directory (the KWin script is written there).
     pub data_dir: &'a DataDir,
 }
 

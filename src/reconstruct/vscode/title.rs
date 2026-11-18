@@ -39,11 +39,13 @@ const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", ".venv", "dist", 
 const MAX_DEPTH: usize = 8;
 const MAX_ENTRIES: usize = 20_000;
 
+/// Whether `app` is VS Code (or a build of it).
 pub fn is_vscode(app: &str) -> bool {
     let app = app.to_ascii_lowercase();
     VSCODE_APP_IDS.contains(&app.as_str())
 }
 
+/// Whether the title shows unsaved changes (VS Code's `●` marker).
 pub fn title_is_dirty(window_title: &str) -> bool {
     window_title.trim_start().starts_with(DIRTY_MARKER)
 }

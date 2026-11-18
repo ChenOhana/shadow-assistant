@@ -17,19 +17,32 @@ const MAX_UNDO: usize = 200;
 /// Lines moved by PageUp/PageDown (the real distance depends on window size).
 const PAGE_LINES: usize = 30;
 
+/// A cursor movement, in characters and logical lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Motion {
+    /// One character left.
     Left,
+    /// One character right.
     Right,
+    /// One line up, keeping the column.
     Up,
+    /// One line down, keeping the column.
     Down,
+    /// To the start of the line (Home).
     LineStart,
+    /// To the end of the line (End).
     LineEnd,
+    /// To the start of the text (Ctrl+Home).
     DocStart,
+    /// To the end of the text (Ctrl+End).
     DocEnd,
+    /// `PAGE_LINES` lines up (the real distance depends on the window).
     PageUp,
+    /// `PAGE_LINES` lines down.
     PageDown,
+    /// To the start of the previous word (Ctrl+Left).
     WordLeft,
+    /// To the end of the next word (Ctrl+Right).
     WordRight,
 }
 
@@ -54,6 +67,7 @@ enum GroupKind {
     Other,
 }
 
+/// One text field's modelled state: text, cursor, selection and undo history.
 #[derive(Debug, Clone, Default)]
 pub struct TextBuffer {
     text: Vec<char>,
@@ -68,6 +82,7 @@ pub struct TextBuffer {
 }
 
 impl TextBuffer {
+    /// An empty buffer, cursor at the start.
     pub fn new() -> Self {
         Self::default()
     }
@@ -84,22 +99,27 @@ impl TextBuffer {
         }
     }
 
+    /// The whole text.
     pub fn text(&self) -> String {
         self.text.iter().collect()
     }
 
+    /// Length in characters.
     pub fn len(&self) -> usize {
         self.text.len()
     }
 
+    /// Whether the text is empty.
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
+    /// Cursor position, in characters from the start.
     pub fn cursor(&self) -> usize {
         self.cursor
     }
 
+    /// The other end of the selection, if any (the selection is `anchor..cursor`).
     pub fn anchor(&self) -> Option<usize> {
         self.anchor
     }
@@ -143,6 +163,7 @@ impl TextBuffer {
         self.replace(start, end, chars, kind);
     }
 
+    /// Deletes the selection, else the character (or `word`) before the cursor.
     pub fn backspace(&mut self, word: bool) {
         if let Some((s, e)) = self.selection() {
             return self.replace(s, e, Vec::new(), GroupKind::Other);
@@ -158,6 +179,7 @@ impl TextBuffer {
         self.replace(start, self.cursor, Vec::new(), GroupKind::Deleting);
     }
 
+    /// Deletes the selection, else the character (or `word`) after the cursor.
     pub fn delete(&mut self, word: bool) {
         if let Some((s, e)) = self.selection() {
             return self.replace(s, e, Vec::new(), GroupKind::Other);
@@ -289,6 +311,7 @@ impl TextBuffer {
         }
     }
 
+    /// Undoes the last edit group (about a word of typing).
     pub fn undo(&mut self) {
         let Some(g) = self.undo.pop() else { return };
         for e in g.edits.iter().rev() {
@@ -302,6 +325,7 @@ impl TextBuffer {
         self.redo.push(g);
     }
 
+    /// Redoes the last undone edit group.
     pub fn redo(&mut self) {
         let Some(g) = self.redo.pop() else { return };
         for e in &g.edits {
@@ -369,6 +393,7 @@ impl TextBuffer {
         }
     }
 
+    /// Selects the whole text, cursor at the end.
     pub fn select_all(&mut self) {
         self.open_group = None;
         if self.text.is_empty() {

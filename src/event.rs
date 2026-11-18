@@ -16,15 +16,21 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// App id used when no window is focused or the focus source is unavailable.
 pub const UNKNOWN_APP: &str = "unknown";
 
+/// One line of the capture log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
+    /// When it happened, epoch ms (RFC 3339 UTC in the log); for a key, the
+    /// kernel's timestamp of the key event.
     #[serde(serialize_with = "ser_ts", deserialize_with = "de_ts")]
     pub ts: Millis,
+    /// The focused app's id (`org.kde.konsole`), or `unknown`.
     pub app: String,
+    /// What happened.
     #[serde(flatten)]
     pub kind: EventKind,
 }
 
+/// The kinds of events, tagged by `type` in the JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum EventKind {
@@ -35,14 +41,18 @@ pub enum EventKind {
         key: String,
         /// Modifiers held, in canonical order: shift, ctrl, alt, super, altgr.
         mods: Vec<Mod>,
+        /// An auto-repeat synthesized on the desktop's schedule, not a new press.
         #[serde(default, skip_serializing_if = "is_false")]
         repeat: bool,
+        /// The focused window's title when the key was pressed.
         window: String,
     },
     /// A window was activated, or (`renamed: true`) the focused window's
     /// title changed.
     Focus {
+        /// The window's title.
         window: String,
+        /// The same window's title changed (not another window activated).
         #[serde(default, skip_serializing_if = "is_false")]
         renamed: bool,
     },
@@ -50,31 +60,49 @@ pub enum EventKind {
     /// right after the key event that triggered it. `None` when the clipboard
     /// could not be read.
     Paste {
+        /// The clipboard text (up to 64 KiB), or `None` if it could not be read.
         text: Option<String>,
+        /// The focused window's title.
         window: String,
     },
     /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.
-    System { state: SystemState },
+    System {
+        /// Which marker.
+        state: SystemState,
+    },
 }
 
+/// A modifier key held with a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mod {
+    /// Shift.
     Shift,
+    /// Control.
     Ctrl,
+    /// Alt.
     Alt,
+    /// Super (the Windows/Meta key).
     Super,
+    /// AltGr (ISO level 3).
     Altgr,
 }
 
+/// A lifecycle marker in the log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SystemState {
+    /// `brain run` started (without a `stop` before it, it crashed).
     Start,
+    /// `brain run` stopped cleanly.
     Stop,
+    /// The machine is going to sleep.
     Sleep,
+    /// The machine woke up (keyboards were reopened).
     Wake,
+    /// The screen locked: nothing is recorded until `unlock`.
     Lock,
+    /// The screen unlocked.
     Unlock,
 }
 

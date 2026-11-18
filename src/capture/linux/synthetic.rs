@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 /// The synthetic source as a [`Platform`]: types at `rate` key presses per
 /// second on the US layout.
 pub struct Synthetic {
+    /// Key presses per second.
     pub rate: f64,
 }
 
@@ -74,8 +75,11 @@ impl Capture for SyntheticCapture {
     }
 }
 
+/// The app the synthetic editor window belongs to.
 pub const SYNTHETIC_APP: &str = "synthetic";
+/// The synthetic editor window's title.
 pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
+/// The app id of the synthetic terminal (a real terminal class, so Enter commits).
 pub const SYNTHETIC_TERMINAL: &str = "org.kde.konsole";
 const COMMANDS: [&str; 3] = ["git status", "cargo test", "ls -la"];
 

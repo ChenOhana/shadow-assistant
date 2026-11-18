@@ -1,3 +1,8 @@
+//! The `brain` command line: `brain run` captures until stopped, `brain query`
+//! answers from the captured data and prints JSON. This file only parses the
+//! arguments and reports errors (on stderr, exit code 1); the work is in the
+//! library ([`brain::capture`], [`brain::query`]).
+
 use anyhow::Result;
 use brain::datadir::DataDir;
 use clap::{Parser, Subcommand};

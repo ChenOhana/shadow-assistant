@@ -30,8 +30,11 @@ const CLOCK_SLACK_MS: Millis = 60_000;
 /// The `--at`, `--from` and `--to` flags, as given (see [`timefmt::parse_user_time_at`]).
 #[derive(Debug, Clone, Default)]
 pub struct TimeFlags {
+    /// `--at T`: the 10 minutes ending at T.
     pub at: Option<String>,
+    /// `--from T`: start of the window (alone: up to now).
     pub from: Option<String>,
+    /// `--to T`: end of the window.
     pub to: Option<String>,
 }
 
@@ -47,8 +50,11 @@ enum Command {
 /// A resolved time window; `None` bounds are open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Window {
+    /// Start, inclusive (epoch ms); `None` is open.
     pub from: Option<Millis>,
+    /// End, inclusive (epoch ms); `None` is open.
     pub to: Option<Millis>,
+    /// T when the window came from `--at T`, echoed in the output.
     pub at: Option<Millis>,
 }
 
@@ -184,22 +190,33 @@ fn like_contains(s: &str) -> String {
 
 // ---- search ---------------------------------------------------------------
 
+/// One `query search` hit.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct SearchResult {
+    /// The session's row id, as a string (the assignment's format).
     pub session_id: String,
+    /// The app id (`org.kde.konsole`).
     pub app: String,
+    /// The session's window title, normalized.
     pub window: String,
+    /// When the session started, local time (RFC 3339).
     pub started_at: String,
     /// `None` while the session is still open.
     pub ended_at: Option<String>,
+    /// About 40 characters on each side of the first match, on one line.
     pub snippet: String,
 }
 
+/// `query search` output.
 #[derive(Debug, Serialize)]
 pub struct SearchOutput {
+    /// The query as given.
     pub query: String,
+    /// The resolved window's start, local time; `None` if open.
     pub from: Option<String>,
+    /// The resolved window's end, local time; `None` if open.
     pub to: Option<String>,
+    /// Newest first, at most `--limit`.
     pub results: Vec<SearchResult>,
 }
 
@@ -319,29 +336,42 @@ fn find(hay: &[char], needle: &[char]) -> Option<usize> {
 
 // ---- sessions ---------------------------------------------------------------
 
+/// One `query sessions` row.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Session {
+    /// The session's row id, as a string.
     pub session_id: String,
+    /// The app id.
     pub app: String,
+    /// The session's window title, normalized.
     pub window: String,
+    /// When the session started, local time (RFC 3339).
     pub started_at: String,
     /// `None` while the session is still open.
     pub ended_at: Option<String>,
     /// `idle`, `commit` (a submitted line, e.g. a shell command), `cancel`,
     /// `field`, `stop` or `restart`; `None` while open.
     pub end_reason: Option<String>,
+    /// The session's reconstructed text (the live text while open).
     pub text: String,
 }
 
+/// `query sessions` output: one page of the matching sessions.
 #[derive(Debug, Serialize)]
 pub struct SessionsOutput {
+    /// The `--app` filter, as given.
     pub app: Option<String>,
+    /// The `--window` filter, as given.
     pub window: Option<String>,
+    /// The resolved window's start, local time; `None` if open.
     pub from: Option<String>,
+    /// The resolved window's end, local time; `None` if open.
     pub to: Option<String>,
     /// How many sessions match in all (the page is `offset..offset+limit`).
     pub total: u64,
+    /// How many matching sessions this page skipped (`--offset`).
     pub offset: usize,
+    /// Oldest first, at most `--limit`.
     pub sessions: Vec<Session>,
 }
 
@@ -417,19 +447,27 @@ pub fn sessions(
 
 // ---- apps -------------------------------------------------------------------
 
+/// One `query apps` row.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct App {
+    /// The app id, as `--app` accepts it.
     pub app: String,
+    /// How many sessions it has in the window.
     pub sessions: u64,
+    /// When its first session in the window started, local time.
     pub first_started_at: String,
     /// When its last session in the window ended (or started, if still open).
     pub last_active_at: String,
 }
 
+/// `query apps` output.
 #[derive(Debug, Serialize)]
 pub struct AppsOutput {
+    /// The resolved window's start, local time; `None` if open.
     pub from: Option<String>,
+    /// The resolved window's end, local time; `None` if open.
     pub to: Option<String>,
+    /// Most recently active first.
     pub apps: Vec<App>,
 }
 
@@ -464,21 +502,29 @@ pub fn apps(dir: &DataDir, flags: &TimeFlags, now: Millis) -> Result<AppsOutput>
 
 // ---- text -----------------------------------------------------------------
 
+/// `query text` output.
 #[derive(Debug, Serialize)]
 pub struct TextOutput {
+    /// The app's full id (resolved from `--app`).
     pub app: String,
+    /// T when the window came from `--at T`, local time.
     pub at: Option<String>,
+    /// The resolved window's start, local time.
     pub from: Option<String>,
+    /// The resolved window's end, local time.
     pub to: Option<String>,
     /// The windows' texts, one per line.
     pub text: String,
+    /// Each window's text, in order of its first keystroke in the range.
     pub windows: Vec<TextWindow>,
 }
 
 /// One window's reconstructed text.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct TextWindow {
+    /// The window title, normalized.
     pub window: String,
+    /// What was typed in it during the range, reconstructed.
     pub text: String,
 }
 

@@ -80,7 +80,9 @@ pub struct LayoutSpec {
     pub layout: String,
     /// Comma-separated, positionally matching `layout`.
     pub variant: String,
+    /// The keyboard model (`pc105`); empty means the XKB default.
     pub model: String,
+    /// Comma-separated XKB options (`grp:alt_shift_toggle`).
     pub options: String,
 }
 
@@ -99,6 +101,7 @@ pub struct Keyboard {
 unsafe impl Send for Keyboard {}
 
 impl Keyboard {
+    /// Compiles the keymap for `spec` with libxkbcommon.
     pub fn new(spec: &LayoutSpec) -> Result<Self> {
         // SAFETY: plain FFI constructor; null is checked.
         let ctx = NonNull::new(unsafe { xkb_context_new(0) })
@@ -134,6 +137,7 @@ impl Keyboard {
         };
         // SAFETY: keymap is valid.
         let Some(state) = NonNull::new(unsafe { xkb_state_new(keymap.as_ptr()) }) else {
+            // SAFETY: keymap and ctx are valid and owned; neither is used again.
             unsafe {
                 xkb_keymap_unref(keymap.as_ptr());
                 xkb_context_unref(ctx.as_ptr());
@@ -208,6 +212,7 @@ impl Keyboard {
         sym
     }
 
+    /// Whether `evdev_code` repeats when held, per the keymap.
     pub fn key_repeats(&self, evdev_code: u16) -> bool {
         // SAFETY: keymap is valid.
         unsafe {
@@ -235,6 +240,7 @@ impl Keyboard {
         out
     }
 
+    /// How many layouts the keymap has.
     pub fn num_layouts(&self) -> u32 {
         // SAFETY: keymap is valid.
         unsafe { xkb_keymap_num_layouts(self.keymap.as_ptr()) }

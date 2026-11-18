@@ -73,7 +73,10 @@ pub enum Tier2Start {
     /// Not a VS Code session, or replay is off.
     NotApplicable,
     /// The edited file was copied to the snapshot path for this session.
-    Snapshot { file: PathBuf },
+    Snapshot {
+        /// The edited file.
+        file: PathBuf,
+    },
     /// The file cannot be identified yet (VS Code records newly opened files
     /// with a delay); ask again later.
     NotYet(String),
@@ -163,6 +166,8 @@ pub trait Tier2Snapshotter: Send {
     /// its file before any key, in case it is saved before the session's
     /// own snapshot is taken.
     fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}
+    /// Copies the file of the session `session_id` that opened at
+    /// `started_at` in a window titled `raw_title`, or says why not.
     fn snapshot(
         &self,
         app: &str,
@@ -198,6 +203,7 @@ fn text_hash(s: &str) -> u64 {
     h.finish()
 }
 
+/// The session engine: groups logged events into sessions and keeps their text, inside the ingest transaction (see the module docs).
 pub struct Sessions {
     open: HashMap<Key, OpenSession>,
     /// A plain Ctrl+V in a terminal at this (app, window, ts): drop the paste.
@@ -730,6 +736,7 @@ impl Sessions {
         )
     }
 
+    /// Removes the snapshot of a session that will never get a tier 2 job.
     pub fn discard_snapshot(&self, id: i64) {
         if let Some(t2) = &self.tier2 {
             t2.discard(id);

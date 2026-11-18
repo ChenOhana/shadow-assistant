@@ -28,6 +28,7 @@ pub const CHECKPOINT_INTERVAL_MS: Millis = 5_000;
 /// Upper bound on lines per transaction, which bounds memory use and commit latency.
 pub const MAX_LINES_PER_STEP: usize = 5_000;
 
+/// Tails the capture log into the SQLite index (see the module docs).
 pub struct Ingester {
     conn: Connection,
     log_path: PathBuf,
@@ -40,10 +41,14 @@ pub struct Ingester {
     tier2_jobs: Vec<i64>,
 }
 
+/// What one ingest step did.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct StepStats {
+    /// Complete log lines read.
     pub lines: usize,
+    /// Lines that were not valid events (skipped).
     pub invalid_lines: usize,
+    /// Log checkpoints written.
     pub checkpoints: usize,
 }
 
@@ -51,10 +56,12 @@ pub struct StepStats {
 pub type Clock = fn() -> Millis;
 
 impl Ingester {
+    /// An ingester without tier 2, resuming at the offset stored in `conn`.
     pub fn new(conn: Connection, log_path: &Path) -> Result<Self> {
         Self::with_tier2(conn, log_path, None)
     }
 
+    /// An ingester with tier 2 snapshots (`brain run --vscode-replay`), resuming at the offset stored in `conn`.
     pub fn with_tier2(
         conn: Connection,
         log_path: &Path,
@@ -88,6 +95,7 @@ impl Ingester {
         })
     }
 
+    /// The log offset ingested up to (bytes).
     pub fn offset(&self) -> u64 {
         self.offset
     }
@@ -108,6 +116,7 @@ impl Ingester {
         self.step_at(timefmt::now_ms)
     }
 
+    /// [`Self::step`] with the given clock for idle timeouts (fixed in tests).
     pub fn step_at(&mut self, clock: Clock) -> Result<StepStats> {
         let r = self.try_step(clock);
         if r.is_err() {
@@ -192,6 +201,7 @@ impl Ingester {
         Ok(stats)
     }
 
+    /// The database connection (tests read it).
     pub fn connection(&self) -> &Connection {
         &self.conn
     }

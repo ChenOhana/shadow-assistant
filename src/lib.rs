@@ -5,6 +5,10 @@
 //! [`store`] with full-text index) → [`query`] (`search` over sessions, `text`
 //! over the log).
 
+// Every public item is documented; with clippy's zero-warnings rule this
+// keeps it so.
+#![warn(missing_docs)]
+
 pub mod capture;
 pub mod datadir;
 pub mod event;

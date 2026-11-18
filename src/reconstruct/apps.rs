@@ -4,6 +4,7 @@
 //! prompt, a chat compose box, a browser's address/search bar) or inserts a
 //! newline (editors and everything unknown), and which shortcuts mean what.
 
+/// The kind of app, which decides what Enter and shortcuts mean (tier 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppClass {
     /// Shell prompts: readline editing, history, Enter runs the line.

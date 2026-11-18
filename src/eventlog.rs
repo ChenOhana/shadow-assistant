@@ -24,6 +24,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+/// The only writer of a capture log (see the module docs for the crash-safety rules).
 pub struct LogWriter {
     file: File,
     path: PathBuf,
@@ -80,6 +81,7 @@ impl LogWriter {
         self.len
     }
 
+    /// Whether the log has no events yet.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }

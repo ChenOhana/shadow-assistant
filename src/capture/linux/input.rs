@@ -37,10 +37,11 @@ const SYN_DROPPED: u16 = 3;
 pub enum Control {
     /// Close and re-open all devices (after resume from sleep).
     Reopen,
-    /// KDE's layout switcher changed the active layout.
+    /// The desktop's layout switcher changed the active layout.
     SetLayout(u32),
     /// Replace the keymap (the layout list changed).
     SetKeyboard(Box<super::xkb::Keyboard>),
+    /// Stop the loop (brain is shutting down); held keys are released.
     Stop,
 }
 
@@ -52,6 +53,7 @@ pub struct ControlHandle {
 }
 
 impl ControlHandle {
+    /// Sends `msg` and wakes the input thread.
     pub fn send(&self, msg: Control) {
         if self.tx.send(msg).is_ok() {
             let one: u64 = 1;
@@ -67,6 +69,7 @@ struct Device {
     dev: RawDevice,
 }
 
+/// The input thread's state: the open keyboards, the inotify watch for hotplug, and the key processing.
 pub struct InputLoop {
     devices: Vec<Device>,
     next_id: u32,
@@ -80,6 +83,7 @@ pub struct InputLoop {
 }
 
 impl InputLoop {
+    /// A loop feeding `recorder` through `keys`, and the handle other threads control it with.
     pub fn new(keys: KeyProcessor, recorder: Arc<Recorder>) -> Result<(Self, ControlHandle)> {
         // SAFETY: plain syscalls; return values are checked.
         let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
@@ -88,6 +92,7 @@ impl InputLoop {
         }
         // SAFETY: `wake` is a fresh, owned fd.
         let wake = Arc::new(unsafe { OwnedFd::from_raw_fd(wake) });
+        // SAFETY: plain syscall; the return value is checked.
         let inotify = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         if inotify < 0 {
             return Err(std::io::Error::last_os_error()).context("inotify_init1");
@@ -97,6 +102,8 @@ impl InputLoop {
         let dir = CString::new(INPUT_DIR).unwrap();
         // IN_ATTRIB: udev applies the `input` group permissions after creating
         // the node, so a device may only become openable on that event.
+        // SAFETY: `inotify` is an open fd and `dir` a NUL-terminated path that
+        // outlives the call; the return value is checked.
         let wd = unsafe {
             libc::inotify_add_watch(
                 inotify.as_raw_fd(),
@@ -141,6 +148,7 @@ impl InputLoop {
         Ok(())
     }
 
+    /// How many keyboards are open.
     pub fn keyboard_count(&self) -> usize {
         self.devices.len()
     }

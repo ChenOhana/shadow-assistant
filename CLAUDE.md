@@ -120,7 +120,10 @@ tests/                   integration tests that drive the real binary;
   migration, compatibility shims or legacy-format handling. Test data
   directories can be deleted and recreated.
 - `cargo fmt`, `cargo clippy --all-targets` (zero warnings) and `cargo test`
-  before every commit. Run `cargo test --release --test crash_safety` when
+  before every commit. Every public item has a `///` doc saying what it
+  means (units, where a value comes from), not restating its name:
+  `#![warn(missing_docs)]` in lib.rs makes a missing one a warning.
+  Every `unsafe` block has its own `// SAFETY:` comment. Run `cargo test --release --test crash_safety` when
   touching the log, ingest or store.
 - Keep the hot path (input thread) free of allocation-heavy work, blocking
   I/O other than the single log `write(2)`, and SQLite.

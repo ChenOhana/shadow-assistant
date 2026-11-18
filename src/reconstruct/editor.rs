@@ -5,27 +5,45 @@ use super::apps::AppClass;
 use super::buffer::{Motion, TextBuffer};
 use crate::event::Mod;
 
+/// What a key does to the text, decided per app class from the key and its modifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    /// Typed text, replacing the selection.
     Insert(String),
+    /// Backspace (Ctrl+Backspace: a word).
     Backspace {
+        /// Delete a word (Ctrl), not one character.
         word: bool,
     },
+    /// Delete, forward (Ctrl+Delete: a word).
     Delete {
+        /// Delete a word (Ctrl), not one character.
         word: bool,
     },
+    /// Cursor movement (arrows, Home/End, Ctrl+arrows, PageUp/PageDown).
     Move {
+        /// Where the cursor goes.
         motion: Motion,
+        /// Shift held: extend the selection instead of moving.
         extend: bool,
     },
+    /// Ctrl+A in fields that select all (not in terminals, where it is line start).
     SelectAll,
+    /// Ctrl+X: the selection is removed (and goes to the clipboard).
     Cut,
+    /// Ctrl+Z (Ctrl+_ in terminals).
     Undo,
+    /// Ctrl+Shift+Z or Ctrl+Y.
     Redo,
+    /// Ctrl+U in a terminal: delete to the start of the line.
     KillLineStart,
+    /// Ctrl+K in a terminal: delete to the end of the line.
     KillLineEnd,
+    /// Ctrl+W in a terminal: delete the word before the cursor.
     KillWordBack,
+    /// Up or Ctrl+P in a terminal: the previous command brain saw run.
     HistoryPrev,
+    /// Down or Ctrl+N in a terminal: back toward the line being typed.
     HistoryNext,
     /// Enter in a single-line field: the text is submitted and the field clears.
     Commit,
@@ -43,9 +61,13 @@ pub enum Action {
 /// What an applied action did to the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
+    /// The session goes on.
     Continue,
+    /// A single-line field was submitted (Enter at a prompt): the session ends.
     Commit,
+    /// A single-line field was cancelled (Ctrl+C at a prompt): the session ends.
     Cancel,
+    /// Focus moved to another field of the same window: the session ends.
     FieldChange,
 }
 
@@ -204,7 +226,9 @@ pub fn key_suppresses_paste(class: AppClass, key: &str, mods: &[Mod]) -> bool {
 /// The state of one text field being edited during a session.
 #[derive(Debug, Clone)]
 pub struct FieldEditor {
+    /// Which rules apply (terminal, browser, editor, ...).
     pub class: AppClass,
+    /// The text and cursor being edited.
     pub buf: TextBuffer,
     /// Shell history position: 0 = most recent command.
     history_index: Option<usize>,
@@ -213,6 +237,7 @@ pub struct FieldEditor {
 }
 
 impl FieldEditor {
+    /// An editor of `class` starting from `buf` (empty, or a window's document).
     pub fn new(class: AppClass, buf: TextBuffer) -> Self {
         Self {
             class,
@@ -275,6 +300,7 @@ impl FieldEditor {
         Outcome::Continue
     }
 
+    /// Inserts pasted text at the cursor, replacing the selection.
     pub fn paste(&mut self, text: &str) {
         self.buf.insert(text);
     }

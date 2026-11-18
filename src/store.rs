@@ -156,6 +156,7 @@ fn init_schema(conn: &Connection, path: &Path) -> Result<()> {
     }
 }
 
+/// The log offset ingest has reached (bytes).
 pub fn ingest_offset(conn: &Connection) -> Result<u64> {
     let off: i64 = conn.query_row(
         "SELECT log_offset FROM ingest_state WHERE id = 1",
@@ -165,6 +166,7 @@ pub fn ingest_offset(conn: &Connection) -> Result<u64> {
     Ok(off as u64)
 }
 
+/// Stores the log offset ingest has reached, in the ingest transaction.
 pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
     conn.execute(
         "UPDATE ingest_state SET log_offset = ?1 WHERE id = 1",
@@ -173,6 +175,7 @@ pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
     Ok(())
 }
 
+/// Records that the log line at byte `offset` has timestamp `ts`: a seek point for `query text`.
 pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
     conn.prepare_cached("INSERT OR IGNORE INTO log_checkpoints (ts, byte_offset) VALUES (?1, ?2)")?
         .execute(rusqlite::params![ts, offset as i64])?;
