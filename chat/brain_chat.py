@@ -14,9 +14,11 @@ request with tools turned off makes it answer from what it found.
 
 import argparse
 import os
+import shutil
 import sys
 from datetime import datetime
 
+import rtl
 from tools import TOOLS, Tools, describe
 
 MODEL = "claude-opus-5-5"
@@ -47,6 +49,7 @@ Narrow a large result rather than reading everything.
 finds nothing, say so and say where you looked; never guess.
 
 How to answer:
+- Answer in the language the user writes in.
 - Be concise. Cite what you report with its time, app and window. List \
 commands in the order they were run, in a code block.
 - brain sees keys, not program output: it cannot tell whether a command \
@@ -164,6 +167,17 @@ def anthropic_turn(model: str, effort: str, on_text, fallbacks: bool = True, cli
     return turn
 
 
+def redraw_question(question: str) -> None:
+    """Replaces the typed question, drawn backwards by the line editor in a
+    terminal without bidirectional support, with its visual-order rows."""
+    width = shutil.get_terminal_size().columns
+    typed_rows = max(1, -(-(len("you> ") + len(question)) // width))
+    sys.stdout.write("\033[1A\033[2K" * typed_rows)
+    rows = rtl.display(question, width - len("you> "))
+    sys.stdout.write("you> " + "\n     ".join(rows) + "\n")
+    sys.stdout.flush()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="brain-chat",
@@ -180,17 +194,40 @@ def main() -> int:
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--effort", default="low", choices=["low", "medium", "high", "xhigh", "max"])
     ap.add_argument("--no-fallback", action="store_true", help="no server-side refusal fallback")
+    ap.add_argument(
+        "--rtl",
+        default=os.environ.get("BRAIN_CHAT_RTL", "auto"),
+        choices=["auto", "on", "off"],
+        help="show right-to-left text (Hebrew, Arabic) in visual order, right-aligned: "
+        "auto = in terminals that cannot do it themselves (default)",
+    )
     args = ap.parse_args()
 
     if not os.path.isdir(args.data_dir):
         print(f"brain-chat: no brain data directory at {args.data_dir} (use --data-dir)", file=sys.stderr)
         return 1
     dim = (lambda s: f"\033[2m{s}\033[0m") if sys.stderr.isatty() else (lambda s: s)
-    out = lambda s: (sys.stdout.write(s), sys.stdout.flush())  # noqa: E731
+    write = lambda s: (sys.stdout.write(s), sys.stdout.flush())  # noqa: E731
+    rtl_on = rtl.enabled(args.rtl, sys.stdout)
+    if rtl_on:
+        try:
+            import bidi  # noqa: F401
+        except ImportError:
+            print("brain-chat: python-bidi is not installed (make chat-setup); RTL off", file=sys.stderr)
+            rtl_on = False
+    # With RTL on, answers are written line by line, reordered for display.
+    renderer = rtl.LineRenderer(write) if rtl_on else None
+    out = renderer.feed if renderer else write
+    flush = renderer.finish if renderer else (lambda: None)
+
+    def on_tool(line):
+        flush()  # finish any text line before the tool line
+        print(dim(f"  → {line}"), file=sys.stderr)
+
     chat = Chat(
         anthropic_turn(args.model, args.effort, out, fallbacks=not args.no_fallback),
         Tools(args.brain, args.data_dir),
-        on_tool=lambda line: print(dim(f"  → {line}"), file=sys.stderr),
+        on_tool=on_tool,
     )
 
     import anthropic
@@ -198,9 +235,11 @@ def main() -> int:
     def ask(question: str) -> bool:
         try:
             chat.ask(question)
+            flush()
             print()
             return True
         except KeyboardInterrupt:
+            flush()
             print("\n(stopped)", file=sys.stderr)
         except anthropic.AuthenticationError:
             print("brain-chat: no valid Anthropic API key (set ANTHROPIC_API_KEY)", file=sys.stderr)
@@ -222,6 +261,8 @@ def main() -> int:
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
+        if question and rtl_on and rtl.has_rtl(question):
+            redraw_question(question)
         if question:
             ask(question)
 

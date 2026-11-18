@@ -1,3 +1,4 @@
 # brain-chat's only dependency: the official Anthropic SDK (the version its
 # offline tests were written and checked against).
 anthropic==2.10.0
+python-bidi==0.6.12  # right-to-left text in terminals without BiDi (rtl.py)

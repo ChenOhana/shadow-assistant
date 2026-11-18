@@ -31,6 +31,26 @@ chat/brain-chat --data-dir ~/brain-data
 binary (`$BRAIN_BIN`, default `brain` on the PATH), `--model` the model
 (default `claude-opus-5-5`), `--effort` how hard it thinks (default `low`).
 
+## Right-to-left text (Hebrew, Arabic)
+
+Ask in Hebrew and Claude answers in Hebrew. A terminal draws characters
+left to right in the order they are written, so one without bidirectional
+support (Ghostty, kitty, Alacritty, xterm) would show Hebrew backwards.
+There brain-chat writes each line in visual order (the Unicode
+Bidirectional Algorithm, via python-bidi) and right-aligns right-to-left
+lines, like a chat app; English words, numbers and commands inside a line
+keep their order, long lines are wrapped first so they stay readable, and
+code blocks are left alone. Answers then appear line by line instead of
+word by word.
+
+`--rtl auto` (the default, or `$BRAIN_CHAT_RTL`) does this in terminals
+that cannot themselves and leaves Konsole, GNOME Terminal and mlterm (which
+reorder by themselves) and pipes or files alone; `--rtl on`/`off` force it.
+
+One limit: the question you are typing at `you>` is drawn by Python's line
+editor, which does not reorder, so in such a terminal it looks backwards
+while you type; when you press Enter, brain-chat redraws it the right way.
+
 ## How it answers
 
 ```
@@ -80,11 +100,12 @@ Anthropic's side by brain-chat; nothing is written to disk.
 ## Tests
 
 ```sh
-make chat-test                 # offline: 23 tests, no API calls
+make chat-test                 # offline: 32 tests, no API calls
 chat/.venv/bin/python chat/live_check.py   # live: 3 questions, costs a little
 ```
 
-The offline tests cover the redaction, the tools against a real brain data
+The offline tests cover the redaction, right-to-left rendering, the tools
+against a real brain data
 directory (a made-up day with an ssh session, a sudo password and a token,
 ingested by brain itself), the question loop with a scripted model
 (rounds, the cap, parallel calls, errors, refusals, interruption), and the

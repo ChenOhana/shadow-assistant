@@ -617,6 +617,14 @@ a subprocess with an argument list.
   says so. Every tool call is printed. The Messages API with a local loop
   was chosen over Anthropic-hosted agents so no session history is kept
   on Anthropic's side.
+- **Right-to-left text**: answers come in the language of the question. In
+  terminals without bidirectional rendering (Ghostty, kitty, Alacritty)
+  brain-chat writes each line in visual order with the Unicode
+  Bidirectional Algorithm (python-bidi), wraps long lines first, and
+  right-aligns right-to-left lines; code blocks stay as they are. Konsole,
+  GNOME Terminal and pipes are left alone (auto-detected; `--rtl` forces
+  it). The question being typed is drawn by Python's line editor, which
+  cannot reorder; it is redrawn correctly after Enter.
 - **Why Python**: there is no official Anthropic SDK for Rust, and the
   Python SDK provides streaming, retries and typed errors; brain-chat is a
   separate process that only reads, so `brain run`'s budget is untouched.

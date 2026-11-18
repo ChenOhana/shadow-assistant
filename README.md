@@ -266,6 +266,8 @@ chat/brain-chat --data-dir ~/.local/state/brain    # a chat; or pass a question
 Claude answers by calling read-only tools (`list_apps`, `sessions`,
 `search`, `text`) that run `brain query` on your machine, in a loop it ends
 when it has the answer (at most 10 rounds of tool calls per question).
+Ask in Hebrew and it answers in Hebrew, drawn right to left even in
+terminals that cannot do that themselves, like Ghostty.
 **Tool results go to Anthropic's API**: likely secrets (tokens, keys,
 passwords in commands, a password typed at a `sudo` prompt) are masked
 first, as a best effort, and every tool call is printed.
