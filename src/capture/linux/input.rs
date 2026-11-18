@@ -16,7 +16,7 @@
 //!   closed and re-opened.
 
 use super::keys::{KeyOut, KeyProcessor};
-use super::recorder::Recorder;
+use crate::capture::recorder::Recorder;
 use crate::timefmt::{Millis, now_ms, system_time_ms};
 use anyhow::{Context, Result, bail};
 use evdev::raw_stream::RawDevice;

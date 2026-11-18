@@ -5,7 +5,7 @@
 //! the `dead_code` allowance.
 #![allow(dead_code)]
 
-use brain::capture::synthetic::us_keycode;
+use brain::capture::linux::synthetic::us_keycode;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::os::fd::AsRawFd;

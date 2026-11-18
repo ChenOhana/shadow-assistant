@@ -13,7 +13,7 @@ use crate::event::Mod;
 use crate::timefmt::Millis;
 use std::collections::{HashMap, HashSet};
 
-/// Compositor key-repeat settings.
+/// Compositor key-repeat settings (the desktop backend reads them).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RepeatConfig {
     pub enabled: bool,
@@ -22,7 +22,7 @@ pub struct RepeatConfig {
 }
 
 impl Default for RepeatConfig {
-    /// KDE Plasma's defaults.
+    /// KDE Plasma's defaults (600 ms, 25 Hz).
     fn default() -> Self {
         Self {
             enabled: true,
@@ -33,45 +33,6 @@ impl Default for RepeatConfig {
 }
 
 impl RepeatConfig {
-    /// Reads `[Keyboard]` from KDE's `kcminputrc` text, falling back to defaults.
-    pub fn from_kcminputrc(text: &str) -> Self {
-        let mut cfg = Self::default();
-        let mut in_keyboard = false;
-        for line in text.lines().map(str::trim) {
-            if line.starts_with('[') {
-                in_keyboard = line == "[Keyboard]";
-                continue;
-            }
-            if !in_keyboard {
-                continue;
-            }
-            let Some((k, v)) = line.split_once('=') else {
-                continue;
-            };
-            match k.trim() {
-                "KeyRepeat" => cfg.enabled = v.trim() == "repeat" || v.trim() == "true",
-                "RepeatDelay" => {
-                    if let Ok(d) = v.trim().parse::<f64>()
-                        && d >= 0.0
-                    {
-                        cfg.delay_ms = d as Millis;
-                    }
-                }
-                "RepeatRate" => {
-                    if let Ok(r) = v.trim().parse::<f64>() {
-                        if r > 0.0 {
-                            cfg.rate_hz = r;
-                        } else {
-                            cfg.enabled = false;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        cfg
-    }
-
     fn interval_ms(&self) -> f64 {
         1000.0 / self.rate_hz
     }
@@ -614,23 +575,5 @@ mod tests {
             p.tick(end, &mut emit);
             assert_eq!(got, expected, "scenario {scenario}: {events:?}");
         }
-    }
-
-    #[test]
-    fn parses_kcminputrc() {
-        let cfg = RepeatConfig::from_kcminputrc(
-            "[Mouse]\nRepeatDelay=1\n[Keyboard]\nKeyRepeat=repeat\nRepeatDelay=250\nRepeatRate=30.5\n",
-        );
-        assert_eq!(
-            cfg,
-            RepeatConfig {
-                enabled: true,
-                delay_ms: 250,
-                rate_hz: 30.5
-            }
-        );
-        let off = RepeatConfig::from_kcminputrc("[Keyboard]\nKeyRepeat=nothing\n");
-        assert!(!off.enabled);
-        assert_eq!(RepeatConfig::from_kcminputrc(""), RepeatConfig::default());
     }
 }

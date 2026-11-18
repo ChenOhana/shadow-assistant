@@ -70,13 +70,20 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
 
 ```
 src/main.rs              CLI (clap), error → stderr + exit 1
-src/capture/mod.rs       `run` orchestration: sources, ingest thread, signals
-src/capture/input.rs     poll loop over keyboards (evdev), hotplug, EVIOCSMASK
-src/capture/keys.rs      pure key processing: xkb resolution + repeat synthesis
-src/capture/xkb.rs       libxkbcommon FFI wrapper
-src/capture/recorder.rs  stamps focus, appends to log, clipboard on paste, lock pause
-src/capture/desktop.rs   D-Bus: KWin focus script, Klipper, lock, sleep, layouts
-src/capture/synthetic.rs synthetic input source for tests/benchmarks
+src/capture/mod.rs       `run` orchestration: platform, ingest thread, signals
+src/capture/platform.rs  the platform interfaces (Platform, Capture) and their contract
+src/capture/recorder.rs  the sink every source writes to: stamps focus, appends to
+                         the log, clipboard on paste, lock pause
+src/capture/linux/       the Linux platform:
+  mod.rs                 wires evdev keys, logind sleep and the desktop backend
+  input.rs               poll loop over keyboards (evdev), hotplug, EVIOCSMASK
+  keys.rs                pure key processing: xkb resolution + repeat synthesis
+  xkb.rs                 libxkbcommon FFI wrapper
+  desktop.rs             the Desktop interface, detection, unsupported fallback
+  kde.rs, kwin_focus.js  KDE Plasma: KWin focus, Klipper, lock, layouts, repeat
+  logind.rs, layout.rs   sleep/wake; system keyboard layout (env, localed)
+  dbus.rs                signal watching shared by the backends
+  synthetic.rs           synthetic input source for tests/benchmarks
 src/eventlog.rs          append-only JSONL log: torn-tail repair, line reader
 src/store.rs             SQLite schema (WAL, FTS5), helpers
 src/ingest.rs            log → SQLite, offset advanced in the same transaction

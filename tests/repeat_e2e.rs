@@ -24,7 +24,7 @@
 
 mod common;
 
-use brain::capture::synthetic::us_keycode;
+use brain::capture::linux::synthetic::us_keycode;
 use common::*;
 use std::path::PathBuf;
 use std::time::Duration;

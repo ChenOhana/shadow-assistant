@@ -91,7 +91,7 @@ each application. Every approach below falls into one of those three groups.
   instead of hooking it.
 
 **Decision: evdev (A), passive and never grabbed, with characters resolved by
-libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)
+libxkbcommon.** (`src/capture/linux/input.rs`, `keys.rs`, `xkb.rs`)
 
 - **Devices.** Every `/dev/input/event*` whose key bitmap has A, Z, Space and
   Enter is a keyboard. Each gets an event-type mask (`EVIOCSMASK`: only
@@ -146,7 +146,7 @@ libxkbcommon.** (`src/capture/input.rs`, `keys.rs`, `xkb.rs`)
 | `/proc` + compositor-agnostic heuristics | No | — | — | — | No way to know focus from process state |
 
 **Decision: a KWin script that pushes focus changes into brain over D-Bus.**
-(`src/capture/desktop.rs`, `kwin_focus.js`)
+(`src/capture/linux/kde.rs`, `kwin_focus.js`)
 
 - `brain run` claims `org.shadowassistant.Brain.p<pid>` on the session bus
   and exports one method, `Activated(desktopFile, resourceClass, caption,
@@ -178,6 +178,41 @@ Klipper (`getClipboardContents`, 300 ms timeout, up to 64 KiB) and logged as a
 **Sleep/wake.** logind's `PrepareForSleep` on the system bus: `sleep` and
 `wake` are logged, and on wake every keyboard is closed and reopened (held
 keys released). Tested with a real suspend through `systemctl suspend`.
+
+### 2.4 The platform layer
+
+Capture sits behind interfaces (`src/capture/platform.rs`), so another
+platform is a new module, not a change to the core:
+
+- A **`Platform`** starts capture and writes everything into the
+  `Recorder`: keys as the app received them, focus (app id, window title,
+  renamed), screen lock, sleep/wake, and the clipboard at a paste shortcut.
+  Everything after the recorder (log, ingest, sessions, reconstruction,
+  storage, queries) is platform-independent. The trait documents the
+  contract every key source must keep: characters as the app received
+  them, shortcuts on the Latin layout, time order with transitions before
+  same-moment repeats, never grabbing or delaying a key, releasing keys of
+  a vanished device.
+- **Linux** (`src/capture/linux/`) is one platform: keys from evdev and
+  xkbcommon, which work on any Linux desktop, and sleep/wake from logind.
+  Everything else comes from a **`Desktop`** backend chosen at start from
+  `XDG_CURRENT_DESKTOP` (or the compositor's name on the session bus):
+  focus, clipboard, screen lock, and the keyboard settings the key
+  resolution needs (layouts, layout switches, repeat schedule). KDE Plasma
+  is one backend. A desktop without one still gets keys, attributed to
+  `unknown`, with a warning that its screen lock may not be detected.
+- The **synthetic** test source is another `Platform`.
+- `Cargo.toml` lists evdev and zbus as Linux-only dependencies, and a build
+  for another OS stops with a message pointing at the platform layer.
+
+A macOS or Windows port would add a platform with its own key source (a
+CGEventTap, a low-level keyboard hook: the OS supplies characters and
+repeats there), focus source and lock/sleep events. Cross-platform key
+crates (rdev, keytap, handy-keys) could sit behind its key source; on
+Linux they do not help: under Wayland they either see nothing (rdev's
+listener is X11-only) or grab the keyboard (rdev's `unstable_grab`), and
+none resolves layouts, follows the compositor's repeat schedule or tracks
+focus.
 
 ## 3. Event format and ingestion
 

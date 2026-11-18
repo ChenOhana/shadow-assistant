@@ -4,16 +4,75 @@
 //! per second, through the same [`KeyProcessor`] → [`Recorder`] → log → ingest
 //! path as real input. After every sentence it switches to a terminal, runs a
 //! shell command (Enter commits that session) and switches back (the editor
-//! session resumes), so sessions open, commit and resume all the time. Only the evdev device read is replaced. Crash-safety,
-//! consistency and resource tests can therefore run unattended, without root
-//! access to `/dev/uinput`.
+//! session resumes), so sessions open, commit and resume all the time. Only
+//! the evdev device read is replaced, and desktop integration is off.
+//! Crash-safety, consistency and resource tests can therefore run unattended,
+//! without root access to `/dev/uinput` or a desktop.
 
-use super::keys::{KeyOut, KeyProcessor};
-use super::recorder::Recorder;
+use super::keys::{KeyOut, KeyProcessor, RepeatConfig};
+use super::xkb::{Keyboard, LayoutSpec};
+use crate::capture::platform::{Capture, Platform};
+use crate::capture::recorder::{NoClipboard, Recorder};
+use crate::datadir::DataDir;
+use crate::event::SystemState;
+use crate::eventlog::LogWriter;
 use crate::timefmt::now_ms;
+use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// The synthetic source as a [`Platform`]: types at `rate` key presses per
+/// second on the US layout.
+pub struct Synthetic {
+    pub rate: f64,
+}
+
+impl Platform for Synthetic {
+    fn start(&self, _data_dir: &DataDir, log: LogWriter) -> Result<Box<dyn Capture>> {
+        let recorder = Arc::new(Recorder::new(log, Box::new(NoClipboard)));
+        recorder.system(SystemState::Start);
+        let kb = Keyboard::new(&LayoutSpec {
+            layout: "us".into(),
+            ..Default::default()
+        })?;
+        let keys = KeyProcessor::new(kb, RepeatConfig::default());
+        let stop = Arc::new(AtomicBool::new(false));
+        let rate = self.rate;
+        let thread = {
+            let (recorder, stop) = (recorder.clone(), stop.clone());
+            std::thread::Builder::new()
+                .name("synthetic".into())
+                .spawn(move || run(keys, recorder, rate, stop))?
+        };
+        eprintln!("brain: synthetic input at {rate} keys/s");
+        Ok(Box::new(SyntheticCapture {
+            recorder,
+            stop,
+            thread,
+        }))
+    }
+}
+
+struct SyntheticCapture {
+    recorder: Arc<Recorder>,
+    stop: Arc<AtomicBool>,
+    thread: JoinHandle<()>,
+}
+
+impl Capture for SyntheticCapture {
+    fn recorder(&self) -> &Arc<Recorder> {
+        &self.recorder
+    }
+
+    fn stop(self: Box<Self>) {
+        self.stop.store(true, Ordering::Relaxed);
+        if self.thread.join().is_err() {
+            eprintln!("brain: warning: synthetic input thread panicked");
+        }
+    }
+}
 
 pub const SYNTHETIC_APP: &str = "synthetic";
 pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
