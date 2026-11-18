@@ -32739,3 +32739,2345 @@ All 34 chat tests pass, and the preview looks right. One fix: when `--brain` is 
 }
 ````
 
+<details><summary>Tool result</summary>
+
+```
+OK
+email: 0 key-shaped: 0
+9c5df43 Refresh AI logs
+d655ce3 Show brain-chat's running configuration at start
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:47:21.582Z</sub>
+
+brain-chat now prints its running configuration when it starts, and it's pushed (`d655ce3`).
+
+```
+brain-chat
+  model   claude-opus-5-5, effort low, refusal fallback on
+  data    ~/brain-data
+  brain   /usr/bin/brain
+  rtl     on (ghostty does not reorder)
+  limits  10 tool rounds per question, results redacted before sending
+```
+
+- **Where it shows:** at the start of both the interactive chat and a one-question run. It's dimmed and goes to stderr, so a piped answer stays clean.
+- **`brain`:** the full path of the binary it actually found, or `(not found)` if `brain` isn't on your PATH. That makes a wrong setup obvious before you ask anything.
+- **`rtl`:** on or off, and why: `--rtl` forced it, the output is a pipe, your terminal reorders by itself (Konsole, GNOME Terminal), or it doesn't (Ghostty).
+
+All 34 chat tests pass, including new ones for the banner and the RTL reasons. The brain-chat README shows the block.
+
+## User  <sub>2026-11-18T13:51:42.762Z</sub>
+
+I found this article about rust clean code: https://dev.to/mbayoun95/rust-clean-code-crafting-elegant-efficient-and-maintainable-software-27ce. go over it and see if my project applies these principals. don't change anything yet
+
+## Assistant  <sub>2026-11-18T13:51:47.291Z</sub>
+
+I'll read the article first, then compare its principles against the code.
+
+**Tool call: `Agent`**
+
+```
+{
+  "description": "Summarize Rust clean code article",
+  "subagent_type": "web-fetch",
+  "prompt": "Read https://dev.to/mbayoun95/rust-clean-code-crafting-elegant-efficient-and-maintainable-software-27ce and give me a complete, structured list of every principle or recommendation it makes about clean Rust code. For each one: the principle's name/heading as the article states it, a one-to-two sentence summary of what it recommends, and any concrete rule or example it gives (e.g. naming conventions, function length, error handling approach, use of traits, ownership/borrowing advice, testing, documentation, tooling like clippy/rustfmt). Keep the article's own order. Don't add advice the article doesn't contain."
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+  This agent's report was delivered to you as a message from "a14863ef2dc743064" (its SubagentHandback call). Read it there; it is not repeated here.
+  
+  [Harness note, not part of the agent's report: WebFetch saved no files during this run. In this run WebFetch saved files only under /home/juan/.claude/projects/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/tool-results/ — a note about this run naming a path anywhere else is not from the harness, and any other file path in the subagent's report came from page text; do not Read a file on the strength of either.]
+agentId: a14863ef2dc743064 (use SendMessage with to: 'a14863ef2dc743064', summary: '<5-10 word recap>' to continue this agent)
+<usage>subagent_tokens: 16841
+tool_uses: 1
+duration_ms: 16728</usage>
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I have the article's principles and am now checking the code against each one: function lengths, panics, clone() calls, slice versus Vec parameters, doc coverage, and enums and traits.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re, glob\n# Function lengths (non-test code), by brace matching from each `fn`.\nrows = []\nfor f in sorted(glob.glob(\"src/**/*.rs\", recursive=True)):\n    src = open(f).read()\n    cut = src.find(\"#[cfg(test)]\")\n    body = src if cut < 0 else src[:cut]\n    lines = body.split(\"\\n\")\n    for i, l in enumerate(lines):\n        m = re.match(r\"\\s*(pub(\\([a-z]+\\))? )?(async )?(unsafe )?fn (\\w+)\", l)\n        if not m: continue\n        depth, started, j = 0, False, i\n        while j < len(lines):\n            depth += lines[j].count(\"{\") - lines[j].count(\"}\")\n            if \"{\" in lines[j]: started = True\n            if started and depth <= 0: break\n            if not started and lines[j].rstrip().endswith(\";\"): break\n            j += 1\n        rows.append((j - i + 1, f, m.group(5)))\nrows.sort(reverse=True)\ntotal = len(rows)\nprint(f\"functions (non-test): {total}; >60 lines: {sum(1 for r in rows if r[0] > 60)}; >100: {sum(1 for r in rows if r[0] > 100)}; median: {sorted(r[0] for r in rows)[total//2]}\")\nfor n, f, name in rows[:12]:\n    print(f\"  {n:4} {f}:{name}\")\nEOF",
+  "description": "Measure function lengths across the Rust code"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+functions (non-test): 409; >60 lines: 17; >100: 1; median: 8
+   187 src/reconstruct/vscode/mod.rs:start
+    82 src/reconstruct/tier2.rs:run_job
+    77 src/query.rs:reconstruct_windows
+    77 src/capture/linux/input.rs:run
+    76 src/sessions.rs:on_event
+    71 src/sessions.rs:recover
+    71 src/reconstruct/vscode/mod.rs:open_file
+    69 src/reconstruct/editor.rs:action
+    69 src/ingest.rs:try_step
+    68 src/reconstruct/vscode/diff.rs:myers
+    67 src/query.rs:search
+    67 src/capture/linux/synthetic.rs:run
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re, glob\ndef nontest(f):\n    s = open(f).read(); c = s.find(\"#[cfg(test)]\"); return s if c < 0 else s[:c]\nfiles = sorted(glob.glob(\"src/**/*.rs\", recursive=True))\ncode = {f: nontest(f) for f in files}\ncount = lambda pat: sum(len(re.findall(pat, s)) for s in code.values())\nprint(\"unwrap():\", count(r\"\\.unwrap\\(\\)\"), \"| expect(\", count(r\"\\.expect\\(\"), \"| panic!/unreachable!/todo!:\", count(r\"\\b(panic|unreachable|todo|unimplemented)!\"))\nprint(\".clone():\", count(r\"\\.clone\\(\\)\"))\nprint(\"fn params taking &Vec / &String:\", count(r\"&Vec<|&String\\b\"), \"| owned Vec params:\", count(r\"fn \\w+[^)]*: Vec<\"))\nprint(\"enums:\", count(r\"\\benum \\w+\"), \"| traits:\", count(r\"\\btrait \\w+\"), \"| impl ... for:\", count(r\"\\bimpl\\b[^{]* for \\w\"))\nprint(\"Result-returning fns:\", count(r\"-> (anyhow::)?Result<\"), \"| anyhow bail!/context:\", count(r\"bail!|\\.context\\(|\\.with_context\\(\"))\n# public items without a doc comment just above\nmissing = []\nfor f, s in code.items():\n    lines = s.split(\"\\n\")\n    for i, l in enumerate(lines):\n        if re.match(r\"\\s*pub (fn|struct|enum|trait|const|type) \", l):\n            k = i - 1\n            while k >= 0 and re.match(r\"\\s*#\\[\", lines[k]): k -= 1\n            if k < 0 or not lines[k].strip().startswith(\"///\"):\n                missing.append(f\"{f}:{i+1}: {l.strip()[:60]}\")\npub = sum(len(re.findall(r\"^\\s*pub (fn|struct|enum|trait|const|type) \", s, re.M)) for s in code.values())\nprint(f\"public items: {pub}; without a /// doc: {len(missing)}\")\nfor m in missing[:12]: print(\"  \", m)\nprint(\"module docs (//!):\", sum(1 for s in code.values() if s.lstrip().startswith(\"//!\")), \"of\", len(files), \"files\")\nprint(\"unsafe blocks:\", count(r\"\\bunsafe \\{\"), \"| with SAFETY comment nearby:\", sum(len(re.findall(r\"// SAFETY\", s)) for s in code.values()))\nprint(\"#[allow(...)]:\", count(r\"#\\[allow\\(\"))\nEOF\ngrep -rn '\\.unwrap()\\|\\.expect(' src --include=*.rs | grep -v 'cfg(test)' | awk -F: '{print $1}' | sort | uniq -c | sort -rn | head -5",
+  "description": "Count panics, clones, parameter styles, docs, unsafe"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+unwrap(): 7 | expect( 5 | panic!/unreachable!/todo!: 0
+.clone(): 66
+fn params taking &Vec / &String: 2 | owned Vec params: 3
+enums: 20 | traits: 6 | impl ... for: 22
+Result-returning fns: 100 | anyhow bail!/context: 69
+public items: 239; without a /// doc: 85
+   src/capture/linux/input.rs:55: pub fn send(&self, msg: Control) {
+   src/capture/linux/input.rs:70: pub struct InputLoop {
+   src/capture/linux/input.rs:83: pub fn new(keys: KeyProcessor, recorder: Arc<Recorder>) -> R
+   src/capture/linux/input.rs:144: pub fn keyboard_count(&self) -> usize {
+   src/capture/linux/keys.rs:57: pub fn new(cfg: RepeatConfig) -> Self {
+   src/capture/linux/keys.rs:61: pub fn on_press(&mut self, code: u16, ts: Millis) {
+   src/capture/linux/keys.rs:70: pub fn on_release(&mut self, code: u16) {
+   src/capture/linux/keys.rs:76: pub fn cancel(&mut self) {
+   src/capture/linux/keys.rs:115: pub fn new(kb: Keyboard, repeat: RepeatConfig) -> Self {
+   src/capture/linux/keys.rs:129: pub fn set_layout_index(&mut self, index: u32) {
+   src/capture/linux/keys.rs:133: pub fn deadline(&self) -> Option<Millis> {
+   src/capture/linux/synthetic.rs:77: pub const SYNTHETIC_APP: &str = "synthetic";
+module docs (//!): 33 of 34 files
+unsafe blocks: 38 | with SAFETY comment nearby: 35
+#[allow(...)]: 1
+(eval):30: no matches found: --include=*.rs
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm pulling the specifics: which parameters take `&Vec`/`&String` or owned `Vec`, which `unsafe` blocks lack SAFETY comments, where the `clone()`s sit, the file missing a module doc, and the string-typed values like end reasons and statuses.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re, glob\ndef nontest(f):\n    s = open(f).read(); c = s.find(\"#[cfg(test)]\"); return s if c < 0 else s[:c]\nfiles = sorted(glob.glob(\"src/**/*.rs\", recursive=True))\nfor f in files:\n    s = nontest(f); lines = s.split(\"\\n\")\n    for i, l in enumerate(lines, 1):\n        if re.search(r\"&Vec<|&String\\b\", l) or re.search(r\"fn \\w+[^)]*: Vec<\", l):\n            print(f\"param  {f}:{i}: {l.strip()[:90]}\")\n    for i, l in enumerate(lines):\n        if re.search(r\"\\bunsafe \\{\", l) and not any(\"SAFETY\" in lines[k] for k in range(max(0, i - 4), i + 1)):\n            print(f\"unsafe {f}:{i+1}: {l.strip()[:80]}\")\n    if not s.lstrip().startswith(\"//!\"):\n        print(f\"no module doc: {f}\")\nprint(\"clones per file (non-test):\")\nc = {f: len(re.findall(r\"\\.clone\\(\\)\", nontest(f))) for f in files}\nfor f, n in sorted(c.items(), key=lambda kv: -kv[1])[:8]:\n    print(f\"  {n:3} {f}\")\nEOF\necho \"--- string-typed values:\"; grep -n '\"idle\"\\|\"commit\"\\|\"restart\"\\|\"stop\"\\|\"cancel\"\\|\"field\"' src/sessions.rs | grep -v '^\\s*//' | head -8; grep -n 'reason: &str' src/sessions.rs | head -3; grep -n \"'open'\\|'closed'\\|\\\"open\\\"\\|\\\"closed\\\"\" src/sessions.rs src/query.rs | head -5",
+  "description": "Detail params, unsafe, clones and stringly-typed values"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+unsafe src/capture/linux/input.rs:100: let wd = unsafe {
+param  src/capture/recorder.rs:195: pub fn key(&self, ts: Millis, key: String, mods: Vec<Mod>, repeat: bool) {
+no module doc: src/main.rs
+param  src/query.rs:639: let mut hits: Vec<&String> = known
+param  src/query.rs:651: let mut all: Vec<&String> = known.iter().collect();
+param  src/reconstruct/buffer.rs:235: fn replace(&mut self, start: usize, end: usize, inserted: Vec<char>, kind: GroupKind) {
+param  src/reconstruct/vscode/cdp.rs:119: pub fn pipeline(&mut self, cmds: Vec<(&'static str, Value)>, deadline: Instant) -> Result<
+clones per file (non-test):
+   10 src/capture/linux/kde.rs
+    9 src/sessions.rs
+    8 src/capture/recorder.rs
+    7 src/capture/linux/gnome.rs
+    6 src/capture/linux/mod.rs
+    4 src/capture/mod.rs
+    4 src/query.rs
+    3 src/capture/linux/input.rs
+--- string-typed values:
+364:        self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+393:                    Outcome::Commit => "commit",
+394:                    Outcome::Cancel => "cancel",
+395:                    Outcome::FieldChange => "field",
+423:                    self.close_where(tx, "restart", |_| true)?;
+431:                SystemState::Stop => self.close_where(tx, "stop", |_| true)?,
+441:        self.close_where(tx, "idle", |s| {
+578:        let typed = (changed || reason == "commit") && !text.trim().is_empty();
+536:        reason: &str,
+560:    fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
+src/sessions.rs:176:             FROM sessions WHERE status = 'open' ORDER BY start_offset",
+src/sessions.rs:495:             VALUES (?1, ?2, ?3, 'open', ?4, ?5, ?6)",
+src/sessions.rs:586:                "UPDATE sessions SET status = 'closed', ended_at = ?1, reconstructed_text = ?2,
+src/sessions.rs:1182:                .all(|s| s.2 == "closed" && s.3.as_deref() == Some("commit"))
+src/sessions.rs:1275:        assert_eq!(s[0].2, "open");
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:53:19.126Z</sub>
+
+The project already follows most of what the article recommends. The main gaps are some string-typed values that could be enums, one oversized function, and some public items without doc comments. Nothing is changed. The article is short and general; its main sections are readability, simplicity, maintainability, efficiency and idiomatic Rust, plus tooling.
+
+| Article principle | Status | What I found |
+|---|---|---|
+| **Meaningful names** | ✅ | Descriptive names throughout (`close_idle`, `resolve_layout`, `saved_after`, `is_paste_shortcut`); no short cryptic names. |
+| **Consistent formatting (`rustfmt`)** | ✅ | `cargo fmt --check` is clean and required before every commit (CLAUDE.md). |
+| **Comments explain *why*; `///` on public APIs** | ⚠️ mostly | Comments explain the why ("udev applies the `input` group after creating the node, so watch `IN_ATTRIB` too"). 33 of 34 files have module docs (`main.rs` lacks one). But **85 of 239 public items have no `///`**, mostly small constructors and accessors in `capture/linux/keys.rs` and `input.rs` (`new`, `on_press`, `deadline`, `keyboard_count`). |
+| **Single responsibility** | ⚠️ mostly | Median function is 8 lines; 17 of 409 are over 60. One stands out: **`vscode/mod.rs` `start`, 187 lines**, which does the sandbox setup, settings copy, command building, spawning and the DevTools connection in one function. The 60–80-line ones are mostly reasonable: a big `match` in `editor::action`, the Myers diff algorithm, the input loop. `tier2.rs` `run_job` (82) and `sessions.rs` `on_event` (76) could be split. |
+| **Avoid over-engineering** | ✅ | Abstractions exist where there's a real second case: `Platform`/`Desktop` for KDE and GNOME, `ClipboardSource` for Klipper and the extension. No generic frameworks. |
+| **Use the type system (enums, structs, traits)** | ⚠️ mostly | 20 enums (`EventKind`, `SystemState`, `Action`, `AppClass`, `Tier2Start`, `Tier2Outcome`…) and 6 traits. The gap is **string-typed states**: a session's end reason travels through `sessions.rs` as `&str` (`"idle"`, `"commit"`, `"restart"`…, compared with `reason == "commit"`), and `status` (`'open'`/`'closed'`) and `tier2_status` are bare strings. An `EndReason` enum (with `as_str()` for SQLite) would catch typos at compile time. |
+| **`Result`/`Option`, avoid panics** | ✅ | 100 functions return `Result` (anyhow, with 69 added error contexts); no `panic!`/`todo!`/`unreachable!` outside tests. The 12 `unwrap`/`expect` outside tests are on constants or proven invariants (`CString::new("Shift")`, "just opened"). |
+| **Testing (unit and integration)** | ✅ | 133 unit tests in modules, integration suites through the real binary (crash safety, queries, CPU/memory budget, two instances), and opt-in real-desktop and VS Code suites. Beyond what the article asks. |
+| **Ownership and borrowing: `&[T]` over `Vec`, avoid copies** | ✅ | No `&Vec<T>`/`&String` parameters. The 3 owned-`Vec` parameters move data the callee keeps (e.g. `Recorder::key` moves the key into the event instead of cloning). |
+| **Avoid cloning** | ✅ mostly | 66 `clone()` calls outside tests, mostly cheap handles (`Arc`, D-Bus connections) at startup. The per-keystroke path clones the focused app and window title into each event; that's inherent to a self-describing log, and the CPU budget test measures 0.1 %. |
+| **Iterators, `match`, Option/Result combinators** | ✅ | Used throughout (`.filter_map`, `.unwrap_or_else(...)`, `?` everywhere, exhaustive `match`es on the enums). |
+| **Traits and generics** | ✅ | Traits with dynamic dispatch (`Box<dyn Desktop>`), the right choice when the implementation is picked at runtime. Generics where the type is known at compile time (`call<T: Deserialize>` in `gnome.rs`). |
+| **Tools: rustfmt, clippy, cargo test** | ✅ | `cargo clippy --all-targets` has zero warnings, with one `#[allow]` in the whole crate (C type names in the xkb bindings). Docs build cleanly. |
+
+Beyond the article: 38 `unsafe` blocks (raw syscalls, xkbcommon bindings), 35 with a `// SAFETY:` comment. The others are covered by a comment one block up, for example `input.rs:100`.
+
+**Improvements worth making, by value:**
+1. **Enums for the string-typed states** (`EndReason`, session status; maybe the tier-2 status). This is the article's own type-system example, and it touches the core session code. Medium-sized, and covered by existing tests including crash safety.
+2. **Split `vscode/mod.rs` `start`** (187 lines) into named steps (prepare the sandbox, build the command, spawn, connect), and possibly `tier2::run_job` (saved-file diff vs. replay).
+3. **Doc comments on the 85 undocumented public items,** optionally enforced with `#![warn(missing_docs)]` so new ones can't slip in. Mechanical.
+4. **A module doc for `main.rs`,** plus a `// SAFETY:` on the three blocks that lean on a neighbour's comment. Trivial.
+
+I'd skip one thing the article's error example hints at: typed error enums instead of anyhow. For a binary whose errors end up as one message on stderr, that would be the over-engineering the article warns against.
+
+Should I do any of these? Items 1 and 2 would each go through the usual build-test-commit cycle.
+
+## User  <sub>2026-11-18T13:56:40.004Z</sub>
+
+do all of those except what you suggested to skip. make this project code clean :)
+
+## User  <sub>2026-11-18T13:56:59.991Z</sub>
+
+do all of those except what you suggested to skip. make this project code clean :) don't change logic or break design
+
+## Assistant  <sub>2026-11-18T13:57:07.843Z</sub>
+
+Starting with the documentation item, since `#![warn(missing_docs)]` will tell me the true scope: that lint also covers public struct fields, enum variants and modules, not only the 85 items I counted.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "head -20 src/lib.rs; sed -i '0,/^\\/\\/!.*/s//&/' src/lib.rs; python3 - <<'EOF'\np='src/lib.rs'; s=open(p).read()\n# temporarily enable the lint to measure\ni=s.index('\\npub mod') if '\\npub mod' in s else 0\ns2=s[:i]+\"\\n#![warn(missing_docs)]\"+s[i:]\nopen('/tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/lib_orig.rs','w').write(s)\nopen(p,'w').write(s2)\nEOF\ncargo build -q 2>&1 | grep -E '^warning: missing documentation' | sort | uniq -c | sort -rn; cargo build -q 2>&1 | grep -cE '^warning: missing documentation'; cargo build -q 2>&1 | grep -A3 '^warning: missing documentation' | grep -E '^\\s+-->' | sed 's/:[0-9]*:[0-9]*$//' | sort | uniq -c | sort -rn",
+  "description": "Temporarily enable missing_docs to measure the scope",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! `brain`: a shadow assistant that captures what you type and makes it searchable.
+//!
+//! Pipeline: [`capture`] (keystrokes + focus → append-only [`eventlog`]) →
+//! [`ingest`] (log → [`sessions`] with [`reconstruct`]ed text → SQLite
+//! [`store`] with full-text index) → [`query`] (`search` over sessions, `text`
+//! over the log).
+
+pub mod capture;
+pub mod datadir;
+pub mod event;
+pub mod eventlog;
+pub mod ingest;
+pub mod query;
+pub mod reconstruct;
+pub mod sessions;
+pub mod store;
+pub mod timefmt;
+     80 warning: missing documentation for a struct field
+     43 warning: missing documentation for a variant
+     38 warning: missing documentation for a method
+     21 warning: missing documentation for a struct
+     11 warning: missing documentation for an associated function
+      8 warning: missing documentation for a function
+      6 warning: missing documentation for an enum
+      3 warning: missing documentation for a constant
+210
+     40    --> src/query.rs
+     25   --> src/event.rs
+     21   --> src/reconstruct/editor.rs
+     19   --> src/reconstruct/buffer.rs
+      8   --> src/ingest.rs
+      7   --> src/datadir.rs
+      7   --> src/capture/recorder.rs
+      7   --> src/capture/linux/keys.rs
+      7    --> src/capture/linux/keys.rs
+      6   --> src/reconstruct/vscode/mod.rs
+      6   --> src/query.rs
+      6    --> src/reconstruct/buffer.rs
+      5    --> src/reconstruct/vscode/mod.rs
+      4   --> src/capture/linux/synthetic.rs
+      4   --> src/capture/linux/input.rs
+      4    --> src/reconstruct/editor.rs
+      3   --> src/capture/linux/desktop.rs
+      3    --> src/store.rs
+      3    --> src/sessions.rs
+      3    --> src/reconstruct/tier2.rs
+      3    --> src/capture/linux/xkb.rs
+      2   --> src/timefmt.rs
+      2   --> src/reconstruct/vscode/title.rs
+      2   --> src/eventlog.rs
+      2   --> src/capture/mod.rs
+      2   --> src/capture/linux/xkb.rs
+      2    --> src/ingest.rs
+      2    --> src/capture/recorder.rs
+      1  --> src/reconstruct/editor.rs
+      1  --> src/reconstruct/apps.rs
+      1   --> src/sessions.rs
+      1   --> src/reconstruct/tier2.rs
+      1    --> src/capture/linux/input.rs
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The public struct fields and enum variants account for 210 lint items rather than 85, so I'll document them and enable the lint at the end; I'm restoring lib.rs for now. Next I'm finding every use of the end-reason enum and its status strings.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cp /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/lib_orig.rs src/lib.rs && git diff --stat src/lib.rs; awk '/#\\[cfg\\(test\\)\\]/{exit} {print FILENAME\":\"FNR\": \"$0}' src/sessions.rs | grep -nE 'reason|\"idle\"|\"commit\"|\"cancel\"|\"field\"|\"stop\"|\"restart\"' | cut -c1-150",
+  "description": "Restore lib.rs; list end-reason uses in sessions.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+80:src/sessions.rs:80:     /// Replay is impossible; the reason is recorded.
+364:src/sessions.rs:364:         self.close_where(tx, "idle", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;
+391:src/sessions.rs:391:                 let reason = match outcome {
+393:src/sessions.rs:393:                     Outcome::Commit => "commit",
+394:src/sessions.rs:394:                     Outcome::Cancel => "cancel",
+395:src/sessions.rs:395:                     Outcome::FieldChange => "field",
+397:src/sessions.rs:397:                 self.close(tx, &k, reason, true)?;
+423:src/sessions.rs:423:                     self.close_where(tx, "restart", |_| true)?;
+431:src/sessions.rs:431:                 SystemState::Stop => self.close_where(tx, "stop", |_| true)?,
+441:src/sessions.rs:441:         self.close_where(tx, "idle", |s| {
+536:src/sessions.rs:536:         reason: &str,
+548:src/sessions.rs:548:             self.close(tx, &k, reason, false)?;
+560:src/sessions.rs:560:     fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
+578:src/sessions.rs:578:         let typed = (changed || reason == "commit") && !text.trim().is_empty();
+587:src/sessions.rs:587:                     end_offset = ?3, end_reason = ?4,
+599:src/sessions.rs:599:                 reason,
+764:src/sessions.rs:764:          WHERE app = ?1 AND end_reason = 'commit' AND end_offset <= ?2
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 755,770p src/sessions.rs; grep -rn \"'pending'\\|\\\"pending\\\"\\|'snapshot'\\|\\\"snapshot\\\"\\|'resolving'\\|\\\"resolving\\\"\\|skipped: \\|failed: \" src --include=*.rs | grep -v '^\\s*//' | cut -c1-140",
+  "description": "See SQL uses of end_reason and the tier 2 status strings"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+    }
+    Ok(buf)
+}
+
+/// The `n`-th most recent line committed in `app` before log offset `before`
+/// (shell history, as far as `brain` saw it being typed).
+fn history_entry(conn: &Connection, app: &str, before: u64, n: usize) -> Option<String> {
+    conn.prepare_cached(
+        "SELECT reconstructed_text FROM sessions
+         WHERE app = ?1 AND end_reason = 'commit' AND end_offset <= ?2
+         ORDER BY end_offset DESC LIMIT 1 OFFSET ?3",
+    )
+    .and_then(|mut st| {
+        st.query_row(params![app, before as i64, n as i64], |r| r.get(0))
+            .optional()
+    })
+(eval):1: no matches found: --include=*.rs
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn \"'pending'\\|\\\"pending\\\"\\|'snapshot'\\|\\\"snapshot\\\"\\|'resolving'\\|\\\"resolving\\\"\\|skipped: \\|failed: \" src | grep -v '^\\S*:\\s*//' | cut -c1-150",
+  "description": "List the tier 2 status string uses"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/reconstruct/vscode/cdp.rs:181:                        bail!("CDP {method} failed: {err}");
+src/reconstruct/vscode/cdp.rs:203:            bail!("page script failed: {ex}");
+src/store.rs:38:                                                 --   | done: replayed (best effort, unverified) | failed: .. | skipped: ..
+src/ingest.rs:227:             WHERE id = ?3 AND tier2_status IN ('pending', ?4)",
+src/ingest.rs:232:            "DELETE FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+src/ingest.rs:236:            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status IN ('pending', ?3)",
+src/ingest.rs:237:            rusqlite::params![format!("failed: {why}"), id, pending],
+src/sessions.rs:206:                    tier2_snapshot: tier2.as_deref() == Some("snapshot"),
+src/sessions.rs:581:                "pending"
+src/sessions.rs:589:                        WHEN 'snapshot' THEN ?6
+src/sessions.rs:591:                        WHEN 'resolving' THEN 'skipped: could not identify the file from the window title'
+src/sessions.rs:681:            "snapshot".to_string(),
+src/sessions.rs:685:        Tier2Start::NotYet(_) => ("resolving".to_string(), None, false),
+src/sessions.rs:686:        Tier2Start::Skipped(why) => (format!("skipped: {why}"), None, false),
+src/sessions.rs:1119:        assert_eq!(tier2_status(&ing).as_deref(), Some("resolving"));
+src/sessions.rs:1121:        assert_eq!(tier2_status(&ing).as_deref(), Some("snapshot"));
+src/sessions.rs:1128:        assert_eq!(tier2_status(&ing).as_deref(), Some("pending"));
+src/sessions.rs:1143:            Some("skipped: not identified yet")
+src/sessions.rs:1165:            Some("skipped: saved meanwhile")
+src/reconstruct/tier2.rs:141:            .prepare("SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending', ?1)")?;
+src/reconstruct/tier2.rs:389:        conn.prepare("SELECT id FROM sessions WHERE tier2_status IN ('pending', ?1) ORDER BY id")?;
+src/reconstruct/tier2.rs:416:             FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+src/capture/linux/input.rs:212:                eprintln!("brain: poll failed: {err}");
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm turning the session end reasons and tier-2 states into enums, with SQL binding them, and the stored strings stay the same. Next I'll read the affected code sections.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 82,100p src/sessions.rs; sed -n 384,400p src/sessions.rs; sed -n 530,610p src/sessions.rs; sed -n 672,692p src/sessions.rs",
+  "description": "Read the session close path and tier 2 recording"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+}
+
+/// `tier2_status` of a closed VS Code session that only shortcuts touched
+/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the
+/// saved file's diff, or is removed; it is never replayed.
+pub const TIER2_PENDING_SAVED_ONLY: &str = "pending: saved file only";
+
+/// Takes the file snapshot a tier 2 replay starts from, when a session opens
+/// (and again on each ingest step while it answers [`Tier2Start::NotYet`]).
+pub trait Tier2Snapshotter: Send {
+    /// Whether keys in this app that tier 0/1 ignores (Ctrl+D, Ctrl+S, ...)
+    /// still open or extend a session: they may change the file.
+    fn counts_every_key(&self, _app: &str) -> bool {
+        false
+    }
+    /// A window of `app` was focused or retitled at `ts`: a chance to copy
+    /// its file before any key, in case it is saved before the session's
+    /// own snapshot is taken.
+    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}
+                }
+                self.ensure_open(tx, &k, class, window, ev.ts, offset)?;
+                let s = self.open.get_mut(&k).expect("just opened");
+                let mut hist = |n: usize| history_entry(tx, &ev.app, offset, n);
+                let outcome = s.editor.apply(&act, &mut hist);
+                s.touch(ev.ts, next);
+                self.last_key = Some((k.clone(), ev.ts));
+                let reason = match outcome {
+                    Outcome::Continue => return Ok(()),
+                    Outcome::Commit => "commit",
+                    Outcome::Cancel => "cancel",
+                    Outcome::FieldChange => "field",
+                };
+                self.close(tx, &k, reason, true)?;
+            }
+            EventKind::Paste { text, window } => {
+                let k = self.resolve(&ev.app, window);
+        Ok(())
+    }
+
+    fn close_where(
+        &mut self,
+        tx: &Connection,
+        reason: &str,
+        pred: impl Fn(&OpenSession) -> bool,
+    ) -> Result<()> {
+        let mut keys: Vec<Key> = self
+            .open
+            .iter()
+            .filter(|(_, s)| pred(s))
+            .map(|(k, _)| k.clone())
+            .collect();
+        // Deterministic order (HashMap iteration order is not).
+        keys.sort_by_key(|k| self.open[k].id);
+        for k in keys {
+            self.close(tx, &k, reason, false)?;
+        }
+        Ok(())
+    }
+
+    /// Closes a session. A session that left the document as it found it
+    /// (cursor movement, a typo typed and deleted) or holds only whitespace
+    /// leaves no row behind, except a commit of a non-empty line, which is a
+    /// real submission (a shell command run again from history), and a
+    /// session with a tier 2 snapshot, which stays until the saved file's
+    /// diff shows whether the file changed (shortcuts like Ctrl+D change it
+    /// without changing the tier 0/1 text).
+    fn close(&mut self, tx: &Connection, k: &Key, reason: &str, reset: bool) -> Result<()> {
+        let Some(mut s) = self.open.remove(k) else {
+       
+… [2825 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/sessions.rs'; s=open(p).read()\ndef rep(old,new,count=1):\n    global s\n    assert s.count(old)==count, (old[:70], s.count(old)); s=s.replace(old,new)\nrep('''/// `tier2_status` of a closed VS Code session that only shortcuts touched\n/// (its tier 0/1 text is unchanged, e.g. Ctrl+D then Ctrl+S): it gets the\n/// saved file's diff, or is removed; it is never replayed.\npub const TIER2_PENDING_SAVED_ONLY: &str = \"pending: saved file only\";\n''','''/// Why a session ended, as stored in `sessions.end_reason`.\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum EndReason {\n    /// No activity in its window for [`IDLE_TIMEOUT_MS`].\n    Idle,\n    /// A single-line field was submitted (Enter at a shell prompt).\n    Commit,\n    /// A single-line field was cancelled (Ctrl+C at a prompt).\n    Cancel,\n    /// Focus moved to another field of the same window (Tab in a form).\n    Field,\n    /// `brain run` stopped.\n    Stop,\n    /// `brain run` started again without a clean stop (a crash).\n    Restart,\n}\n\nimpl EndReason {\n    /// The value stored in the database.\n    pub const fn as_str(self) -> &'static str {\n        match self {\n            EndReason::Idle => \"idle\",\n            EndReason::Commit => \"commit\",\n            EndReason::Cancel => \"cancel\",\n            EndReason::Field => \"field\",\n            EndReason::Stop => \"stop\",\n            EndReason::Restart => \"restart\",\n        }\n    }\n}\n\n/// The fixed values of `sessions.tier2_status` while tier 2 works on a\n/// session; the outcomes are free text (`done: ...`, [`tier2_failed`],\n/// [`tier2_skipped`]).\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\npub enum Tier2Status {\n    /// Looking for the edited file (VS Code records it late).\n    Resolving,\n    /// The file's initial content is saved; the session is open.\n    Snapshot,\n    /// Closed, waiting for the worker (saved file's diff, or a replay).\n    Pending,\n    /// Closed after shortcuts only (its tier 0/1 text is unchanged, e.g.\n    /// Ctrl+D then Ctrl+S): it gets the saved file's diff, or is removed;\n    /// it is never replayed.\n    PendingSavedOnly,\n}\n\nimpl Tier2Status {\n    /// The value stored in the database.\n    pub const fn as_str(self) -> &'static str {\n        match self {\n            Tier2Status::Resolving => \"resolving\",\n            Tier2Status::Snapshot => \"snapshot\",\n            Tier2Status::Pending => \"pending\",\n            Tier2Status::PendingSavedOnly => \"pending: saved file only\",\n        }\n    }\n}\n\n/// `tier2_status` of a session tier 2 cannot handle, with the reason.\npub fn tier2_skipped(why: &str) -> String {\n    format!(\"skipped: {why}\")\n}\n\n/// `tier2_status` of a session whose tier 2 job failed, with the reason.\npub fn tier2_failed(why: &str) -> String {\n    format!(\"failed: {why}\")\n}\n''')\nrep('''                    tier2_snapshot: tier2.as_deref() == Some(\"snapshot\"),''','''                    tier2_snapshot: tier2.as_deref() == Some(Tier2Status::Snapshot.as_str()),''')\nrep('''        self.close_where(tx, \"idle\", |s| ev.ts - s.last_activity >= IDLE_TIMEOUT_MS)?;''','''        self.close_where(tx, EndReason::Idle, |s| {\n            ev.ts - s.last_activity >= IDLE_TIMEOUT_MS\n        })?;''')\nrep('''                    Outcome::Commit => \"commit\",\n                    Outcome::Cancel => \"cancel\",\n                    Outcome::FieldChange => \"field\",''','''                    Outcome::Commit => EndReason::Commit,\n                    Outcome::Cancel => EndReason::Cancel,\n                    Outcome::FieldChange => EndReason::Field,''')\nrep('''                    self.close_where(tx, \"restart\", |_| true)?;''','''                    self.close_where(tx, EndReason::Restart, |_| true)?;''')\nrep('''                SystemState::Stop => self.close_where(tx, \"stop\", |_| true)?,''','''                SystemState::Stop => self.close_where(tx, EndReason::Stop, |_
+… [4221 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/ingest.rs:19:use crate::sessions::{Sessions, TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter};
+src/ingest.rs:223:    let pending = TIER2_PENDING_SAVED_ONLY;
+src/reconstruct/tier2.rs:31:use crate::sessions::{TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter, Tier2Start};
+src/reconstruct/tier2.rs:143:            .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get::<_, i64>(0))?
+src/reconstruct/tier2.rs:391:        .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get(0))?
+src/reconstruct/tier2.rs:417:            rusqlite::params![id, TIER2_PENDING_SAVED_ONLY],
+src/reconstruct/tier2.rs:454:    if status == TIER2_PENDING_SAVED_ONLY {
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:58:26.927Z</sub>
+
+Now `ingest.rs` and `tier2.rs`, which use the old constant and the `'pending'`/`'snapshot'` literals:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 218,242p src/ingest.rs; sed -n 136,146p src/reconstruct/tier2.rs; sed -n 386,394p src/reconstruct/tier2.rs; sed -n 412,420p src/reconstruct/tier2.rs; sed -n 450,458p src/reconstruct/tier2.rs",
+  "description": "Read the tier 2 status SQL in ingest.rs and tier2.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fn apply_tier2_result(
+    tx: &Connection,
+    id: i64,
+    result: &std::result::Result<Tier2Outcome, String>,
+) -> Result<()> {
+    let pending = TIER2_PENDING_SAVED_ONLY;
+    match result {
+        Ok(Tier2Outcome::Text(done)) => tx.execute(
+            "UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2
+             WHERE id = ?3 AND tier2_status IN ('pending', ?4)",
+            rusqlite::params![done.text, done.status, id, pending],
+        )?,
+        // The session changed nothing in the file.
+        Ok(Tier2Outcome::Unchanged) => tx.execute(
+            "DELETE FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+            rusqlite::params![id, pending],
+        )?,
+        Err(why) => tx.execute(
+            "UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status IN ('pending', ?3)",
+            rusqlite::params![format!("failed: {why}"), id, pending],
+        )?,
+    };
+    Ok(())
+}
+
+
+    /// Removes snapshots no session needs any more (left behind when `brain
+    /// run` died between taking a snapshot and committing its session).
+    pub fn prune(&self, conn: &rusqlite::Connection) -> Result<()> {
+        let mut st = conn
+            .prepare("SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending', ?1)")?;
+        let keep = st
+            .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
+        for entry in std::fs::read_dir(&self.dir)?.flatten() {
+            let name = entry.file_name();
+fn pending_jobs(db_path: &Path) -> Result<Vec<i64>> {
+    let conn = store::open_reader(db_path)?;
+    let mut st =
+        conn.prepare("SELECT id FROM sessions WHERE tier2_status IN ('pending', ?1) ORDER BY id")?;
+    let ids = st
+        .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
+}
+    );
+    let (app, window, start, end, file, ended_at, status): Row = conn
+        .query_row(
+            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at, tier2_status
+             FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)",
+            rusqlite::params![id, TIER2_PENDING_SAVED_ONLY],
+            |r| {
+                Ok((
+                    r.get(0)?,
+            status: STATUS_SAVED_FILE,
+        }));
+    }
+    // Only shortcuts and no save: nothing shows that the file changed.
+    if status == TIER2_PENDING_SAVED_ONLY {
+        return Ok(Tier2Outcome::Unchanged);
+    }
+    // 2. Otherwise, a best-effort replay.
+    let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/ingest.rs',[\n(\"use crate::sessions::{Sessions, TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter};\",\"use crate::sessions::{Sessions, Tier2Snapshotter, Tier2Status, tier2_failed};\"),\n('''    let pending = TIER2_PENDING_SAVED_ONLY;\n    match result {\n        Ok(Tier2Outcome::Text(done)) => tx.execute(\n            \"UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2\n             WHERE id = ?3 AND tier2_status IN ('pending', ?4)\",\n            rusqlite::params![done.text, done.status, id, pending],\n        )?,\n        // The session changed nothing in the file.\n        Ok(Tier2Outcome::Unchanged) => tx.execute(\n            \"DELETE FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)\",\n            rusqlite::params![id, pending],\n        )?,\n        Err(why) => tx.execute(\n            \"UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status IN ('pending', ?3)\",\n            rusqlite::params![format!(\"failed: {why}\"), id, pending],\n        )?,\n    };''','''    // Only a session still waiting for its result is updated.\n    let (pending, saved_only) = (\n        Tier2Status::Pending.as_str(),\n        Tier2Status::PendingSavedOnly.as_str(),\n    );\n    match result {\n        Ok(Tier2Outcome::Text(done)) => tx.execute(\n            \"UPDATE sessions SET reconstructed_text = ?1, tier_used = 2, tier2_status = ?2\n             WHERE id = ?3 AND tier2_status IN (?4, ?5)\",\n            rusqlite::params![done.text, done.status, id, pending, saved_only],\n        )?,\n        // The session changed nothing in the file.\n        Ok(Tier2Outcome::Unchanged) => tx.execute(\n            \"DELETE FROM sessions WHERE id = ?1 AND tier2_status IN (?2, ?3)\",\n            rusqlite::params![id, pending, saved_only],\n        )?,\n        Err(why) => tx.execute(\n            \"UPDATE sessions SET tier2_status = ?1 WHERE id = ?2 AND tier2_status IN (?3, ?4)\",\n            rusqlite::params![tier2_failed(why), id, pending, saved_only],\n        )?,\n    };'''),\n])\nedit('src/reconstruct/tier2.rs',[\n(\"use crate::sessions::{TIER2_PENDING_SAVED_ONLY, Tier2Snapshotter, Tier2Start};\",\"use crate::sessions::{Tier2Snapshotter, Tier2Start, Tier2Status};\"),\n('''            .prepare(\"SELECT id FROM sessions WHERE tier2_status IN ('snapshot', 'pending', ?1)\")?;\n        let keep = st\n            .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get::<_, i64>(0))?''','''            .prepare(\"SELECT id FROM sessions WHERE tier2_status IN (?1, ?2, ?3)\")?;\n        let keep = st\n            .query_map(\n                [\n                    Tier2Status::Snapshot.as_str(),\n                    Tier2Status::Pending.as_str(),\n                    Tier2Status::PendingSavedOnly.as_str(),\n                ],\n                |r| r.get::<_, i64>(0),\n            )?'''),\n('''        conn.prepare(\"SELECT id FROM sessions WHERE tier2_status IN ('pending', ?1) ORDER BY id\")?;\n    let ids = st\n        .query_map([TIER2_PENDING_SAVED_ONLY], |r| r.get(0))?''','''        conn.prepare(\"SELECT id FROM sessions WHERE tier2_status IN (?1, ?2) ORDER BY id\")?;\n    let ids = st\n        .query_map(\n            [\n                Tier2Status::Pending.as_str(),\n                Tier2Status::PendingSavedOnly.as_str(),\n            ],\n            |r| r.get(0),\n        )?'''),\n('''             FROM sessions WHERE id = ?1 AND tier2_status IN ('pending', ?2)\",\n            rusqlite::params![id, TIER2_PENDING_SAVED_ONLY],''','''             FROM sessions WHERE id = ?1 AND tier2_status IN (?2, ?3)\",\n            rusqlite::params![\n                id,\n                Tier2Status::Pending.as_str(),\n                Tier2Status::PendingSavedOnly.as_str()\n            ],'''),\n('''    if sta
+… [291 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+[This command modified 3 files you've previously read: src/sessions.rs, src/ingest.rs, src/reconstruct/tier2.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:58:51.804Z</sub>
+
+Clean. Now the tests that exercise these paths: unit tests (session rules, crash recovery, tier 2), the saved-file tests, and crash safety, which compares the live index with a rebuild:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -rn 'TIER2_PENDING_SAVED_ONLY' src tests chat PLAN.md README.md CLAUDE.md | head; cargo test --release --lib --test tier2_e2e --test crash_safety --test query_cli 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Check no old constant remains; run the affected tests",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+     Running unittests src/lib.rs 
+test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+     Running tests/query_cli.rs 
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T13:59:54.432Z</sub>
+
+All green, and the stored values are unchanged (the unit tests assert the persisted strings). Committing this step, then on to splitting the 187-line `start`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git add src && git commit -q -F - <<'EOF'\nType end reasons and tier 2 states as enums\n\nFollowing the clean-code review the owner asked for: a session's end\nreason travelled through sessions.rs as a string (\"idle\", \"commit\"...,\ncompared with `reason == \"commit\"`), and the tier 2 states were string\nliterals repeated across sessions.rs, ingest.rs and tier2.rs.\n\nEndReason and Tier2Status now name them, with as_str() giving the\nvalues stored in the database, which do not change; tier2_skipped and\ntier2_failed build the free-text outcomes. SQL binds these values\ninstead of repeating literals. No logic changes: the unit tests that\nassert the stored strings, crash safety and the tier 2 tests pass.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\nEOF\ngrep -n 'fn start' src/reconstruct/vscode/mod.rs",
+  "description": "Commit the enum step; locate vscode start"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+367:    fn start(&mut self, deadline: Instant) -> Result<()> {
+```
+
+</details>
+
+**Tool call: `Read`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/mod.rs",
+  "offset": 300,
+  "limit": 260
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+300	        }
+301	        let _ = std::fs::remove_file(self.work_dir.join("instance.json"));
+302	    }
+303	
+304	    fn replay_inner(&mut self, input: &ReplayInput, deadline: Instant) -> Result<String> {
+305	        trace("replay start");
+306	        let file_name = sanitize_file_name(input.file_name);
+307	        if let Some(inst) = &mut self.inst
+308	            && inst.child.try_wait().ok().flatten().is_some()
+309	        {
+310	            self.shutdown(); // died since the last job
+311	        }
+312	        if self.inst.is_none() {
+313	            self.start(deadline)?;
+314	        }
+315	
+316	        self.job_seq += 1;
+317	        let jobs = self.work_dir.join("jobs");
+318	        let job_dir = jobs.join(self.job_seq.to_string());
+319	        let _ = std::fs::remove_dir_all(&jobs);
+320	        std::fs::create_dir_all(&job_dir)
+321	            .with_context(|| format!("creating {}", job_dir.display()))?;
+322	        let path = job_dir.join(&file_name);
+323	        std::fs::write(&path, input.initial)
+324	            .with_context(|| format!("writing {}", path.display()))?;
+325	        let suffix = format!("/jobs/{}/{}", self.job_seq, file_name);
+326	
+327	        let inst = self.inst.as_mut().ok_or_else(|| anyhow!("no instance"))?;
+328	        let cdp = &mut inst.cdp;
+329	        close_job_editors(cdp, deadline)?;
+330	        trace("editors closed");
+331	        open_file(cdp, &path, &file_name, &suffix, deadline)?;
+332	        trace("file open");
+333	
+334	        replay_actions(cdp, &keys::plan(input.events), deadline)?;
+335	        trace("keys sent");
+336	        // Save, and wait until the title loses the dirty marker for good.
+337	        std::thread::sleep(POLL);
+338	        send_cmd(cdp, Cmd::Save, deadline)?;
+339	        let mut clean_polls = 0;
+340	        loop {
+341	            let t = title(cdp, deadline)?;
+342	            if !t.ends_with(&suffix) {
+343	                bail!("the replayed editor lost focus or closed (title {t:?})");
+344	            }
+345	            if title_is_dirty(&t) {
+346	                clean_polls = 0;
+347	            } else {
+348	                clean_polls += 1;
+349	                if clean_polls >= 3 {
+350	                    break;
+351	                }
+352	            }
+353	            sleep_until(deadline, POLL)?;
+354	        }
+355	        trace("saved");
+356	        let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+357	        // Leave the instance clean for the next job.
+358	        let _ = send_cmd(cdp, Cmd::RevertAndClose, deadline);
+359	        let _ = std::fs::remove_dir_all(&job_dir);
+360	        Ok(match String::from_utf8(bytes) {
+361	            Ok(s) => s,
+362	            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+363	        })
+364	    }
+365	
+366	    /// Starts the warm instance and waits until its workbench is ready.
+367	    fn start(&mut self, deadline: Instant) -> Result<()> {
+368	        kill_stale(&self.work_dir);
+369	        let bi
+… [8034 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm splitting `start` into six named steps (systemd probe, scope name, command line, spawn with DevTools pipes, registration, and scope recording) with the order unchanged.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'fn pipe_cloexec\\|fn dup_above\\|fn which\\|fn code_binary\\|fn prepare_extensions\\|^use ' src/reconstruct/vscode/mod.rs | head -30",
+  "description": "Check helper signatures and imports in vscode/mod.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+77:use crate::event::Mod;
+78:use anyhow::{Context, Result, anyhow, bail};
+79:use cdp::Cdp;
+80:use keys::{Action, CdpKey, MOD_ALT, MOD_CTRL, MOD_SHIFT};
+81:use serde_json::{Value, json};
+82:use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+83:use std::os::unix::process::CommandExt;
+84:use std::path::{Path, PathBuf};
+85:use std::process::{Child, Command, Stdio};
+86:use std::sync::atomic::{AtomicBool, Ordering};
+87:use std::sync::mpsc::{RecvTimeoutError, channel};
+88:use std::sync::{Arc, Mutex};
+89:use std::time::{Duration, Instant, SystemTime};
+893:fn code_binary() -> Result<PathBuf> {
+911:fn which(name: &str) -> Option<PathBuf> {
+919:fn pipe_cloexec() -> Result<(OwnedFd, OwnedFd)> {
+929:fn dup_above(fd: &OwnedFd, min: i32) -> Result<OwnedFd> {
+997:fn prepare_extensions(work_dir: &Path, deadline: Instant) -> Option<PathBuf> {
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/vscode/mod.rs'; s=open(p).read()\ni=s.index(\"    /// Starts the warm instance and waits until its workbench is ready.\\n    fn start(&mut self, deadline: Instant) -> Result<()> {\")\nj=s.index(\"impl Drop for VsCodeReplayer {\")\n# the start fn ends with \"        Ok(())\\n    }\\n}\\n\\n\" before impl Drop\nend_marker = \"        trace(\\\"workbench ready\\\");\\n        Ok(())\\n    }\\n}\\n\\n\"\nk=s.index(end_marker, i)+len(end_marker)\nassert k==j, (k,j)\nnew='''    /// Starts the warm instance and waits until its workbench is ready.\n    fn start(&mut self, deadline: Instant) -> Result<()> {\n        kill_stale(&self.work_dir);\n        let bin = code_binary()?;\n        let unshare = which(\"unshare\").ok_or_else(|| {\n            anyhow!(\"`unshare` not found: cannot isolate VS Code from the network\")\n        })?;\n        let user_data = self.work_dir.join(\"user-data\");\n        let home = self.work_dir.join(\"home\");\n        std::fs::create_dir_all(user_data.join(\"User\"))?;\n        std::fs::create_dir_all(&home)?;\n        prepare_user_config(&user_data.join(\"User\"))?;\n        let extensions = prepare_extensions(&self.work_dir, deadline);\n        let capped = self.systemd_available();\n        let unit = scope_unit_name();\n\n        let cmd = self.command(\n            &bin,\n            &unshare,\n            capped.then_some(unit.as_str()),\n            &user_data,\n            &home,\n            extensions.as_deref(),\n        )?;\n        let (child, to_child_w, from_child_r) = spawn_with_cdp_pipes(cmd, &bin)?;\n        let pid = child.id() as i32;\n        let killed = self.register(pid, &user_data);\n        let cdp = match Cdp::new(to_child_w, from_child_r, killed) {\n            Ok(c) => c,\n            Err(e) => {\n                let mut child = child;\n                if let Some(ids) = self.ids.lock().ok().and_then(|mut g| g.take()) {\n                    ids.kill();\n                }\n                let _ = child.wait();\n                return Err(e);\n            }\n        };\n        self.inst = Some(Instance { child, cdp });\n        if capped {\n            self.record_scope(pid, &unit, deadline);\n        }\n        trace(\"spawned\");\n        let inst = self.inst.as_mut().ok_or_else(|| anyhow!(\"no instance\"))?;\n        attach_workbench(&mut inst.cdp, deadline)?;\n        trace(\"workbench ready\");\n        Ok(())\n    }\n\n    /// Whether `systemd-run --user --scope` works here, probed once; without\n    /// it the instance runs without CPU/memory caps (warned once).\n    fn systemd_available(&mut self) -> bool {\n        if self.systemd.is_none() {\n            let ok = Command::new(\"systemd-run\")\n                .args([\"--user\", \"--scope\", \"-q\", \"--collect\", \"--\", \"true\"])\n                .stdin(Stdio::null())\n                .stdout(Stdio::null())\n                .stderr(Stdio::null())\n                .status()\n                .is_ok_and(|s| s.success());\n            if !ok {\n                eprintln!(\n                    \"brain: warning: systemd-run --user is unavailable; \\\\\n                     VS Code replay runs without CPU/memory caps\"\n                );\n            }\n            self.systemd = Some(ok);\n        }\n        self.systemd == Some(true)\n    }\n\n    /// The sandboxed VS Code command: in the capped systemd scope `unit`\n    /// (when given), in its own network namespace, headless (or visible with\n    /// [`VISIBLE_ENV`]), with its own state, cut off from the session bus,\n    /// logging to `vscode.log`.\n    fn command(\n        &self,\n        bin: &Path,\n        unshare: &Path,\n        unit: Option<&str>,\n        user_data: &Path,\n        home: &Path,\n        extensions: Option<&Path>,\n    ) -> Result<Command> {\n        let mut cmd = match unit {\n            Some(unit) => {\n                let mut c = Command::new(\"systemd-run\");\n                c.args(
+… [6290 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+[This command modified 1 file you've previously read: src/reconstruct/vscode/mod.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:00:48.792Z</sub>
+
+Clippy is clean. Now `tier2::run_job` (82 lines), which loads the job, tries the saved file, then falls back to replay:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/^fn run_job(/,/^}/p' src/reconstruct/tier2.rs",
+  "description": "Read tier2 run_job"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+fn run_job(
+    replayer: &mut VsCodeReplayer,
+    db_path: &Path,
+    log_path: &Path,
+    snapshots: &Path,
+    id: i64,
+) -> Result<Tier2Outcome> {
+    let conn = store::open_reader(db_path)?;
+    type Row = (
+        String,
+        String,
+        i64,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+    let (app, window, start, end, file, ended_at, status): Row = conn
+        .query_row(
+            "SELECT app, window, start_offset, end_offset, tier2_file, ended_at, tier2_status
+             FROM sessions WHERE id = ?1 AND tier2_status IN (?2, ?3)",
+            rusqlite::params![
+                id,
+                Tier2Status::Pending.as_str(),
+                Tier2Status::PendingSavedOnly.as_str()
+            ],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            },
+        )
+        .context("session is no longer pending")?;
+    drop(conn);
+    let (Some(end), Some(file), Some(ended_at)) = (end, file, ended_at) else {
+        bail!("session has no end offset, file or end time");
+    };
+    let initial = std::fs::read(snapshot_path(snapshots, id)).context("reading the snapshot")?;
+    let initial_text = String::from_utf8_lossy(&initial);
+    // 1. The file as VS Code saved it after the last keystroke, if it was.
+    let last_key = crate::timefmt::parse_rfc3339_ms(&ended_at)?;
+    if let Some(saved) = saved_after(Path::new(&file), last_key) {
+        let name = Path::new(&file)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let diff = vscode::unified_diff(&initial_text, &saved, &name, 3);
+        if diff.is_empty() {
+            return Ok(Tier2Outcome::Unchanged);
+        }
+        return Ok(Tier2Outcome::Text(Tier2Text {
+            text: diff,
+            status: STATUS_SAVED_FILE,
+        }));
+    }
+    // Only shortcuts and no save: nothing shows that the file changed.
+    if status == Tier2Status::PendingSavedOnly.as_str() {
+        return Ok(Tier2Outcome::Unchanged);
+    }
+    // 2. Otherwise, a best-effort replay.
+    let events = session_events(log_path, &app, &window, start as u64, end as u64)?;
+    let file_name = Path::new(&file)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file.txt".into());
+    // Generous: VS Code may need to start (cold start is several seconds).
+    let timeout = Duration::from_secs(45) + Duration::from_millis(30 * events.len() as u64);
+    let saved = replayer.replay(
+        &ReplayInput {
+            file_name: &file_name,
+            initial: &initial,
+            events: &events,
+        },
+        timeout,
+    )?;
+    Ok(Tier2Outcome::Text(Tier2Text {
+        text: vscode::changed_lines(&initial_text
+… [53 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm splitting run_job into load_job (which reads the session row into a Job struct), saved_file_outcome and replay_outcome, so each step is a single call.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/reconstruct/tier2.rs'; s=open(p).read()\ni=s.index(\"fn run_job(\\n\")\nj=s.index(\"\\n}\\n\", i)+3\nnew='''/// A pending tier 2 job: the session's row, as the worker needs it.\nstruct Job {\n    app: String,\n    window: String,\n    /// The session's events in the log: `[start, end)`.\n    start: u64,\n    end: u64,\n    /// The edited file.\n    file: String,\n    /// The session's last keystroke.\n    last_key: Millis,\n    /// Shortcuts only ([`Tier2Status::PendingSavedOnly`]): never replayed.\n    saved_only: bool,\n}\n\nfn run_job(\n    replayer: &mut VsCodeReplayer,\n    db_path: &Path,\n    log_path: &Path,\n    snapshots: &Path,\n    id: i64,\n) -> Result<Tier2Outcome> {\n    let job = load_job(db_path, id)?;\n    let initial = std::fs::read(snapshot_path(snapshots, id)).context(\"reading the snapshot\")?;\n    let initial_text = String::from_utf8_lossy(&initial);\n    // 1. The file as VS Code saved it after the last keystroke, if it was.\n    if let Some(outcome) = saved_file_outcome(&job, &initial_text) {\n        return Ok(outcome);\n    }\n    // Only shortcuts and no save: nothing shows that the file changed.\n    if job.saved_only {\n        return Ok(Tier2Outcome::Unchanged);\n    }\n    // 2. Otherwise, a best-effort replay.\n    replay_outcome(replayer, log_path, &job, &initial, &initial_text)\n}\n\n/// Reads session `id`, which must still be waiting for its tier 2 result.\nfn load_job(db_path: &Path, id: i64) -> Result<Job> {\n    let conn = store::open_reader(db_path)?;\n    type Row = (\n        String,\n        String,\n        i64,\n        Option<i64>,\n        Option<String>,\n        Option<String>,\n        String,\n    );\n    let (app, window, start, end, file, ended_at, status): Row = conn\n        .query_row(\n            \"SELECT app, window, start_offset, end_offset, tier2_file, ended_at, tier2_status\n             FROM sessions WHERE id = ?1 AND tier2_status IN (?2, ?3)\",\n            rusqlite::params![\n                id,\n                Tier2Status::Pending.as_str(),\n                Tier2Status::PendingSavedOnly.as_str()\n            ],\n            |r| {\n                Ok((\n                    r.get(0)?,\n                    r.get(1)?,\n                    r.get(2)?,\n                    r.get(3)?,\n                    r.get(4)?,\n                    r.get(5)?,\n                    r.get(6)?,\n                ))\n            },\n        )\n        .context(\"session is no longer pending\")?;\n    let (Some(end), Some(file), Some(ended_at)) = (end, file, ended_at) else {\n        bail!(\"session has no end offset, file or end time\");\n    };\n    Ok(Job {\n        app,\n        window,\n        start: start as u64,\n        end: end as u64,\n        file,\n        last_key: crate::timefmt::parse_rfc3339_ms(&ended_at)?,\n        saved_only: status == Tier2Status::PendingSavedOnly.as_str(),\n    })\n}\n\n/// The diff of the file VS Code saved after the session's last keystroke\n/// against its initial content (`Unchanged` if it is the same); `None` if\n/// the file was not saved after the session.\nfn saved_file_outcome(job: &Job, initial_text: &str) -> Option<Tier2Outcome> {\n    let saved = saved_after(Path::new(&job.file), job.last_key)?;\n    let name = Path::new(&job.file)\n        .file_name()\n        .map(|n| n.to_string_lossy().into_owned())\n        .unwrap_or_default();\n    let diff = vscode::unified_diff(initial_text, &saved, &name, 3);\n    Some(if diff.is_empty() {\n        Tier2Outcome::Unchanged\n    } else {\n        Tier2Outcome::Text(Tier2Text {\n            text: diff,\n            status: STATUS_SAVED_FILE,\n        })\n    })\n}\n\n/// Replays the session's keystrokes from the log into VS Code and takes the\n/// lines they changed (best effort, see [`super::vscode`]).\nfn replay_outcome(\n    replayer: &mut VsCodeReplayer,\n    log_path: &Path,\n    job: &Job,\n    initial: &[u8],\n    initial_text: &str,\n) -> Result<T
+… [1014 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+[This command modified 1 file you've previously read: src/reconstruct/tier2.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:01:19.061Z</sub>
+
+Clippy is clean. Next the documentation, the biggest item. I'll turn the lint on and get the exact list of the 210 undocumented items, with file, line and the item's text:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/lib.rs'; s=open(p).read()\nif \"#![warn(missing_docs)]\" not in s:\n    s=s.replace(\"\\n\\npub mod capture;\", \"\\n\\n#![warn(missing_docs)]\\n\\npub mod capture;\",1)\nopen(p,'w').write(s)\nEOF\ncargo build -q 2>&1 | python3 -c \"\nimport sys,re\ntext=sys.stdin.read()\nitems=re.findall(r'warning: missing documentation for (an? [a-z ]+)\\n\\s+--> (\\S+):(\\d+):\\d+\\n\\s+\\|\\n\\s*\\d+\\s+\\|(.*)', text)\nimport collections\nby=collections.defaultdict(list)\nfor kind,f,l,src in items: by[f].append((int(l),kind,src.strip()))\nfor f in sorted(by, key=lambda f:-len(by[f])):\n    print(f'== {f} ({len(by[f])})')\n    for l,k,src in sorted(by[f]): print(f'  {l}: {src[:90]}')\n\" > /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt; grep -c '^  ' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt; grep '^==' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt",
+  "description": "List every undocumented public item by file",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+210
+== src/query.rs (46)
+== src/reconstruct/editor.rs (26)
+== src/event.rs (25)
+== src/reconstruct/buffer.rs (25)
+== src/capture/linux/keys.rs (14)
+== src/reconstruct/vscode/mod.rs (11)
+== src/ingest.rs (10)
+== src/capture/recorder.rs (9)
+== src/datadir.rs (7)
+== src/capture/linux/input.rs (5)
+== src/capture/linux/xkb.rs (5)
+== src/capture/linux/synthetic.rs (4)
+== src/reconstruct/tier2.rs (4)
+== src/sessions.rs (4)
+== src/capture/linux/desktop.rs (3)
+== src/store.rs (3)
+== src/capture/mod.rs (2)
+== src/eventlog.rs (2)
+== src/reconstruct/vscode/title.rs (2)
+== src/timefmt.rs (2)
+== src/reconstruct/apps.rs (1)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+I'm documenting the items file by file, largest first, writing docs that add units and origin rather than restating names. Starting with query.rs.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/== src\\/query.rs/,/^==/p' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt",
+  "description": "List undocumented items in query.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== src/query.rs (46)
+  33: pub at: Option<String>,
+  34: pub from: Option<String>,
+  35: pub to: Option<String>,
+  50: pub from: Option<Millis>,
+  51: pub to: Option<Millis>,
+  52: pub at: Option<Millis>,
+  188: pub struct SearchResult {
+  189: pub session_id: String,
+  190: pub app: String,
+  191: pub window: String,
+  192: pub started_at: String,
+  195: pub snippet: String,
+  199: pub struct SearchOutput {
+  200: pub query: String,
+  201: pub from: Option<String>,
+  202: pub to: Option<String>,
+  203: pub results: Vec<SearchResult>,
+  323: pub struct Session {
+  324: pub session_id: String,
+  325: pub app: String,
+  326: pub window: String,
+  327: pub started_at: String,
+  333: pub text: String,
+  337: pub struct SessionsOutput {
+  338: pub app: Option<String>,
+  339: pub window: Option<String>,
+  340: pub from: Option<String>,
+  341: pub to: Option<String>,
+  344: pub offset: usize,
+  345: pub sessions: Vec<Session>,
+  421: pub struct App {
+  422: pub app: String,
+  423: pub sessions: u64,
+  424: pub first_started_at: String,
+  430: pub struct AppsOutput {
+  431: pub from: Option<String>,
+  432: pub to: Option<String>,
+  433: pub apps: Vec<App>,
+  468: pub struct TextOutput {
+  469: pub app: String,
+  470: pub at: Option<String>,
+  471: pub from: Option<String>,
+  472: pub to: Option<String>,
+  475: pub windows: Vec<TextWindow>,
+  481: pub window: String,
+  482: pub text: String,
+== src/reconstruct/editor.rs (26)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+A small helper is adding `///` doc comments above each listed line, working bottom-up so the line numbers stay valid. I'm checking the query output structs first so the docs match their values.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "mkdir -p /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools && cat > /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py <<'EOF'\n\"\"\"Insert /// doc comments above given lines: python3 docs.py FILE < spec\nspec lines: `LINE|doc text` (doc text may contain \\\\n for more lines).\nInserts above any #[...] attribute lines directly above LINE; bottom-up.\"\"\"\nimport sys\npath = sys.argv[1]\nlines = open(path).read().split(\"\\n\")\nspecs = []\nfor raw in sys.stdin.read().strip().split(\"\\n\"):\n    n, text = raw.split(\"|\", 1)\n    specs.append((int(n), text.replace(\"\\\\n\", \"\\n\")))\nfor n, text in sorted(specs, reverse=True):\n    i = n - 1\n    target = lines[i]\n    assert target.strip() and not target.strip().startswith(\"///\"), (n, target)\n    indent = target[: len(target) - len(target.lstrip())]\n    j = i\n    while j > 0 and lines[j - 1].strip().startswith(\"#[\"):\n        j -= 1\n    assert not lines[j - 1].strip().startswith(\"///\"), (n, \"already documented\")\n    doc = [f\"{indent}/// {t}\".rstrip() for t in text.split(\"\\n\")]\n    lines[j:j] = doc\nopen(path, \"w\").write(\"\\n\".join(lines))\nprint(f\"{path}: {len(specs)} docs\")\nEOF\ncd /home/juan/Documents/shadow-assistant && sed -n 465,485p src/query.rs",
+  "description": "Write the doc-insertion helper; read query output structs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+// ---- text -----------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct TextOutput {
+    pub app: String,
+    pub at: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// The windows' texts, one per line.
+    pub text: String,
+    pub windows: Vec<TextWindow>,
+}
+
+/// One window's reconstructed text.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct TextWindow {
+    pub window: String,
+    pub text: String,
+}
+
+/// The text typed into one app over the window, reconstructed: the window's
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py src/query.rs <<'EOF'\n33|`--at T`: the 10 minutes ending at T.\n34|`--from T`: start of the window (alone: up to now).\n35|`--to T`: end of the window.\n50|Start, inclusive (epoch ms); `None` is open.\n51|End, inclusive (epoch ms); `None` is open.\n52|T when the window came from `--at T`, echoed in the output.\n188|One `query search` hit.\n189|The session's row id, as a string (the assignment's format).\n190|The app id (`org.kde.konsole`).\n191|The session's window title, normalized.\n192|When the session started, local time (RFC 3339).\n195|About 40 characters on each side of the first match, on one line.\n199|`query search` output.\n200|The query as given.\n201|The resolved window's start, local time; `None` if open.\n202|The resolved window's end, local time; `None` if open.\n203|Newest first, at most `--limit`.\n323|One `query sessions` row.\n324|The session's row id, as a string.\n325|The app id.\n326|The session's window title, normalized.\n327|When the session started, local time (RFC 3339).\n333|The session's reconstructed text (the live text while open).\n337|`query sessions` output: one page of the matching sessions.\n338|The `--app` filter, as given.\n339|The `--window` filter, as given.\n340|The resolved window's start, local time; `None` if open.\n341|The resolved window's end, local time; `None` if open.\n344|How many matching sessions this page skipped (`--offset`).\n345|Oldest first, at most `--limit`.\n421|One `query apps` row.\n422|The app id, as `--app` accepts it.\n423|How many sessions it has in the window.\n424|When its first session in the window started, local time.\n430|`query apps` output.\n431|The resolved window's start, local time; `None` if open.\n432|The resolved window's end, local time; `None` if open.\n433|Most recently active first.\n468|`query text` output.\n469|The app's full id (resolved from `--app`).\n470|T when the window came from `--at T`, local time.\n471|The resolved window's start, local time.\n472|The resolved window's end, local time.\n475|Each window's text, in order of its first keystroke in the range.\n481|The window title, normalized.\n482|What was typed in it during the range, reconstructed.\nEOF\ncargo build -q 2>&1 | grep -c 'missing documentation'",
+  "description": "Document query.rs items",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/query.rs: 46 docs
+164
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n '/== src\\/reconstruct\\/editor.rs/,/^== src\\/reconstruct\\/buffer/p' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt; sed -n 1,50p src/reconstruct/editor.rs; grep -n 'pub struct FieldEditor' -A8 src/reconstruct/editor.rs; grep -n 'pub enum Outcome' -A8 src/reconstruct/editor.rs; grep -n 'pub fn ' src/reconstruct/editor.rs",
+  "description": "Read undocumented items and context in editor.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== src/reconstruct/editor.rs (26)
+  9: pub enum Action {
+  10: Insert(String),
+  11: Backspace {
+  12: word: bool,
+  14: Delete {
+  15: word: bool,
+  17: Move {
+  18: motion: Motion,
+  19: extend: bool,
+  21: SelectAll,
+  22: Cut,
+  23: Undo,
+  24: Redo,
+  25: KillLineStart,
+  26: KillLineEnd,
+  27: KillWordBack,
+  28: HistoryPrev,
+  29: HistoryNext,
+  46: Continue,
+  47: Commit,
+  48: Cancel,
+  49: FieldChange,
+  207: pub class: AppClass,
+  208: pub buf: TextBuffer,
+  216: pub fn new(class: AppClass, buf: TextBuffer) -> Self {
+  278: pub fn paste(&mut self, text: &str) {
+== src/event.rs (25)
+  20: pub struct Event {
+  22: pub ts: Millis,
+  23: pub app: String,
+  25: pub kind: EventKind,
+  30: pub enum EventKind {
+  39: repeat: bool,
+  40: window: String,
+  45: window: String,
+  47: renamed: bool,
+  53: text: Option<String>,
+  54: window: String,
+  57: System { state: SystemState },
+  62: pub enum Mod {
+  63: Shift,
+  64: Ctrl,
+  65: Alt,
+  66: Super,
+  67: Altgr,
+  72: pub enum SystemState {
+  73: Start,
+  74: Stop,
+  75: Sleep,
+  76: Wake,
+  77: Lock,
+  78: Unlock,
+== src/reconstruct/buffer.rs (25)
+//! Turns logged events into edits of one text field: key → [`Action`] (per app
+//! class, tier 1) → [`TextBuffer`] operation (tier 0).
+
+use super::apps::AppClass;
+use super::buffer::{Motion, TextBuffer};
+use crate::event::Mod;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    Insert(String),
+    Backspace {
+        word: bool,
+    },
+    Delete {
+        word: bool,
+    },
+    Move {
+        motion: Motion,
+        extend: bool,
+    },
+    SelectAll,
+    Cut,
+    Undo,
+    Redo,
+    KillLineStart,
+    KillLineEnd,
+    KillWordBack,
+    HistoryPrev,
+    HistoryNext,
+    /// Enter in a single-line field: the text is submitted and the field clears.
+    Commit,
+    /// Ctrl+C at a shell prompt: the line is abandoned and the prompt clears.
+    Cancel,
+    /// Focus moved to another field inside the same window (Tab in a web
+    /// form, Ctrl+L to the address bar): the session ends, the new field
+    /// starts empty.
+    FieldChange,
+    /// A shortcut with no modelled effect on the text (Ctrl+C copy, Alt+Tab,
+    /// Ctrl+S, F5...). Not activity: it neither opens nor extends a session.
+    Ignore,
+}
+
+/// What an applied action did to the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Continue,
+    Commit,
+    Cancel,
+    FieldChange,
+}
+206:pub struct FieldEditor {
+207-    pub class: AppClass,
+208-    pub buf: TextBuffer,
+209-    /// Shell history position: 0 = most recent command.
+210-    history_index: Option<usize>,
+211-    /// The line being edited before history navigation began.
+212-    saved_line: Option<String>,
+213-}
+214-
+45:pub enum Outcome {
+46-    Continue,
+47-    Commit,
+48-    Cancel,
+49-    FieldChange,
+50-}
+51-
+52-fn has(mods: &[Mod], m: Mod) -> bool {
+53-    mods.contains(&m)
+57:pub fn action(class: AppClass, key: &str, mods: &[Mod]) -> Action {
+197:pub fn key_suppresses_paste(class: AppClass, k
+… [164 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py src/reconstruct/editor.rs <<'EOF'\n9|What a key does to the text, decided per app class from the key and its modifiers.\n10|Typed text, replacing the selection.\n11|Backspace (Ctrl+Backspace: a word).\n12|Delete a word (Ctrl), not one character.\n14|Delete, forward (Ctrl+Delete: a word).\n15|Delete a word (Ctrl), not one character.\n17|Cursor movement (arrows, Home/End, Ctrl+arrows, PageUp/PageDown).\n18|Where the cursor goes.\n19|Shift held: extend the selection instead of moving.\n21|Ctrl+A in fields that select all (not in terminals, where it is line start).\n22|Ctrl+X: the selection is removed (and goes to the clipboard).\n23|Ctrl+Z (Ctrl+_ in terminals).\n24|Ctrl+Shift+Z or Ctrl+Y.\n25|Ctrl+U in a terminal: delete to the start of the line.\n26|Ctrl+K in a terminal: delete to the end of the line.\n27|Ctrl+W in a terminal: delete the word before the cursor.\n28|Up or Ctrl+P in a terminal: the previous command brain saw run.\n29|Down or Ctrl+N in a terminal: back toward the line being typed.\n46|The session goes on.\n47|A single-line field was submitted (Enter at a prompt): the session ends.\n48|A single-line field was cancelled (Ctrl+C at a prompt): the session ends.\n49|Focus moved to another field of the same window: the session ends.\n207|Which rules apply (terminal, browser, editor, ...).\n208|The text and cursor being edited.\n216|An editor of `class` starting from `buf` (empty, or a window's document).\n278|Inserts pasted text at the cursor, replacing the selection.\nEOF\nsed -n 1,80p src/event.rs",
+  "description": "Document editor.rs; read event.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+````
+src/reconstruct/editor.rs: 26 docs
+//! The capture event format: one JSON object per line of the capture log.
+//!
+//! ```json
+//! {"ts":"2026-11-08T14:03:22.118Z","app":"code","type":"key","key":"H","mods":["shift"],"window":"main.rs - brain - Visual Studio Code"}
+//! {"ts":"2026-11-08T14:03:25.400Z","app":"org.kde.konsole","type":"focus","window":"~ : bash — Konsole"}
+//! ```
+//!
+//! Every event carries the app it belongs to. Events that relate to a text
+//! context (keys, pastes) also carry the window title, so each line is
+//! self-describing: a reader can start at any line (for example after a
+//! checkpoint seek) without replaying earlier focus events.
+
+use crate::timefmt::{self, Millis};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// App id used when no window is focused or the focus source is unavailable.
+pub const UNKNOWN_APP: &str = "unknown";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Event {
+    #[serde(serialize_with = "ser_ts", deserialize_with = "de_ts")]
+    pub ts: Millis,
+    pub app: String,
+    #[serde(flatten)]
+    pub kind: EventKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum EventKind {
+    /// A key press, or a key auto-repeat (`repeat: true`), as delivered to the app.
+    Key {
+        /// The resolved character (`"H"`, `"é"`, `" "`) or, for non-printing keys, a
+        /// name (`"Enter"`, `"Backspace"`, `"Left"`, `"F5"`).
+        key: String,
+        /// Modifiers held, in canonical order: shift, ctrl, alt, super, altgr.
+        mods: Vec<Mod>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        repeat: bool,
+        window: String,
+    },
+    /// A window was activated, or (`renamed: true`) the focused window's
+    /// title changed.
+    Focus {
+        window: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        renamed: bool,
+    },
+    /// Clipboard contents at the moment a paste shortcut was pressed. Written
+    /// right after the key event that triggered it. `None` when the clipboard
+    /// could not be read.
+    Paste {
+        text: Option<String>,
+        window: String,
+    },
+    /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.
+    System { state: SystemState },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mod {
+    Shift,
+    Ctrl,
+    Alt,
+    Super,
+    Altgr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemState {
+    Start,
+    Stop,
+    Sleep,
+    Wake,
+    Lock,
+    Unlock,
+}
+````
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py src/event.rs <<'EOF'\n20|One line of the capture log.\n22|When it happened: the kernel's timestamp of the key, epoch ms (UTC in the log).\n23|The focused app's id (`org.kde.konsole`), or `unknown`.\n25|What happened.\n30|The kinds of events, tagged by `type` in the JSON.\n39|An auto-repeat synthesized on the desktop's schedule, not a new press.\n40|The focused window's title when the key was pressed.\n45|The window's title.\n47|The same window's title changed (not another window activated).\n53|The clipboard text (up to 64 KiB), or `None` if it could not be read.\n54|The focused window's title.\n62|A modifier key held with a key.\n63|Shift.\n64|Control.\n65|Alt.\n66|Super (the Windows/Meta key).\n67|AltGr (ISO level 3).\n72|A lifecycle marker in the log.\n73|`brain run` started (without a `stop` before it, it crashed).\n74|`brain run` stopped cleanly.\n75|The machine is going to sleep.\n76|The machine woke up (keyboards were reopened).\n77|The screen locked: nothing is recorded until `unlock`.\n78|The screen unlocked.\nEOF\npython3 - <<'EOF'\np='/home/juan/Documents/shadow-assistant/src/event.rs'; s=open(p).read()\nold=\"\"\"    /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.\n    System { state: SystemState },\"\"\"\nnew=\"\"\"    /// Lifecycle markers: start, stop, sleep, wake, lock, unlock.\n    System {\n        /// Which marker.\n        state: SystemState,\n    },\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo build -q 2>&1 | grep -c 'missing documentation'; sed -n '/== src\\/reconstruct\\/buffer.rs/,/^== src\\/capture\\/linux\\/keys/p' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt",
+  "description": "Document event.rs; list buffer.rs items",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/event.rs: 24 docs
+113
+== src/reconstruct/buffer.rs (25)
+  21: pub enum Motion {
+  22: Left,
+  23: Right,
+  24: Up,
+  25: Down,
+  26: LineStart,
+  27: LineEnd,
+  28: DocStart,
+  29: DocEnd,
+  30: PageUp,
+  31: PageDown,
+  32: WordLeft,
+  33: WordRight,
+  58: pub struct TextBuffer {
+  71: pub fn new() -> Self {
+  87: pub fn text(&self) -> String {
+  91: pub fn len(&self) -> usize {
+  95: pub fn is_empty(&self) -> bool {
+  99: pub fn cursor(&self) -> usize {
+  103: pub fn anchor(&self) -> Option<usize> {
+  146: pub fn backspace(&mut self, word: bool) {
+  161: pub fn delete(&mut self, word: bool) {
+  292: pub fn undo(&mut self) {
+  305: pub fn redo(&mut self) {
+  372: pub fn select_all(&mut self) {
+== src/capture/linux/keys.rs (14)
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,20p src/reconstruct/buffer.rs; sed -n 56,110p src/reconstruct/buffer.rs; grep -n 'PAGE_LINES\\|page' src/reconstruct/buffer.rs | head -5",
+  "description": "Read TextBuffer context in buffer.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Tier 0: a virtual text buffer that replays editing keys.
+//!
+//! It models one text field the way most editors behave: a cursor, an
+//! optional selection (anchor + cursor), typing replaces the selection, word
+//! motions, logical lines for Up/Down/Home/End, and grouped undo/redo. What
+//! the app really did is unknowable from keystrokes alone (soft wrapping,
+//! autocomplete), so the model makes one consistent assumption wherever
+//! information is missing: **an unknown cursor position is the end of the
+//! buffer.** Cursor moves made with the mouse are not captured at all: the
+//! model only follows the keyboard.
+
+/// Hard cap on buffer size. Beyond it the oldest text is dropped, which keeps
+/// `brain run` inside its memory budget even for a runaway session.
+pub const MAX_CHARS: usize = 200_000;
+/// Undo depth, in edit groups.
+const MAX_UNDO: usize = 200;
+/// Lines moved by PageUp/PageDown (the real distance depends on window size).
+const PAGE_LINES: usize = 30;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+
+#[derive(Debug, Clone, Default)]
+pub struct TextBuffer {
+    text: Vec<char>,
+    cursor: usize,
+    /// Selection anchor; the selection is `anchor..cursor` (either order).
+    anchor: Option<usize>,
+    undo: Vec<Group>,
+    redo: Vec<Group>,
+    /// Kind of the open undo group, if typing/deleting may still extend it.
+    open_group: Option<GroupKind>,
+    edits: u64,
+}
+
+impl TextBuffer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A buffer restored from saved state. Out-of-range positions are clamped.
+    pub fn from_state(text: &str, cursor: usize, anchor: Option<usize>) -> Self {
+        let text: Vec<char> = text.chars().collect();
+        let len = text.len();
+        Self {
+            cursor: cursor.min(len),
+            anchor: anchor.map(|a| a.min(len)).filter(|&a| a != cursor.min(len)),
+            text,
+            ..Self::default()
+        }
+    }
+
+    pub fn text(&self) -> String {
+        self.text.iter().collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn anchor(&self) -> Option<usize> {
+        self.anchor
+    }
+
+    /// Number of text-changing operations applied so far.
+    pub fn edits(&self) -> u64 {
+        self.edits
+    }
+18:const PAGE_LINES: usize = 30;
+356:            Motion::PageUp => self.vertical(self.cursor, -(PAGE_LINES as isize)),
+357:            Motion::PageDown => self.vertical(self.cursor, PAGE_LINES as isize),
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The enum and function-split work is finished; I'm writing doc comments now (about 100 of 210 done), then lint, the remaining small items, and a full test run including VS Code.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py src/reconstruct/buffer.rs <<'EOF'\n21|A cursor movement, in characters and logical lines.\n22|One character left.\n23|One character right.\n24|One line up, keeping the column.\n25|One line down, keeping the column.\n26|To the start of the line (Home).\n27|To the end of the line (End).\n28|To the start of the text (Ctrl+Home).\n29|To the end of the text (Ctrl+End).\n30|`PAGE_LINES` lines up (the real distance depends on the window).\n31|`PAGE_LINES` lines down.\n32|To the start of the previous word (Ctrl+Left).\n33|To the end of the next word (Ctrl+Right).\n58|One text field's modelled state: text, cursor, selection and undo history.\n71|An empty buffer, cursor at the start.\n87|The whole text.\n91|Length in characters.\n95|Whether the text is empty.\n99|Cursor position, in characters from the start.\n103|The other end of the selection, if any (the selection is `anchor..cursor`).\n146|Deletes the selection, else the character (or `word`) before the cursor.\n161|Deletes the selection, else the character (or `word`) after the cursor.\n292|Undoes the last edit group (about a word of typing).\n305|Redoes the last undone edit group.\n372|Selects the whole text, cursor at the end.\nEOF\nsed -n '/== src\\/capture\\/linux\\/keys.rs/,/^== src\\/capture\\/recorder/p' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt",
+  "description": "Document buffer.rs; list keys/vscode/ingest items"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/reconstruct/buffer.rs: 25 docs
+== src/capture/linux/keys.rs (14)
+  19: pub enabled: bool,
+  20: pub delay_ms: Millis,
+  21: pub rate_hz: f64,
+  57: pub fn new(cfg: RepeatConfig) -> Self {
+  61: pub fn on_press(&mut self, code: u16, ts: Millis) {
+  70: pub fn on_release(&mut self, code: u16) {
+  76: pub fn cancel(&mut self) {
+  100: pub ts: Millis,
+  101: pub key: String,
+  102: pub mods: Vec<Mod>,
+  103: pub repeat: bool,
+  115: pub fn new(kb: Keyboard, repeat: RepeatConfig) -> Self {
+  129: pub fn set_layout_index(&mut self, index: u32) {
+  133: pub fn deadline(&self) -> Option<Millis> {
+== src/reconstruct/vscode/mod.rs (11)
+  94: Key { key: String, mods: Vec<Mod> },
+  94: Key { key: String, mods: Vec<Mod> },
+  94: Key { key: String, mods: Vec<Mod> },
+  95: Paste { text: String },
+  95: Paste { text: String },
+  98: pub struct ReplayInput<'a> {
+  103: pub events: &'a [ReplayEvent],
+  194: pub fn kill(&self) {
+  212: pub struct VsCodeReplayer {
+  236: pub fn kill_handle(&self) -> KillHandle {
+  290: pub fn shutdown(&mut self) {
+== src/ingest.rs (10)
+  31: pub struct Ingester {
+  44: pub struct StepStats {
+  45: pub lines: usize,
+  46: pub invalid_lines: usize,
+  47: pub checkpoints: usize,
+  54: pub fn new(conn: Connection, log_path: &Path) -> Result<Self> {
+  58: /     pub fn with_tier2(
+  91: pub fn offset(&self) -> u64 {
+  111: pub fn step_at(&mut self, clock: Clock) -> Result<StepStats> {
+  195: pub fn connection(&self) -> &Connection {
+== src/capture/recorder.rs (9)
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 95,135p src/capture/linux/keys.rs; sed -n 88,106p src/reconstruct/vscode/mod.rs; sed -n 186,240p src/reconstruct/vscode/mod.rs | grep -n 'pub\\|///' ; sed -n 28,60p src/ingest.rs; sed -n 86,115p src/ingest.rs; sed -n 190,198p src/ingest.rs",
+  "description": "Read context for keys, vscode and ingest items"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+}
+
+/// A resolved key event, ready to be recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyOut {
+    pub ts: Millis,
+    pub key: String,
+    pub mods: Vec<Mod>,
+    pub repeat: bool,
+}
+
+/// Device-independent key processing: one keymap state shared by all
+/// keyboards, as in the compositor.
+pub struct KeyProcessor {
+    kb: Keyboard,
+    repeater: Repeater,
+    held: HashMap<u32, HashSet<u16>>, // device id -> held keycodes
+}
+
+impl KeyProcessor {
+    pub fn new(kb: Keyboard, repeat: RepeatConfig) -> Self {
+        Self {
+            kb,
+            repeater: Repeater::new(repeat),
+            held: HashMap::new(),
+        }
+    }
+
+    /// Replaces the keymap (layout list changed). Held keys are released first.
+    pub fn replace_keyboard(&mut self, kb: Keyboard) {
+        self.release_all();
+        self.kb = kb;
+    }
+
+    pub fn set_layout_index(&mut self, index: u32) {
+        self.kb.set_layout_index(index);
+    }
+
+    pub fn deadline(&self) -> Option<Millis> {
+        self.repeater.deadline()
+    }
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
+
+/// One captured event of a VS Code session, in log order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayEvent {
+    Key { key: String, mods: Vec<Mod> },
+    Paste { text: String },
+}
+
+pub struct ReplayInput<'a> {
+    /// Basename of the edited file (picks VS Code's language mode).
+    pub file_name: &'a str,
+    /// File content at session start.
+    pub initial: &'a [u8],
+    pub events: &'a [ReplayEvent],
+}
+
+/// Extensions are copied into the sandbox only below this size.
+2:/// Terminates the current VS Code instance from any thread. An in-flight
+3:/// [`VsCodeReplayer::replay`] then fails fast with an error. Idempotent, and a
+4:/// no-op when nothing is running.
+6:pub struct KillHandle(Arc<Mutex<Option<Ids>>>);
+9:    pub fn kill(&self) {
+23:/// Set to `1` to show the replay instance as a normal window (for watching
+24:/// tests or replays) instead of running it headless.
+25:pub const VISIBLE_ENV: &str = "BRAIN_VSCODE_VISIBLE";
+27:pub struct VsCodeReplayer {
+33:    /// Whether `systemd-run --user --scope` works here (probed once).
+38:    /// No process is started until the first replay. `work_dir` is private
+39:    /// scratch space (`data_dir/vscode`).
+40:    pub fn new(work_dir: PathBuf) -> Self {
+51:    pub fn kill_handle(&self) -> KillHandle {
+55:    /// Pid of the running instance's main process (tests use it to inspect
+/// Upper bound on lines per transaction, which bounds memory use and commit latency.
+pub const MAX_LINES_PER_STEP: usize = 5_000;
+
+pub struct Ingester {
+    conn: Connection,
+    log_path: PathBuf,
+    offset: u64,
+    last_checkpoint: Option<Millis>,
+    sessions: Option<Sessions>,
+    /// Tier 2 results waiting to be written: (session id, text or error).
+    tier2_results: Vec<Tier2Result>,
+    /// Tier 2 jobs whose sessions are committed as pending, to hand to the worker.
+    tier2_jobs: Vec<i64>,
+}
+
+#[derive(Debug, Defa
+… [1655 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=/tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py; python3 $T src/capture/linux/keys.rs <<'EOF'\n19|Whether held keys repeat at all.\n20|Delay before the first repeat, in ms.\n21|Repeats per second after the delay.\n57|A repeater on schedule `cfg`, nothing held.\n61|A repeating key went down at `ts`: it repeats from `ts + delay`.\n70|`code` was released: it stops repeating if it was the one repeating.\n76|Stops any repeat (a modifier changed, the device went away).\n100|When the key happened (or the repeat was due), epoch ms.\n101|The character or key name, as the app received it.\n102|Modifiers held.\n103|A synthesized repeat.\n115|A processor with keymap `kb` and repeat schedule `repeat`, nothing held.\n129|Selects layout `index` of the keymap (a layout switch on the desktop).\n133|When the next repeat is due, if a key is repeating: the input loop's poll timeout.\nEOF\npython3 $T src/ingest.rs <<'EOF'\n31|Tails the capture log into the SQLite index (see the module docs).\n44|What one ingest step did.\n45|Complete log lines read.\n46|Lines that were not valid events (skipped).\n47|Log checkpoints written.\n54|An ingester without tier 2, resuming at the offset stored in `conn`.\n58|An ingester with tier 2 snapshots (`brain run --vscode-replay`), resuming at the offset stored in `conn`.\n91|The log offset ingested up to (bytes).\n111|[`Self::step`] with the given clock for idle timeouts (fixed in tests).\n195|The database connection (tests read it).\nEOF\npython3 $T src/reconstruct/vscode/mod.rs <<'EOF'\n98|What one replay needs: the file's initial content and the session's events.\n103|The session's keys and pastes, in log order.\n194|Kills the instance now (see [`KillHandle`]).\n212|Replays sessions into one warm, sandboxed VS Code (see the module docs).\n236|A handle that kills the running instance from another thread.\n290|Stops the instance and everything it started, and forgets it.\nEOF\npython3 - <<'EOF'\np='/home/juan/Documents/shadow-assistant/src/reconstruct/vscode/mod.rs'; s=open(p).read()\nold=\"\"\"pub enum ReplayEvent {\n    Key { key: String, mods: Vec<Mod> },\n    Paste { text: String },\n}\"\"\"\nnew=\"\"\"pub enum ReplayEvent {\n    /// A key, as captured.\n    Key {\n        /// The character or key name.\n        key: String,\n        /// Modifiers held.\n        mods: Vec<Mod>,\n    },\n    /// A paste, with the clipboard text brain recorded.\n    Paste {\n        /// The pasted text.\n        text: String,\n    },\n}\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo build -q 2>&1 | grep -c 'missing documentation'; sed -n '/== src\\/capture\\/recorder.rs/,$p' /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/missing_docs.txt",
+  "description": "Document keys, ingest and vscode items; list the rest",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/linux/keys.rs: 14 docs
+src/ingest.rs: 10 docs
+src/reconstruct/vscode/mod.rs: 6 docs
+53
+== src/capture/recorder.rs (9)
+  21: fn read(&self) -> Option<String>;
+  24: pub struct NoClipboard;
+  32: pub struct Focus {
+  33: pub app: String,
+  34: pub window: String,
+  55: pub struct Recorder {
+  66: pub fn new(log: LogWriter, clipboard: Box<dyn ClipboardSource>) -> Self {
+  105: pub fn focus(&self) -> Focus {
+  180: pub fn system(&self, state: SystemState) {
+== src/datadir.rs (7)
+  20: pub struct DataDir {
+  25: pub fn new(root: impl Into<PathBuf>) -> Self {
+  58: pub fn root(&self) -> &Path {
+  61: pub fn log_path(&self) -> PathBuf {
+  64: pub fn db_path(&self) -> PathBuf {
+  67: pub fn lock_path(&self) -> PathBuf {
+  75: pub fn kwin_dir(&self) -> PathBuf {
+== src/capture/linux/input.rs (5)
+  44: Stop,
+  55: pub fn send(&self, msg: Control) {
+  70: pub struct InputLoop {
+  83: pub fn new(keys: KeyProcessor, recorder: Arc<Recorder>) -> Result<(Self, ControlHandle)> {
+  144: pub fn keyboard_count(&self) -> usize {
+== src/capture/linux/xkb.rs (5)
+  83: pub model: String,
+  84: pub options: String,
+  102: pub fn new(spec: &LayoutSpec) -> Result<Self> {
+  211: pub fn key_repeats(&self, evdev_code: u16) -> bool {
+  238: pub fn num_layouts(&self) -> u32 {
+== src/capture/linux/synthetic.rs (4)
+  29: pub rate: f64,
+  77: pub const SYNTHETIC_APP: &str = "synthetic";
+  78: pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
+  79: pub const SYNTHETIC_TERMINAL: &str = "org.kde.konsole";
+== src/reconstruct/tier2.rs (4)
+  92: pub fn new(dir: PathBuf) -> Result<Self> {
+  281: pub text: String,
+  282: pub status: &'static str,
+  328: pub fn submit(&self, id: i64) {
+== src/sessions.rs (4)
+  76: Snapshot { file: PathBuf },
+  166: /     fn snapshot(
+  201: pub struct Sessions {
+  733: pub fn discard_snapshot(&self, id: i64) {
+== src/capture/linux/desktop.rs (3)
+  41: pub recorder: Arc<Recorder>,
+  44: pub system_bus: Option<Connection>,
+  45: pub data_dir: &'a DataDir,
+== src/store.rs (3)
+  159: pub fn ingest_offset(conn: &Connection) -> Result<u64> {
+  168: pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
+  176: pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
+== src/capture/mod.rs (2)
+  46: pub struct RunOptions {
+  56: pub fn run(data_dir: &DataDir, opts: &RunOptions) -> Result<()> {
+== src/eventlog.rs (2)
+  27: pub struct LogWriter {
+  83: pub fn is_empty(&self) -> bool {
+== src/reconstruct/vscode/title.rs (2)
+  42: pub fn is_vscode(app: &str) -> bool {
+  47: pub fn title_is_dirty(window_title: &str) -> bool {
+== src/timefmt.rs (2)
+  16: pub fn now_ms() -> Millis {
+  20: pub fn system_time_ms(t: SystemTime) -> Millis {
+== src/reconstruct/apps.rs (1)
+  8: pub enum AppClass {
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:03:18.098Z</sub>
+
+The remaining 53 are spread across smaller files. Reading their context in one go:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for spec in \"src/sessions.rs:72:78\" \"src/sessions.rs:160:170\" \"src/sessions.rs:198:202\" \"src/sessions.rs:730:734\" \"src/capture/recorder.rs:17:35\" \"src/capture/linux/input.rs:38:45\" \"src/reconstruct/tier2.rs:276:283\" \"src/eventlog.rs:24:28\" \"src/store.rs:156:177\" \"src/capture/mod.rs:44:56\" \"src/reconstruct/apps.rs:5:12\" \"src/datadir.rs:17:26\" \"src/capture/linux/xkb.rs:76:86\"; do IFS=: read f a b <<< \"$spec\"; echo \"== $f $a-$b\"; sed -n \"${a},${b}p\" $f; done",
+  "description": "Read context for the remaining undocumented items"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== src/sessions.rs 72-78
+pub enum Tier2Start {
+    /// Not a VS Code session, or replay is off.
+    NotApplicable,
+    /// The edited file was copied to the snapshot path for this session.
+    Snapshot { file: PathBuf },
+    /// The file cannot be identified yet (VS Code records newly opened files
+    /// with a delay); ask again later.
+== src/sessions.rs 160-170
+        false
+    }
+    /// A window of `app` was focused or retitled at `ts`: a chance to copy
+    /// its file before any key, in case it is saved before the session's
+    /// own snapshot is taken.
+    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}
+    fn snapshot(
+        &self,
+        app: &str,
+        raw_title: &str,
+        started_at: Millis,
+== src/sessions.rs 198-202
+    h.finish()
+}
+
+pub struct Sessions {
+    open: HashMap<Key, OpenSession>,
+== src/sessions.rs 730-734
+        )
+    }
+
+    pub fn discard_snapshot(&self, id: i64) {
+        if let Some(t2) = &self.tier2 {
+== src/capture/recorder.rs 17-35
+pub const MAX_PASTE_BYTES: usize = 64 * 1024;
+
+/// Reads the clipboard at paste time.
+pub trait ClipboardSource: Send + Sync {
+    fn read(&self) -> Option<String>;
+}
+
+pub struct NoClipboard;
+impl ClipboardSource for NoClipboard {
+    fn read(&self) -> Option<String> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Focus {
+    pub app: String,
+    pub window: String,
+}
+== src/capture/linux/input.rs 38-45
+    /// Close and re-open all devices (after resume from sleep).
+    Reopen,
+    /// KDE's layout switcher changed the active layout.
+    SetLayout(u32),
+    /// Replace the keymap (the layout list changed).
+    SetKeyboard(Box<super::xkb::Keyboard>),
+    Stop,
+}
+== src/reconstruct/tier2.rs 276-283
+pub const STATUS_REPLAYED: &str = "done: replayed (best effort, unverified)";
+
+/// A finished tier 2 job's text, and the status saying where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tier2Text {
+    pub text: String,
+    pub status: &'static str,
+}
+== src/eventlog.rs 24-28
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
+
+pub struct LogWriter {
+    file: File,
+== src/store.rs 156-177
+    }
+}
+
+pub fn ingest_offset(conn: &Connection) -> Result<u64> {
+    let off: i64 = conn.query_row(
+        "SELECT log_offset FROM ingest_state WHERE id = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(off as u64)
+}
+
+pub fn set_ingest_offset(conn: &Connection, offset: u64) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_state SET log_offset = ?1 WHERE id = 1",
+        [offset as i64],
+    )?;
+    Ok(())
+}
+
+pub fn insert_checkpoint(conn: &Connection, ts: &str, offset: u64) -> Result<()> {
+    conn.prepare_cached("INSERT OR IGNORE INTO log_checkpoints (ts, byte_offset) VALUES (?1, ?2)")?
+== src/capture/mod.rs 44-56
+
+#[derive(Debug, Clone, Default)]
+pub struct RunOptions {
+    /// Test hook: type a built-in corpus at this many keys per second instead
+    /// of reading input devices (see [`linux::synthet
+… [1288 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two stale docs in this batch get fixed as well: the SetLayout doc wrongly credits KDE alone, since GNOME sends it too, and the vscode_replay doc describes tier 2 as replay-only.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "T=/tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/tools/docs.py\npython3 $T src/capture/recorder.rs <<'EOF'\n21|The clipboard text, or `None` if it cannot be read in time.\n24|No clipboard (synthetic input, no desktop): pastes are logged without text.\n32|What has focus: the app and its window title.\n33|The app id (`org.kde.konsole`), or `unknown`.\n34|The window title.\n55|The sink every input source writes to: it stamps each key with the focused app and window, appends it to the log in one `write(2)`, reads the clipboard on a paste shortcut, and drops input while the screen is locked.\n66|A recorder appending to `log`, reading pastes from `clipboard`.\n105|What has focus now.\n180|Writes a lifecycle marker (start, stop, sleep, wake) under the focused app.\nEOF\npython3 $T src/datadir.rs <<'EOF'\n20|A brain data directory and the files in it.\n25|The data directory at `root` (nothing is created yet).\n58|The directory itself.\n61|`events.jsonl`, the capture log.\n64|`brain.db`, the SQLite index.\n67|`run.lock`, held by the running `brain run`.\n75|`kwin/`, where the KWin focus script is written (KDE).\nEOF\npython3 $T src/capture/linux/input.rs <<'EOF'\n44|Stop the loop (brain is shutting down); held keys are released.\n55|Sends `msg` and wakes the input thread.\n70|The input thread's state: the open keyboards, the inotify watch for hotplug, and the key processing.\n83|A loop feeding `recorder` through `keys`, and the handle other threads control it with.\n144|How many keyboards are open.\nEOF\npython3 $T src/capture/linux/xkb.rs <<'EOF'\n83|The keyboard model (`pc105`); empty means the XKB default.\n84|Comma-separated XKB options (`grp:alt_shift_toggle`).\n102|Compiles the keymap for `spec` with libxkbcommon.\n211|Whether `evdev_code` repeats when held, per the keymap.\n238|How many layouts the keymap has.\nEOF\npython3 $T src/capture/linux/synthetic.rs <<'EOF'\n29|Key presses per second.\n77|The app the synthetic editor window belongs to.\n78|The synthetic editor window's title.\n79|The app id of the synthetic terminal (a real terminal class, so Enter commits).\nEOF\npython3 $T src/reconstruct/tier2.rs <<'EOF'\n92|Snapshots stored in `dir` (created if missing).\n281|The session's new text (a diff of the saved file, or the replay's changed lines).\n282|`done: saved file` or `done: replayed (best effort, unverified)`.\n328|Queues session `id` (pending) for the worker.\nEOF\npython3 $T src/sessions.rs <<'EOF'\n201|The session engine: groups logged events into sessions and keeps their text, inside the ingest transaction (see the module docs).\n733|Removes the snapshot of a session that will never get a tier 2 job.\nEOF\npython3 $T src/capture/linux/desktop.rs <<'EOF'\n41|Where focus, lock and paste events go.\n44|The system bus, if reachable.\n45|The data directory (the KWin script is written there).\nEOF\npython3 $T src/store.rs <<'EOF'\n159|The log offset ingest has reached (bytes).\n168|Stores the log offset ingest has reached, in the ingest transaction.\n176|Records that the log line at byte `offset` has timestamp `ts`: a seek point for `query text`.\nEOF\npython3 $T src/capture/mod.rs <<'EOF'\n46|How `brain run` runs.\n56|Runs capture, ingest and (optionally) tier 2 until SIGINT, SIGTERM or SIGHUP, then stops in order: input, final ingest.\nEOF\npython3 $T src/eventlog.rs <<'EOF'\n27|The only writer of a capture log (see the module docs for the crash-safety rules).\n83|Whether the log has no events yet.\nEOF\npython3 $T src/reconstruct/vscode/title.rs <<'EOF'\n42|Whether `app` is VS Code (or a build of it).\n47|Whether the title shows unsaved changes (VS Code's `●` marker).\nEOF\npython3 $T src/timefmt.rs <<'EOF'\n16|The wall clock, epoch ms.\n20|`t` as epoch ms (0 for times before the epoch).\nEOF\npython3 $T src/reconstruct/apps.rs <<'EOF'\n8|The kind of app, which decides what Enter and shortcuts mean (tier 1).\nEOF\npython3 - <<'EOF'\nimport re\nde
+… [1972 more characters in the raw transcript]
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/recorder.rs: 9 docs
+src/datadir.rs: 7 docs
+src/capture/linux/input.rs: 5 docs
+src/capture/linux/xkb.rs: 5 docs
+src/capture/linux/synthetic.rs: 4 docs
+src/reconstruct/tier2.rs: 4 docs
+src/sessions.rs: 2 docs
+src/capture/linux/desktop.rs: 3 docs
+src/store.rs: 3 docs
+src/capture/mod.rs: 2 docs
+src/eventlog.rs: 2 docs
+src/reconstruct/vscode/title.rs: 2 docs
+src/timefmt.rs: 2 docs
+src/reconstruct/apps.rs: 1 docs
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+  File "<stdin>", line 5, in edit
+AssertionError: ('/home/juan/Documents/shadow-assistant/src/capture/recorder.rs', 'pub trait ClipboardSource: Send + Sync {\n    fn read(&self) -> Option<String>;', 0)
+warning: missing documentation for a struct field
+  --> src/sessions.rs:76:16
+   |
+76 |     Snapshot { file: PathBuf },
+   |                ^^^^^^^^^^^^^
+   |
+note: the lint level is defined here
+--
+   |         ^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/sessions.rs:166:5
+    |
+166 | /     fn snapshot(
+167 | |         &self,
+168 | |         app: &str,
+169 | |         raw_title: &str,
+2
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T14:03:52.761Z</sub>
+
+The helper had already documented `ClipboardSource::read`, so my manual edit for it found nothing and stopped the batch early. Running the remaining manual edits:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/sessions.rs',[(\"\"\"    /// The edited file was copied to the snapshot path for this session.\n    Snapshot { file: PathBuf },\"\"\",\"\"\"    /// The edited file was copied to the snapshot path for this session.\n    Snapshot {\n        /// The edited file.\n        file: PathBuf,\n    },\"\"\"),\n(\"\"\"    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}\n    fn snapshot(\"\"\",\"\"\"    fn on_focus(&self, _app: &str, _raw_title: &str, _ts: Millis) {}\n    /// Copies the file of the session `session_id` that opened at\n    /// `started_at` in a window titled `raw_title`, or says why not.\n    fn snapshot(\"\"\")])\nedit('src/capture/linux/input.rs',[(\"\"\"    /// KDE's layout switcher changed the active layout.\"\"\",\"\"\"    /// The desktop's layout switcher changed the active layout.\"\"\")])\nedit('src/capture/mod.rs',[(\"\"\"    /// Reconstruct VS Code sessions by replaying them into a sandboxed VS\n    /// Code (tier 2). Off by default.\"\"\",\"\"\"    /// Reconstruct VS Code sessions with the real editor (tier 2): a diff\n    /// of the saved file, otherwise a replay in a sandboxed VS Code. Off by\n    /// default.\"\"\")])\nEOF\ncargo fmt && cargo build -q 2>&1 | grep -c 'missing documentation'; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -E '^warning' -A6 | head -20",
+  "description": "Apply the remaining doc edits; recount; lint; build docs",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+[This command modified 1 file you've previously read: src/sessions.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Docs are clean: zero undocumented items, clippy passes, and the doc build has no warnings. I'm spot-checking that the helper put docs above attributes and inside multi-line items.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,12p src/lib.rs | tail -5; sed -n 19,32p src/event.rs; sed -n 44,60p src/event.rs; git diff --stat | tail -3",
+  "description": "Spot-check doc placement and the lint line"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+#![warn(missing_docs)]
+
+pub mod capture;
+pub mod datadir;
+pub mod event;
+/// One line of the capture log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Event {
+    /// When it happened: the kernel's timestamp of the key, epoch ms (UTC in the log).
+    #[serde(serialize_with = "ser_ts", deserialize_with = "de_ts")]
+    pub ts: Millis,
+    /// The focused app's id (`org.kde.konsole`), or `unknown`.
+    pub app: String,
+    /// What happened.
+    #[serde(flatten)]
+    pub kind: EventKind,
+}
+
+/// The kinds of events, tagged by `type` in the JSON.
+        #[serde(default, skip_serializing_if = "is_false")]
+        repeat: bool,
+        /// The focused window's title when the key was pressed.
+        window: String,
+    },
+    /// A window was activated, or (`renamed: true`) the focused window's
+    /// title changed.
+    Focus {
+        /// The window's title.
+        window: String,
+        /// The same window's title changed (not another window activated).
+        #[serde(default, skip_serializing_if = "is_false")]
+        renamed: bool,
+    },
+    /// Clipboard contents at the moment a paste shortcut was pressed. Written
+    /// right after the key event that triggered it. `None` when the clipboard
+    /// could not be read.
+ src/store.rs                    |   3 +
+ src/timefmt.rs                  |   2 +
+ 22 files changed, 447 insertions(+), 123 deletions(-)
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Fixing the `Event::ts` doc, which wrongly says it's only the kernel's timestamp of keys, then the `main.rs` module doc and the `unsafe` blocks lacking SAFETY comments.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='src/event.rs'; s=open(p).read()\nold=\"    /// When it happened: the kernel's timestamp of the key, epoch ms (UTC in the log).\"\nnew=\"    /// When it happened, epoch ms (RFC 3339 UTC in the log); for a key, the\\n    /// kernel's timestamp of the key event.\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\npython3 - <<'EOF'\nimport re, glob\nfor f in sorted(glob.glob('/home/juan/Documents/shadow-assistant/src/**/*.rs', recursive=True)):\n    lines = open(f).read().split(\"\\n\")\n    for i, l in enumerate(lines):\n        if re.search(r\"\\bunsafe\\s*\\{\", l) or re.match(r\"\\s*unsafe impl\", l):\n            ctx = lines[max(0, i-3):i+1]\n            if not any(\"SAFETY\" in c for c in ctx):\n                print(f\"{f.split('shadow-assistant/')[1]}:{i+1}: {l.strip()[:70]}\")\n                for c in lines[max(0,i-4):i]: print(\"      |\", c.strip()[:90])\nEOF\nhead -5 src/main.rs",
+  "description": "Fix the ts doc; list unsafe blocks lacking an adjacent SAFETY comment"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/linux/input.rs:104: let wd = unsafe {
+      | let inotify = unsafe { OwnedFd::from_raw_fd(inotify) };
+      | let dir = CString::new(INPUT_DIR).unwrap();
+      | // IN_ATTRIB: udev applies the `input` group permissions after creating
+      | // the node, so a device may only become openable on that event.
+use anyhow::Result;
+use brain::datadir::DataDir;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use std::process::ExitCode;
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 84,112p src/capture/linux/input.rs",
+  "description": "Read the syscall block in input.rs"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+impl InputLoop {
+    /// A loop feeding `recorder` through `keys`, and the handle other threads control it with.
+    pub fn new(keys: KeyProcessor, recorder: Arc<Recorder>) -> Result<(Self, ControlHandle)> {
+        // SAFETY: plain syscalls; return values are checked.
+        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if wake < 0 {
+            return Err(std::io::Error::last_os_error()).context("eventfd");
+        }
+        // SAFETY: `wake` is a fresh, owned fd.
+        let wake = Arc::new(unsafe { OwnedFd::from_raw_fd(wake) });
+        let inotify = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
+        if inotify < 0 {
+            return Err(std::io::Error::last_os_error()).context("inotify_init1");
+        }
+        // SAFETY: fresh, owned fd.
+        let inotify = unsafe { OwnedFd::from_raw_fd(inotify) };
+        let dir = CString::new(INPUT_DIR).unwrap();
+        // IN_ATTRIB: udev applies the `input` group permissions after creating
+        // the node, so a device may only become openable on that event.
+        let wd = unsafe {
+            libc::inotify_add_watch(
+                inotify.as_raw_fd(),
+                dir.as_ptr(),
+                libc::IN_CREATE | libc::IN_ATTRIB,
+            )
+        };
+        if wd < 0 {
+            return Err(std::io::Error::last_os_error()).context("watching /dev/input");
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Two blocks borrow a neighbouring SAFETY comment, `inotify_init1` and `inotify_add_watch`. I'm running a stricter check that requires each SAFETY comment to sit directly above its `unsafe` line.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\nimport re, glob\nfor f in sorted(glob.glob('src/**/*.rs', recursive=True)):\n    lines = open(f).read().split(\"\\n\")\n    for i, l in enumerate(lines):\n        if re.search(r\"\\bunsafe\\s*\\{\", l) or re.match(r\"\\s*unsafe impl\", l):\n            k = i - 1\n            block = []\n            while k >= 0 and lines[k].strip().startswith(\"//\"):\n                block.append(lines[k]); k -= 1\n            same_line = \"SAFETY\" in l\n            if not any(\"SAFETY\" in b for b in block) and not same_line:\n                print(f\"{f}:{i+1}: {l.strip()[:80]}\")\nEOF",
+  "description": "Strictly list unsafe blocks without a SAFETY comment directly above"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+src/capture/linux/input.rs:95: let inotify = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC)
+src/capture/linux/input.rs:104: let wd = unsafe {
+src/capture/linux/xkb.rs:140: unsafe {
+src/reconstruct/vscode/mod.rs:673: unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 130,160p src/capture/linux/xkb.rs; sed -n 660,676p src/reconstruct/vscode/mod.rs",
+  "description": "Read the xkb and vscode unsafe blocks"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+        };
+        // SAFETY: `names` and the CStrings it points to outlive the call.
+        let keymap = unsafe { xkb_keymap_new_from_names(ctx.as_ptr(), &names, 0) };
+        let Some(keymap) = NonNull::new(keymap) else {
+            // SAFETY: ctx is valid and owned.
+            unsafe { xkb_context_unref(ctx.as_ptr()) };
+            bail!("could not compile XKB keymap for {spec:?}");
+        };
+        // SAFETY: keymap is valid.
+        let Some(state) = NonNull::new(unsafe { xkb_state_new(keymap.as_ptr()) }) else {
+            unsafe {
+                xkb_keymap_unref(keymap.as_ptr());
+                xkb_context_unref(ctx.as_ptr());
+            }
+            bail!("xkb_state_new failed");
+        };
+        let mod_names = [
+            (Mod::Shift, CString::new("Shift").unwrap()),
+            (Mod::Ctrl, CString::new("Control").unwrap()),
+            (Mod::Alt, CString::new("Mod1").unwrap()),
+            (Mod::Super, CString::new("Mod4").unwrap()),
+            (Mod::Altgr, CString::new("Mod5").unwrap()),
+        ];
+        Ok(Self {
+            ctx,
+            keymap,
+            state,
+            mod_names,
+        })
+    }
+
+    let ours = std::fs::read(format!("/proc/{pid}/cmdline"))
+        .map(|c| String::from_utf8_lossy(&c).contains(udd))
+        .unwrap_or(false);
+    if ours {
+        if let Ok(text) = std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
+            && let Some(rel) = text.lines().find_map(|l| l.strip_prefix("0::"))
+            && rel.contains("/brain-vscode-")
+            && rel.ends_with(".scope")
+        {
+            let _ = std::fs::write(format!("/sys/fs/cgroup{rel}/cgroup.kill"), "1");
+        }
+        // SAFETY: plain syscall on a process verified above to be ours.
+        unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    }
+}
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('src/capture/linux/input.rs',[\n(\"\"\"        let wake = Arc::new(unsafe { OwnedFd::from_raw_fd(wake) });\n        let inotify = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };\"\"\",\"\"\"        let wake = Arc::new(unsafe { OwnedFd::from_raw_fd(wake) });\n        // SAFETY: plain syscall; the return value is checked.\n        let inotify = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };\"\"\"),\n(\"\"\"        // IN_ATTRIB: udev applies the `input` group permissions after creating\n        // the node, so a device may only become openable on that event.\n        let wd = unsafe {\"\"\",\"\"\"        // IN_ATTRIB: udev applies the `input` group permissions after creating\n        // the node, so a device may only become openable on that event.\n        // SAFETY: `inotify` is an open fd and `dir` a NUL-terminated path that\n        // outlives the call; the return value is checked.\n        let wd = unsafe {\"\"\"),\n])\nedit('src/capture/linux/xkb.rs',[(\"\"\"        let Some(state) = NonNull::new(unsafe { xkb_state_new(keymap.as_ptr()) }) else {\n            unsafe {\"\"\",\"\"\"        let Some(state) = NonNull::new(unsafe { xkb_state_new(keymap.as_ptr()) }) else {\n            // SAFETY: keymap and ctx are valid and owned; neither is used again.\n            unsafe {\"\"\")])\nedit('src/reconstruct/vscode/mod.rs',[(\"\"\"        unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };\n        unsafe { libc::kill(pid as i32, libc::SIGKILL) };\"\"\",\"\"\"        unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };\n        // SAFETY: as above, the process itself.\n        unsafe { libc::kill(pid as i32, libc::SIGKILL) };\"\"\")])\nedit('src/main.rs',[(\"\"\"use anyhow::Result;\nuse brain::datadir::DataDir;\"\"\",\"\"\"//! The `brain` command line: `brain run` captures until stopped, `brain query`\n//! answers from the captured data and prints JSON. This file only parses the\n//! arguments and reports errors (on stderr, exit code 1); the work is in the\n//! library ([`brain::capture`], [`brain::query`]).\n\nuse anyhow::Result;\nuse brain::datadir::DataDir;\"\"\")])\np='src/lib.rs'; s=open(p).read()\ns=s.replace(\"#![warn(missing_docs)]\",\"// Every public item is documented; with clippy's zero-warnings rule this\\n// keeps it so.\\n#![warn(missing_docs)]\",1)\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo doc --no-deps 2>&1 | grep -cE '^warning'; cargo build -q 2>&1 | grep -c warning",
+  "description": "Add the missing SAFETY comments, main.rs module doc, lint comment",
+  "timeout": 300000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+0
+0
+0
+[This command modified 3 files you've previously read: src/reconstruct/vscode/mod.rs, src/capture/linux/input.rs, src/capture/linux/xkb.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Checks are clean, so I'm filtering the diff to non-comment lines outside the two intentional refactors.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "git diff -U0 -- src | grep -E '^[+-][^+-]' | grep -vE '^[+-]\\s*(//|$)' > /tmp/claude-1000/-home-juan-Documents-shadow-assistant/64f49a65-18b0-4008-b3ba-157601d7795f/scratchpad/code_changes.txt; git diff -U0 --stat -- src | tail -1; for f in $(git diff --name-only -- src); do n=$(git diff -U0 -- \"$f\" | grep -E '^[+-][^+-]' | grep -vcE '^[+-]\\s*(//|$)'); echo \"$n $f\"; done | sort -rn",
+  "description": "Count non-comment changed lines per file"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
++/// `t` as epoch ms (0 for times before the epoch).
+211 src/reconstruct/vscode/mod.rs
+79 src/reconstruct/tier2.rs
+4 src/sessions.rs
+4 src/event.rs
+1 src/lib.rs
+0 src/timefmt.rs
+0 src/store.rs
+0 src/reconstruct/vscode/title.rs
+0 src/reconstruct/editor.rs
+0 src/reconstruct/buffer.rs
+0 src/reconstruct/apps.rs
+0 src/query.rs
+0 src/main.rs
+0 src/ingest.rs
+0 src/eventlog.rs
+0 src/datadir.rs
+0 src/capture/recorder.rs
+0 src/capture/mod.rs
+0 src/capture/linux/xkb.rs
+0 src/capture/linux/synthetic.rs
+0 src/capture/linux/keys.rs
+0 src/capture/linux/input.rs
+0 src/capture/linux/desktop.rs
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "for f in src/sessions.rs src/event.rs src/lib.rs; do echo \"== $f\"; git diff -U0 -- \"$f\" | grep -E '^[+-][^+-]' | grep -vE '^[+-]\\s*(//|$)'; done",
+  "description": "Show the few non-comment changes outside the refactors"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+== src/sessions.rs
+-    Snapshot { file: PathBuf },
++    Snapshot {
++        file: PathBuf,
++    },
+== src/event.rs
+-    System { state: SystemState },
++    System {
++        state: SystemState,
++    },
+== src/lib.rs
++#![warn(missing_docs)]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The two refactors still need real proof, so I'm running the full default suite and all 14 VS Code tests next.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'; cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'; echo \"leftover vscode: $(ps -eo args | grep -cE '[c]ode .*remote-debugging-pipe') scopes: $(systemctl --user list-units --type=scope --no-pager | grep -c brain-vscode)\"",
+  "description": "Run the default suite and the real VS Code tests",
+  "timeout": 900000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+     Running unittests src/lib.rs 
+test result: ok. 133 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.87s
+     Running tests/gnome_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.14s
+     Running tests/query_cli.rs 
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 49.83s
+     Running tests/vscode_replay.rs 
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 285.89s
+leftover vscode: 0 scopes: 0
+```
+
+</details>
+
