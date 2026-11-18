@@ -14,11 +14,20 @@ brain query text --app A       # what was typed into an app, reconstructed
 
 ## Supported OS
 
-Ubuntu (tested on 26.04) with **KDE Plasma 6 on Wayland** (KWin). Key capture
-works on any Linux. Focus tracking needs KWin (tested on Wayland). On other
-desktops, keys are recorded under the app `unknown`. The optional VS Code
-tier 2 (`--vscode-replay`) replays into VS Code when a file was not saved,
-which needs VS Code installed (`/usr/bin/code`).
+Ubuntu (tested on 26.04), on Wayland, with either desktop:
+
+| Desktop | Focus tracking | Paste text | Screen lock | Layouts |
+|---|---|---|---|---|
+| **KDE Plasma 6** (Kubuntu, or Ubuntu with Plasma) | KWin script, loaded by brain itself | Klipper | `org.freedesktop.ScreenSaver` | kxkbrc, Alt+Shift and tray switches |
+| **GNOME** (stock Ubuntu) | brain's GNOME Shell extension (`make install`, then log out and in once) | the extension | `org.gnome.ScreenSaver` | GNOME's input sources, Super+Space switches |
+
+Key capture itself works on any Linux. On another desktop, `brain run`
+warns and still captures keys, attributed to the app `unknown`, without
+paste text, and detects the lock screen only if the desktop implements
+`org.freedesktop.ScreenSaver`, so **an unlock password may be recorded
+there**. The optional VS Code tier 2 (`--vscode-replay`) works on both
+desktops; it replays into VS Code when a file was not saved, which needs
+VS Code installed (`/usr/bin/code`, or the snap).
 
 ## Build
 
@@ -48,6 +57,15 @@ sudo usermod -aG input "$USER"   # then log out and back in
 Note that the `input` group can read every input device. That is the price of
 display-server-independent capture (see PLAN.md for the alternatives).
 
+**On GNOME**, brain also needs its GNOME Shell extension: Wayland gives
+programs no way to see the focused window, and on KDE brain loads a KWin
+script for that by itself, but GNOME only loads extensions at login.
+`make install` installs and enables it for your user when GNOME is
+installed (or `make install-gnome-extension` alone); log out and back in
+once. Until then brain warns and files keys under `unknown`. The extension
+answers brain's clipboard reads at a paste, and any program in your session
+could ask it the same, as with KDE's Klipper.
+
 ## Run
 
 ```sh
@@ -64,7 +82,7 @@ a sandboxed, invisible copy of VS Code. It is off by default.
 
 ### As a service
 
-`brain` can run as a **systemd user service**: it starts with your Plasma
+`brain` can run as a **systemd user service**: it starts with your desktop
 session, restarts if it crashes, stops at logout, and runs as you (no
 root; it needs your desktop session for focus tracking):
 
@@ -95,7 +113,7 @@ Data directory (mode 0700):
 | `events.jsonl` | append-only capture log, the ground truth              |
 | `brain.db`     | SQLite (WAL) index derived from the log                |
 | `run.lock`     | held by the running `brain run` (one per data dir)     |
-| `kwin/`        | generated KWin focus-tracking script                   |
+| `kwin/`        | generated KWin focus-tracking script (KDE only)        |
 | `vscode/`      | VS Code replay sandbox and file snapshots (tier 2 only) |
 
 Example log lines:
@@ -229,8 +247,8 @@ Ingest (inside `brain run`, about once a second) turns the log into
   `*`, and the spinner glyphs terminal programs animate (`◐ ◑ ⠹ ✳`).
   When the title changes *because of the typing* (VS Code names a new file
   after its first line, a mail window after its subject), the session
-  continues: a change of the *same* window's title (KWin tells a title
-  change from a window activation) within 1 s of a keystroke in it, with no
+  continues: a change of the *same* window's title (the KWin script and
+  the GNOME extension tell a title change from a window activation) within 1 s of a keystroke in it, with no
   shortcut in between, is treated as a rename.
 * A session closes after **30 s without typing in that window**, or right
   away when a single-line field is submitted (Enter at a shell prompt, in a
@@ -315,17 +333,25 @@ database read-only and reopen it to see the current state.
 ## Decisions and edge cases
 
 **Platform and capture**
-* **Linux, KDE Plasma 6 on Wayland.** Wayland gives applications no way
-  to observe other apps' keystrokes, so `brain` reads the kernel's input
-  devices (evdev) passively: read-only, never grabbed, so it cannot add
-  input lag. Focus (app + window title) comes from a small KWin script
-  that calls `brain` over D-Bus. PLAN.md compares the alternatives.
+* **Linux, KDE Plasma 6 and GNOME on Wayland.** Wayland gives applications
+  no way to observe other apps' keystrokes, so `brain` reads the kernel's
+  input devices (evdev) passively: read-only, never grabbed, so it cannot
+  add input lag. Focus (app + window title) comes from inside the
+  compositor: a small KWin script on KDE, a GNOME Shell extension on GNOME,
+  both reporting over D-Bus, and brain trusts only reports sent from the
+  compositor's own bus connection. PLAN.md compares the alternatives.
+* **Platform layer.** Capture sits behind interfaces
+  (`src/capture/platform.rs`): keys from evdev work on any Linux desktop;
+  focus, clipboard, lock and keyboard settings come from a backend per
+  desktop, picked from `XDG_CURRENT_DESKTOP`. Another desktop, or another
+  OS, is a new module, not a change to the rest (PLAN.md 2.4).
 * **Keys are resolved at capture time** with libxkbcommon and your real
-  layouts (us/il, Alt+Shift switching, layout changes from the tray), so
-  the log holds the characters the app received (`"ש"`, `"H"`), as in the
-  assignment's example event. Key repeat is regenerated on KDE's schedule.
-* **Held keys** are logged with the repeats KDE's schedule produces
-  (600 ms delay, then 25 Hz), exactly. The app may still have received one
+  layouts (us/il; Alt+Shift and tray switches on KDE, Super+Space on
+  GNOME), so the log holds the characters the app received (`"ש"`, `"H"`),
+  as in the assignment's example event. Key repeat is regenerated on the
+  desktop's schedule (KDE's kcminputrc, GNOME's keyboard settings).
+* **Held keys** are logged with the repeats the desktop's schedule produces
+  (KDE: 600 ms delay, then 25 Hz; GNOME: 500 ms, then every 30 ms), exactly. The app may still have received one
   more or one fewer character per hold: on Wayland each app runs its own
   repeat timer, and Qt apps use timers that may fire up to 5% early or late
   (a 600 ms delay fires anywhere in ~570–630 ms). Measured against Kate, the
@@ -336,7 +362,8 @@ database read-only and reopen it to see the current state.
   way applications match them; this also makes paste detection work in
   Hebrew.
 * **Paste** (Ctrl+V, Ctrl+Shift+V, Shift+Insert): the clipboard text is
-  read from Klipper at that moment and logged, up to 64 KiB.
+  read at that moment (from Klipper on KDE, from the extension on GNOME)
+  and logged, up to 64 KiB.
 * **Screen lock pauses capture**, so the unlock password is never logged.
 * **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
   keyboards are reopened. Tested with a real suspend.
@@ -457,6 +484,15 @@ cargo test --release      # unit tests (~130) and the default integration tests:
                           #                 a second run on the same folder is refused
 ```
 
+GNOME is tested against a real GNOME Shell: a private, headless one that
+the test starts in its own D-Bus session and home, inside its own systemd
+scope, so the desktop you use is not touched (it needs `gnome-shell`,
+`gjs` and `python3-gi`; nothing is typed):
+
+```sh
+cargo test --release --test gnome_e2e -- --ignored --nocapture
+```
+
 Tests against real software are opt-in (`-- --ignored`):
 
 ```sh
@@ -566,3 +602,8 @@ caught. Transcripts are in `ai-logs/`.
     must exist on disk; the owner tried a new untitled file, which tier 2
     always skips. The owner pointed it out, and it then listed every
     condition the replay needs.
+16. **A probe that left a process behind.** Trying a headless GNOME Shell
+    in a private D-Bus session, a desktop portal that bus had started
+    outlived the run. It found and stopped it; the GNOME test now runs the
+    private shell in its own systemd scope, gives its bus no services to
+    start, and checks that nothing on that bus survives.

@@ -12,13 +12,19 @@ design, and must stay consistent with the code.
 
 ## Target platform
 
-Ubuntu, **KDE Plasma 6 on Wayland** (KWin). Not GNOME. Keys come from evdev
-(`/dev/input/event*`, user in the `input` group), resolved with libxkbcommon
-(`libxkbcommon.so.0`, linked by file name, so no `-dev` package is needed).
-Focus comes from a KWin script calling back over D-Bus. Tests that run by
-default must not need hardware, a desktop or privileges: use
-`brain run --synthetic RATE` (hidden flag) to drive the real pipeline. Only
-the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
+Ubuntu on Wayland with **KDE Plasma 6** (KWin) or **GNOME** (stock
+Ubuntu), behind the platform layer (`src/capture/platform.rs`,
+`src/capture/linux/desktop.rs`). Keys come from evdev
+(`/dev/input/event*`, user in the `input` group), resolved with
+libxkbcommon (`libxkbcommon.so.0`, linked by file name, so no `-dev`
+package is needed). Focus comes from inside the compositor: a KWin script
+brain loads on KDE, brain's GNOME Shell extension
+(`packaging/gnome-extension/`, installed by `make install`) on GNOME.
+
+Tests that run by default must not need hardware, a desktop or privileges:
+use `brain run --synthetic RATE` (hidden flag) to drive the real pipeline.
+Only the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate, VS Code or a
+GNOME Shell.
 
 ## Hard requirements (from the assignment) — never regress these
 
@@ -56,6 +62,12 @@ the opt-in (`#[ignore]`) tests use `/dev/uinput`, Kate or VS Code.
   saved after the session, otherwise a best-effort replay; tier 0/1 text
   stays when neither works. Unsaved new files are not supported. Sessions, reconstruction and indexing are built
   before `brain query` (owner's call, changing the original stage order).
+- Platforms: capture sits behind `Platform` / `Desktop` interfaces; only
+  KDE Plasma and GNOME on Ubuntu are supported for now. Other desktops get
+  keys under `unknown` with a warning that the lock screen may not be
+  detected (owner's choice: warn and continue, not refuse). On GNOME the
+  extension's `Clipboard` method may answer anyone, like Klipper (owner's
+  call). Tier 2 needs nothing desktop-specific.
 - Search is substring matching (FTS5 trigram, case- and accent-insensitive),
   not the design's porter stemming: `run` must find "rerun", `בית` "בבית".
 - Sessions and their text must stay a pure function of the log (tier 2
@@ -81,6 +93,8 @@ src/capture/linux/       the Linux platform:
   xkb.rs                 libxkbcommon FFI wrapper
   desktop.rs             the Desktop interface, detection, unsupported fallback
   kde.rs, kwin_focus.js  KDE Plasma: KWin focus, Klipper, lock, layouts, repeat
+  gnome.rs               GNOME: the extension's signals, its clipboard, lock,
+                         GSettings layouts and repeat
   logind.rs, layout.rs   sleep/wake; system keyboard layout (env, localed)
   dbus.rs                signal watching shared by the backends
   synthetic.rs           synthetic input source for tests/benchmarks
@@ -124,6 +138,11 @@ tests/                   integration tests that drive the real binary;
   (or `start_brain`): the guard stops it even when the test fails, and
   tests end with `assert_no_brain_on(data)`. No test may leave a process or
   a file behind.
+- `tests/gnome_e2e.rs` (`#[ignore]`) starts a private headless GNOME Shell
+  in its own D-Bus session, home and systemd scope (never the user's
+  desktop); its private shell must not get a login session, so it cannot
+  touch the real session's lock state. Run it after changing gnome.rs or
+  the extension.
 - `brain run`s on separate data directories are supported side by side
   (`tests/two_instances.rs`); one data directory allows one run.
 - `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test

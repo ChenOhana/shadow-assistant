@@ -14,7 +14,7 @@
 
 use super::dbus::{name_owner, spawn_signal_watch};
 use super::desktop::{
-    Desktop, DesktopContext, DesktopSession, app_id, config_dir, watch_freedesktop_lock,
+    Desktop, DesktopContext, DesktopSession, FREEDESKTOP_LOCK, app_id, config_dir, watch_lock,
 };
 use super::input::{Control, ControlHandle};
 use super::keys::RepeatConfig;
@@ -79,7 +79,7 @@ impl Desktop for Kde {
             None => Connection::session().ok(),
         };
         if let Some(s) = &session_bus {
-            watch_freedesktop_lock(s, ctx.recorder.clone());
+            watch_lock(s, &FREEDESKTOP_LOCK, ctx.recorder.clone());
             watch_layouts(s, ctx.system_bus.clone(), ctx.input.clone());
         }
         Box::new(KdeSession { kwin })

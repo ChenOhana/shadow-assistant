@@ -9,8 +9,8 @@
 //!   desktop.
 //! * **Focus, clipboard, screen lock and keyboard settings** come from a
 //!   [`desktop::Desktop`] backend, chosen at start ([`desktop::detect`]):
-//!   KDE Plasma today. A desktop without a backend still gets keys, filed
-//!   under the app `unknown`, with a warning.
+//!   KDE Plasma and GNOME (stock Ubuntu). A desktop without a backend still
+//!   gets keys, filed under the app `unknown`, with a warning.
 
 pub mod desktop;
 pub mod input;
@@ -19,6 +19,7 @@ pub mod synthetic;
 pub mod xkb;
 
 mod dbus;
+mod gnome;
 mod kde;
 mod layout;
 mod logind;

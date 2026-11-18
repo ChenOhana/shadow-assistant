@@ -1,0 +1,7 @@
+{
+  "uuid": "brain@shadowassistant",
+  "name": "brain: focus reporter",
+  "description": "Reports the focused window, keyboard layout switches and, on request, the clipboard to brain (the shadow assistant) over D-Bus. Needed for brain's focus tracking on GNOME, where Wayland gives other programs no way to see the focused window.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/ChenOhana/shadow-assistant"
+}

@@ -1,4 +1,4 @@
-# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 / Wayland)
+# PLAN — `brain`, a shadow assistant for Linux (KDE Plasma 6 and GNOME, Wayland)
 
 This is the research and architecture write-up for `brain`: how keystrokes
 and application context are collected, how they are ingested, how writing
@@ -12,10 +12,10 @@ build deliberately differs from it are called out ("Differs from the design").
 ```
  keyboards ──► input thread ──► Recorder ──► events.jsonl  (append-only, ground truth)
  (evdev,         │ xkbcommon      ▲ app + window                │ ~1 s
-  passive)       │ key repeat     │ from KWin                   ▼
+  passive)       │ key repeat     │ from the desktop            ▼
                  ▼                │                       ingest thread ──► brain.db (SQLite WAL)
- KWin script ──D-Bus──────────────┘                         │ sessions        sessions + FTS5 (trigram)
- Klipper (paste text), screen lock, sleep, layouts ─────────┘ reconstruction  context_state
+ KWin script / GNOME ext ─D-Bus───┘                         │ sessions        sessions + FTS5 (trigram)
+ clipboard (paste text), screen lock, sleep, layouts ───────┘ reconstruction  context_state
                                                               checkpoints     log_checkpoints
                     tier 2 worker (opt-in): VS Code diff / replay ──┘
  brain query search ──► brain.db (read-only snapshot)
@@ -142,7 +142,7 @@ libxkbcommon.** (`src/capture/linux/input.rs`, `keys.rs`, `xkb.rs`)
 | KDE `org_kde_plasma_window_management` | Only for privileged clients | Full window list + state (what the Plasma task manager uses) | KWin restricts it to trusted clients (desktop-file allowlisting) | Event-driven | Not meant for third-party tools; relies on KDE-internal trust configuration |
 | X11 `_NET_ACTIVE_WINDOW` / `WM_CLASS` | XWayland only | Active *X* window | None | Event-driven (PropertyNotify) | Native Wayland windows are invisible to XWayland clients |
 | AT-SPI focus events | Partly | Focused accessible object + its app | None | Event-driven | Same coverage problem as in 2.2; also gives no stable app id |
-| GNOME Shell extension | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install | Event-driven | The GNOME port of our design; out of scope |
+| GNOME Shell extension (chosen for GNOME) | GNOME only | Equivalent of the KWin script (`global.display` `notify::focus-window`) | Extension install; GNOME on Wayland loads a new one only at login | Event-driven | The GNOME port of the KWin design; `org.gnome.Shell.Eval` is disabled since GNOME 41 and `org.gnome.Shell.Introspect` is reserved for privileged callers, so an extension is the supported way |
 | `/proc` + compositor-agnostic heuristics | No | — | — | — | No way to know focus from process state |
 
 **Decision: a KWin script that pushes focus changes into brain over D-Bus.**
@@ -166,14 +166,41 @@ libxkbcommon.** (`src/capture/linux/input.rs`, `keys.rs`, `xkb.rs`)
   script left loaded by a `brain run` killed with -9 is unloaded by the next
   start.
 
-**Screen lock.** `org.freedesktop.ScreenSaver` `ActiveChanged` (and
-`GetActive` at start): while locked, keys are still read (to keep modifier
+**On GNOME: brain's GNOME Shell extension.**
+(`packaging/gnome-extension/`, `src/capture/linux/gnome.rs`)
+
+- GNOME cannot load code at runtime the way KWin can (on Wayland, a new
+  extension needs a login), so the extension is installed once
+  (`make install`) and stays. It exports an object on GNOME Shell's own
+  session-bus connection: a `Focus(desktopFile, windowClass, title,
+  renamed)` signal on `notify::focus-window` and on the focused window's
+  `notify::title`, `InputSourceChanged`/`InputSourcesChanged` signals from
+  the Shell's input-source manager, and `Current`, `InputSource` and
+  `Clipboard` methods. brain accepts the signals only from the owner of
+  `org.gnome.Shell` and calls the methods on it, so no other program can
+  pose as the extension, and several `brain run`s can listen at once.
+- The app id is the window's desktop file (via `Shell.WindowTracker`), else
+  its Wayland app id, as on KDE. Ubuntu's snaps report ids such as
+  `firefox_firefox` and `code_code`.
+- Keyboard settings come from GSettings: the XKB input sources and options,
+  and the repeat delay and interval. GNOME (mutter) loads at most four
+  layouts per keymap and splits longer lists into groups of four; brain
+  mirrors that when following a switch.
+- Without the extension (not installed, or GNOME not yet restarted), brain
+  warns and captures keys under `unknown`; it picks the extension's signals
+  up as soon as it runs.
+
+**Screen lock.** `ActiveChanged` (and `GetActive` at start) of
+`org.freedesktop.ScreenSaver` on KDE, `org.gnome.ScreenSaver` on GNOME
+(sent by GNOME Shell): while locked, keys are still read (to keep modifier
 state right) but nothing is logged, so the unlock password never is. `lock`
 and `unlock` are logged, and the focus is re-stated after unlock.
 
-**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read from
-Klipper (`getClipboardContents`, 300 ms timeout, up to 64 KiB) and logged as a
-`paste` event right after the key. Copying alone is never recorded.
+**Paste.** On Ctrl+V, Ctrl+Shift+V or Shift+Insert the clipboard is read
+(300 ms timeout, up to 64 KiB) and logged as a `paste` event right after the
+key: from Klipper's `getClipboardContents` on KDE, from the extension's
+`Clipboard` method (`St.Clipboard`) on GNOME. Copying alone is never
+recorded.
 
 **Sleep/wake.** logind's `PrepareForSleep` on the system bus: `sleep` and
 `wake` are logged, and on wake every keyboard is closed and reopened (held
@@ -199,8 +226,9 @@ platform is a new module, not a change to the core:
   `XDG_CURRENT_DESKTOP` (or the compositor's name on the session bus):
   focus, clipboard, screen lock, and the keyboard settings the key
   resolution needs (layouts, layout switches, repeat schedule). KDE Plasma
-  is one backend. A desktop without one still gets keys, attributed to
-  `unknown`, with a warning that its screen lock may not be detected.
+  and GNOME are the backends today. A desktop without one still gets keys,
+  attributed to `unknown`, with a warning that its screen lock may not be
+  detected (so an unlock password may be recorded).
 - The **synthetic** test source is another `Platform`.
 - `Cargo.toml` lists evdev and zbus as Linux-only dependencies, and a build
   for another OS stops with a message pointing at the platform layer.
@@ -558,6 +586,12 @@ window has to be read anyway. Clock steps backwards are discussed in section
 - **Clipboard**: read only on a paste shortcut.
 - **KWin integration** only reads window metadata and calls one D-Bus
   method; calls not coming from KWin are ignored.
+- **The GNOME extension** only reads window metadata, the active input
+  source and, when asked, the clipboard. Its signals are trusted only from
+  GNOME Shell's connection. Its `Clipboard` method answers any program in
+  the user's session, as Klipper does on KDE: on GNOME Wayland, background
+  programs normally cannot read the clipboard, so this widens access, a
+  trade-off the owner accepted.
 - **Queries**: search words are quoted for FTS5 and all SQL uses bound
   parameters.
 - **Hardware checks that need privileges** get exactly two narrow ones
@@ -591,6 +625,12 @@ window has to be read anyway. Clock steps backwards are discussed in section
   `two_instances`' desktop test runs two real captures side by side (same
   focus and keys in both; a stop or `kill -9` of one never unloads the
   other's KWin script);
+  `gnome_e2e` runs a real `brain run` against a private, headless GNOME
+  Shell (its own D-Bus session, home and systemd scope) with the extension
+  installed: focus to a window without and with a desktop file, focus
+  back, a rename, a switch to Hebrew, the clipboard, and the lock (from a
+  stand-in for GNOME's lock service: the private shell has no login
+  session, on purpose, so it cannot reach the real session's lock state);
   `vscode_replay` and `tier2_e2e`'s replay tests drive real VS Code. The
   diff's output was also compared once with `git diff -U3` on 300 random
   edits (identical for distinct lines).
@@ -634,9 +674,13 @@ window has to be read anyway. Clock steps backwards are discussed in section
   `brain_focus_<pid>` name; if another run reused that process id in the
   meantime, its script is unloaded instead (rare; a start-time suffix in
   the name would close it).
-- **Desktop scope**: focus tracking needs KWin. On GNOME the equivalent would
-  be a Shell extension; on wlroots compositors, `wlr-foreign-toplevel`. Keys
-  are captured on any Linux, attributed to `unknown`.
+- **Desktop scope**: focus tracking needs KWin (KDE) or brain's extension
+  (GNOME, active after a login). On wlroots compositors the equivalent would
+  be `wlr-foreign-toplevel`; that is a new `Desktop` backend. Keys are
+  captured on any Linux, attributed to `unknown` without a backend.
+- **GNOME is tested headless**: the extension and brain run against a real
+  GNOME Shell, but a headless one, and its lock screen only through a
+  stand-in; a check on a real stock-Ubuntu login is the remaining step.
 - **Future work**: AT-SPI as a second source for GTK/Qt apps; the
   sandboxed-replay approach of tier 2 for terminals (a pty with the user's
   shell) and Chrome (CDP with a companion extension); retention and

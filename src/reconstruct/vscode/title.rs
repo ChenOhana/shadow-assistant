@@ -4,8 +4,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-/// App ids VS Code reports under KDE/Wayland (desktop file name, or the
-/// resource class when there is none), plus the OSS builds and Flatpak id.
+/// App ids VS Code reports (desktop file name, or the window class when there
+/// is none) for Microsoft's .deb and snap packages, the OSS builds and the
+/// Flatpak.
 const VSCODE_APP_IDS: &[&str] = &[
     "code",
     "code-url-handler",
@@ -13,6 +14,7 @@ const VSCODE_APP_IDS: &[&str] = &[
     "visual-studio-code",
     "com.visualstudio.code",
     "com.microsoft.vscode", // Microsoft's .deb/.rpm package on KDE Wayland
+    "code_code",            // the snap (stock Ubuntu's App Center)
     "com.visualstudio.code.oss",
     "code-oss",
     "codium",
@@ -444,6 +446,7 @@ mod tests {
         assert!(is_vscode("code-url-handler"));
         assert!(is_vscode("com.visualstudio.code"));
         assert!(is_vscode("com.microsoft.VSCode"));
+        assert!(is_vscode("code_code"));
         assert!(!is_vscode("org.kde.kate"));
         assert!(!is_vscode("google-chrome"));
     }

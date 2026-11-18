@@ -4,6 +4,7 @@
 //! | Backend          | Focus      | Clipboard | Screen lock                   | Keyboard settings          |
 //! |------------------|------------|-----------|-------------------------------|----------------------------|
 //! | KDE Plasma       | KWin script| Klipper   | `org.freedesktop.ScreenSaver` | kxkbrc, kcminputrc, layout switch signals |
+//! | GNOME            | brain's GNOME Shell extension | the extension | `org.gnome.ScreenSaver` | GSettings, layout switch signals from the extension |
 //! | anything else    | none (`unknown`) | none | `org.freedesktop.ScreenSaver` if the desktop has it | `XKB_DEFAULT_*`, systemd-localed |
 //!
 //! A new desktop is one more [`Desktop`] implementation and a line in
@@ -12,7 +13,7 @@
 use super::input::ControlHandle;
 use super::keys::RepeatConfig;
 use super::xkb::LayoutSpec;
-use super::{dbus, kde, layout};
+use super::{dbus, gnome, kde, layout};
 use crate::capture::recorder::{ClipboardSource, NoClipboard, Recorder};
 use crate::datadir::DataDir;
 use crate::event::UNKNOWN_APP;
@@ -57,8 +58,17 @@ pub trait DesktopSession {
 /// owns its name on the session bus.
 pub fn detect() -> Box<dyn Desktop> {
     let current = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-    if has_token(&current, "KDE") || on_session_bus(kde::KWIN) {
+    if has_token(&current, "KDE") {
         return Box::new(kde::Kde);
+    }
+    if has_token(&current, "GNOME") {
+        return Box::new(gnome::Gnome);
+    }
+    if on_session_bus(kde::KWIN) {
+        return Box::new(kde::Kde);
+    }
+    if on_session_bus(gnome::SHELL) {
+        return Box::new(gnome::Gnome);
     }
     Box::new(Unsupported {
         name: if current.is_empty() {
@@ -101,15 +111,27 @@ pub(super) fn config_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
 }
 
+/// A screen-saver service whose `ActiveChanged(bool)` signal and `GetActive`
+/// method say whether the screen is locked. Its interface has its name.
+pub(super) struct LockService {
+    pub name: &'static str,
+    pub path: &'static str,
+}
+
+/// The freedesktop interface (KDE, Xfce, ...).
+pub(super) const FREEDESKTOP_LOCK: LockService = LockService {
+    name: "org.freedesktop.ScreenSaver",
+    path: "/ScreenSaver",
+};
+
 /// Pauses capture while the screen is locked, so the unlock password is never
-/// recorded (under whatever app had focus before the lock). Uses the
-/// freedesktop `org.freedesktop.ScreenSaver` interface (KDE, Xfce, ...).
-pub(super) fn watch_freedesktop_lock(conn: &Connection, recorder: Arc<Recorder>) {
+/// recorded (under whatever app had focus before the lock).
+pub(super) fn watch_lock(conn: &Connection, service: &LockService, recorder: Arc<Recorder>) {
     let active: Option<bool> = conn
         .call_method(
-            Some("org.freedesktop.ScreenSaver"),
-            "/ScreenSaver",
-            Some("org.freedesktop.ScreenSaver"),
+            Some(service.name),
+            service.path,
+            Some(service.name),
             "GetActive",
             &(),
         )
@@ -120,8 +142,8 @@ pub(super) fn watch_freedesktop_lock(conn: &Connection, recorder: Arc<Recorder>)
     }
     dbus::spawn_signal_watch(
         conn,
-        "org.freedesktop.ScreenSaver",
-        "org.freedesktop.ScreenSaver",
+        service.name,
+        service.name,
         "ActiveChanged",
         None,
         move |msg| {
@@ -152,14 +174,14 @@ impl Desktop for Unsupported {
 
     fn start(&self, ctx: DesktopContext<'_>) -> Box<dyn DesktopSession> {
         eprintln!(
-            "brain: warning: desktop '{}' is not supported (KDE Plasma is): keys are \
+            "brain: warning: desktop '{}' is not supported (KDE Plasma and GNOME are): keys are \
              attributed to 'unknown', pastes are not resolved, and the screen lock is \
              detected only if the desktop implements org.freedesktop.ScreenSaver, so an \
              unlock password may be recorded",
             self.name
         );
         if let Ok(session) = Connection::session() {
-            watch_freedesktop_lock(&session, ctx.recorder);
+            watch_lock(&session, &FREEDESKTOP_LOCK, ctx.recorder);
         }
         Box::new(NoSession)
     }

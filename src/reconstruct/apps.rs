@@ -52,8 +52,9 @@ const TERMINALS: &[&str] = &[
     "tilix",
     "terminator",
     "terminology",
-    "ptyxis",
-    "kgx", // GNOME Console
+    "ptyxis",  // Ubuntu's default terminal (org.gnome.Ptyxis)
+    "console", // GNOME Console (org.gnome.Console)
+    "kgx",     // GNOME Console's older id
     "warp",
 ];
 const BROWSERS: &[&str] = &[
@@ -187,6 +188,13 @@ mod tests {
         assert_eq!(classify("com.mitchellh.ghostty"), AppClass::Terminal);
         assert_eq!(classify("org.kde.konsole"), AppClass::Terminal);
         assert_eq!(classify("org.gnome.Terminal"), AppClass::Terminal);
+        assert_eq!(classify("org.gnome.Ptyxis"), AppClass::Terminal);
+        assert_eq!(classify("org.gnome.Console"), AppClass::Terminal);
+        // KDE's script console is not a shell: "interactiveconsole" is one token.
+        assert_eq!(
+            classify("org.kde.plasma-interactiveconsole"),
+            AppClass::Generic
+        );
         assert_eq!(classify("google-chrome"), AppClass::Browser);
         assert_eq!(classify("firefox_firefox"), AppClass::Browser);
         assert_eq!(classify("org.kde.kate"), AppClass::Editor);

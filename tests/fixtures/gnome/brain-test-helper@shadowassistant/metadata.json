@@ -1,0 +1,6 @@
+{
+  "uuid": "brain-test-helper@shadowassistant",
+  "name": "brain test helper",
+  "description": "Test only: lets tests/gnome_e2e.rs set the clipboard and switch the layout of a private headless GNOME Shell, which has no keyboard to do it with.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"]
+}
