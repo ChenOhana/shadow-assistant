@@ -264,6 +264,36 @@ changed), `paste`, and `system` (`start`, `stop`,
 `sleep`, `wake`, `lock`, `unlock`). Timestamps are RFC 3339 UTC with
 milliseconds: fixed width, so they sort as strings.
 
+**Why JSONL and not a binary format such as CBOR.** Measured on a real
+log (15,459 events from about a day of use, 2.2 MB, 142 bytes per event):
+
+| Encoding of the same events | Size |
+|---|---|
+| JSONL (as built) | 100 % |
+| CBOR, same fields | 84 % |
+| JSONL compressed with zlib | 5.7 % |
+
+CBOR saves little because most of a line is text it stores just as JSON
+does: the timestamp, the app id and the window title (app and title alone
+are 35 % of a key event). Integer timestamps and numeric field keys might
+reach about 60 %; the titles stay. Against that, a binary log would cost:
+
+- **The crash-safety design.** It rests on newlines: one complete line per
+  `write(2)`, a torn last line cut off at start, readers trusting only
+  newline-terminated lines (3.2, 3.4). CBOR records have no delimiter, so
+  it would need length-prefixed, checksummed frames and new repair and
+  reader logic, in the part of the code most worth keeping simple.
+- **Readability.** The log is the ground truth, and JSONL can be read with
+  `grep`, `tail -f` and `jq`, matches the assignment's example event, and
+  is what the README shows. A binary log needs a dedicated tool to look at.
+
+Speed decides nothing either way: serializing an event takes about a
+microsecond, and capture uses 0.1 % CPU against a 1 % budget. If the log's
+size ever matters (a few MB a day for a heavy typist), compression is the
+lever, at about 17 times smaller: rotate the log into segments and
+compress the closed ones, keeping the live segment plain JSONL so crash
+safety is unchanged (section 10, retention and compaction).
+
 ### 3.2 Write path
 
 - One `write(2)` per event, of a complete line, from the input thread (or a
@@ -686,4 +716,5 @@ window has to be read anyway. Clock steps backwards are discussed in section
 - **Future work**: AT-SPI as a second source for GTK/Qt apps; the
   sandboxed-replay approach of tier 2 for terminals (a pty with the user's
   shell) and Chrome (CDP with a companion extension); retention and
-  compaction of old log data.
+  compaction of old log data (rotated, compressed log segments, about 17
+  times smaller, see 3.1).
