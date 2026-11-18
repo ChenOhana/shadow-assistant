@@ -32,6 +32,12 @@ class Enabled(unittest.TestCase):
         self.assertFalse(rtl.enabled("auto", Tty(True), {"TERM": "mlterm"}))
         self.assertFalse(rtl.enabled("auto", Tty(False), {"TERM": "xterm-ghostty"}))  # a pipe
 
+    def test_reasons(self):
+        self.assertEqual(rtl.decide("auto", Tty(True), {"TERM_PROGRAM": "ghostty"}), (True, "ghostty does not reorder"))
+        self.assertEqual(rtl.decide("auto", Tty(True), {"KONSOLE_VERSION": "1"}), (False, "Konsole reorders by itself"))
+        self.assertEqual(rtl.decide("auto", Tty(False), {}), (False, "output is not a terminal"))
+        self.assertEqual(rtl.decide("off", Tty(True), {}), (False, "--rtl off"))
+
     def test_forced(self):
         self.assertTrue(rtl.enabled("on", Tty(False), {}))
         self.assertFalse(rtl.enabled("off", Tty(True), {"TERM": "xterm-ghostty"}))

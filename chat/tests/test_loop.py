@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from brain_chat import FINAL_ROUND_NOTE, MAX_TOOL_ROUNDS, Chat  # noqa: E402
+from brain_chat import FINAL_ROUND_NOTE, MAX_TOOL_ROUNDS, Chat, banner  # noqa: E402
 
 
 def text(t):
@@ -46,6 +46,17 @@ class Script:
         if isinstance(reply, BaseException):
             raise reply
         return reply(tool_choice) if callable(reply) else reply
+
+
+class Banner(unittest.TestCase):
+    def test_shows_the_running_configuration(self):
+        text = banner("claude-opus-5-5", "low", True, "/no/such/data", "no-such-brain", (True, "ghostty does not reorder"))
+        self.assertTrue(text.startswith("brain-chat\n"))
+        self.assertIn("model   claude-opus-5-5, effort low, refusal fallback on", text)
+        self.assertIn("data    /no/such/data", text)
+        self.assertIn("brain   no-such-brain (not found)", text)
+        self.assertIn("rtl     on (ghostty does not reorder)", text)
+        self.assertIn(f"limits  {MAX_TOOL_ROUNDS} tool rounds per question", text)
 
 
 class Loop(unittest.TestCase):

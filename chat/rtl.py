@@ -18,20 +18,26 @@ import shutil
 import textwrap
 import unicodedata
 
-# Terminals that do bidirectional rendering themselves.
-_BIDI_TERMINAL_VARS = ("KONSOLE_VERSION", "VTE_VERSION")
+def decide(mode: str, stream, env=os.environ) -> tuple[bool, str]:
+    """Whether brain-chat should reorder, and why: `on`, `off`, or `auto`
+    (on for a terminal that does not reorder by itself; off for pipes and
+    files)."""
+    if mode in ("on", "off"):
+        return mode == "on", f"--rtl {mode}"
+    if not stream.isatty():
+        return False, "output is not a terminal"
+    if env.get("KONSOLE_VERSION"):
+        return False, "Konsole reorders by itself"
+    if env.get("VTE_VERSION"):
+        return False, "GNOME Terminal (VTE) reorders by itself"
+    if env.get("TERM", "").startswith("mlterm"):
+        return False, "mlterm reorders by itself"
+    terminal = env.get("TERM_PROGRAM") or env.get("TERM") or "this terminal"
+    return True, f"{terminal} does not reorder"
 
 
 def enabled(mode: str, stream, env=os.environ) -> bool:
-    """Whether brain-chat should reorder: `on`, `off`, or `auto` (on for a
-    terminal that does not reorder by itself; off for pipes and files)."""
-    if mode in ("on", "off"):
-        return mode == "on"
-    if not stream.isatty():
-        return False
-    if any(env.get(v) for v in _BIDI_TERMINAL_VARS) or env.get("TERM", "").startswith("mlterm"):
-        return False
-    return True
+    return decide(mode, stream, env)[0]
 
 
 def is_rtl(text: str) -> bool:

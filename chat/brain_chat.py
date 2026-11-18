@@ -167,6 +167,22 @@ def anthropic_turn(model: str, effort: str, on_text, fallbacks: bool = True, cli
     return turn
 
 
+def banner(model, effort, fallback, data_dir, brain, rtl_state) -> str:
+    """The running configuration, shown when brain-chat starts."""
+    home = os.path.expanduser("~")
+    short = lambda p: "~" + p[len(home):] if p.startswith(home + os.sep) else p  # noqa: E731
+    found = shutil.which(brain)
+    on, why = rtl_state
+    rows = [
+        ("model", f"{model}, effort {effort}, refusal fallback {'on' if fallback else 'off'}"),
+        ("data", short(os.path.abspath(data_dir))),
+        ("brain", short(os.path.abspath(found)) if found else f"{brain} (not found)"),
+        ("rtl", f"{'on' if on else 'off'} ({why})"),
+        ("limits", f"{MAX_TOOL_ROUNDS} tool rounds per question, results redacted before sending"),
+    ]
+    return "brain-chat\n" + "\n".join(f"  {k:<7} {v}" for k, v in rows)
+
+
 def redraw_question(question: str) -> None:
     """Replaces the typed question, drawn backwards by the line editor in a
     terminal without bidirectional support, with its visual-order rows."""
@@ -208,13 +224,16 @@ def main() -> int:
         return 1
     dim = (lambda s: f"\033[2m{s}\033[0m") if sys.stderr.isatty() else (lambda s: s)
     write = lambda s: (sys.stdout.write(s), sys.stdout.flush())  # noqa: E731
-    rtl_on = rtl.enabled(args.rtl, sys.stdout)
+    rtl_on, rtl_why = rtl.decide(args.rtl, sys.stdout)
     if rtl_on:
         try:
             import bidi  # noqa: F401
         except ImportError:
-            print("brain-chat: python-bidi is not installed (make chat-setup); RTL off", file=sys.stderr)
-            rtl_on = False
+            rtl_on, rtl_why = False, "python-bidi is not installed (make chat-setup)"
+    print(
+        dim(banner(args.model, args.effort, not args.no_fallback, args.data_dir, args.brain, (rtl_on, rtl_why))),
+        file=sys.stderr,
+    )
     # With RTL on, answers are written line by line, reordered for display.
     renderer = rtl.LineRenderer(write) if rtl_on else None
     out = renderer.feed if renderer else write

@@ -15,7 +15,17 @@ Yesterday on prod-db (Konsole, window "juan@prod-db: ~"):
 ```
 
 Without a question it opens a chat; follow-up questions keep the context.
-Ctrl+C stops an answer, Ctrl+D quits.
+Ctrl+C stops an answer, Ctrl+D quits. It starts by showing its running
+configuration (on stderr, so a piped answer stays clean):
+
+```
+brain-chat
+  model   claude-opus-5-5, effort low, refusal fallback on
+  data    ~/brain-data
+  brain   /usr/bin/brain
+  rtl     on (ghostty does not reorder)
+  limits  10 tool rounds per question, results redacted before sending
+```
 
 ## Setup
 
@@ -100,7 +110,7 @@ Anthropic's side by brain-chat; nothing is written to disk.
 ## Tests
 
 ```sh
-make chat-test                 # offline: 32 tests, no API calls
+make chat-test                 # offline: 34 tests, no API calls
 chat/.venv/bin/python chat/live_check.py   # live: 3 questions, costs a little
 ```
 
