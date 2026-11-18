@@ -23062,3 +23062,1017 @@ leftovers: brain=0 vscode=0 tmp=0
 
 </details>
 
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 -I scripts/export-ai-logs.py --redact <redacted> --redact <redacted> >/dev/null && echo \"email hits: $(grep -ric '<redacted>' ai-logs | awk -F: '{s+=$2} END{print s+0}')\"; git add ai-logs && git commit -q -m \"Refresh AI logs\" -m \"Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01TqJ1JQ5AR6NbGxAYUZbh83\" && git push -q origin main && git log --oneline | head -3; git status --short | wc -l",
+  "description": "Refresh ai-logs and push"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+email hits: 0
+3ca379b Refresh AI logs
+d9d41a2 Align docs and help with tier 2 as built
+d727e26 Document the sleep/wake check as manual
+0
+```
+
+</details>
+
+## Assistant  <sub>2026-11-17T16:32:38.375Z</sub>
+
+The project is ready to hand over. The review found no code defects, only docs and help text written before the VS Code saved-file diff existed. I fixed those, and everything is pushed (`d9d41a2`, then the `ai-logs/` refresh in `3ca379b`). The working tree is clean.
+
+**Assignment checklist** (checked against the PDF):
+
+| Requirement | Status |
+|---|---|
+| One Rust binary, `brain run` and `brain query` | ✅ |
+| Captures keys (time, app, key, modifiers) and focus changes | ✅ |
+| Rebuilds what was written per app; search and text queries | ✅ |
+| No input lag, ≤ 1 % CPU, ≤ 32 MB | ✅ measured 0.1 % CPU, 8 MB in `perf_budget`; the live service is about 10 MB after hours |
+| Keeps working after sleep/wake | ✅ checked by hand, steps in the README |
+| `kill -9` then restart causes no corruption | ✅ `crash_safety`: 25 kills, database equals a fresh rebuild |
+| Queries work during `run` and see a consistent state | ✅ `query_cli`: thousands of queries while `run` writes |
+| `query text --at T` | ✅ |
+| `--data-dir`, non-zero exit with a message on stderr, JSON output | ✅ |
+| Search: all words in one session, deleted words don't match | ✅ |
+| Sessions defined | ✅ README and PLAN.md 4.1 |
+| PLAN.md: capture approaches compared, ingest, sessions, storage | ✅ |
+| README: build, run, supported OS, permissions, decisions and edge cases | ✅ |
+| `ai-logs/`, CLAUDE.md, "Where the agent failed" | ✅ 15 entries, email redacted (0 hits) |
+
+**What I fixed:**
+- **CLI help:** `--vscode-replay` now describes the diff first, then the replay. `query text` no longer confuses the time range with the app window.
+- **Tier 2 everywhere:** the README, PLAN.md (diagram, section heading, limitations), CLAUDE.md and three module docs called tier 2 a replay only. They now describe the diff with replay as the fallback.
+- **Contradictions:**
+  - PLAN.md and the README said shortcuts never open a session and unchanged sessions leave no row, without the VS Code exception.
+  - PLAN.md 4.5 claimed every result can be rebuilt from the log, which isn't true for tier 2.
+  - CLAUDE.md called the design doc the "source of truth" while PLAN.md lists where the build deliberately differs from it.
+  - PLAN.md still described `rtcwake` as a test permission.
+- **Stale numbers:** "about 120" unit tests is now about 130, the default `tier2_e2e` tests are listed, and the memory figure is the measured one.
+- **README:** a long tier-2 paragraph is split into three clear points, a wrong "autosaved" claim is corrected, and "Where the agent failed" has one more bug from your testing (shortcut-only edits leaving no session) and a new entry 15 (my incomplete replay instructions).
+
+**Verification:**
+- Formatting, clippy and the generated docs are clean.
+- A **fresh clone** builds and passes the whole default suite, so nothing depends on untracked files.
+- The 14 headless VS Code tests pass.
+- No process, VS Code sandbox or temp folder was left behind.
+- I didn't run the two Kate tests this round, because they type on your screen. I only changed docs and help text since they last passed. If you want them before handing in:
+  ```sh
+  cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1
+  ```
+
+The PDF itself stays out of the repo (`.gitignore` excludes `*.pdf`), as CLAUDE.md says.
+
+## User  <sub>2026-11-17T16:39:47.203Z</sub>
+
+<bash-input>cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1</bash-input>
+
+## User  <sub>2026-11-17T16:40:22.925Z</sub>
+
+<bash-stdout>    Finished `release` profile [optimized] target(s) in 0.05s
+     Running tests/real_keyboard_e2e.rs (target/release/build/brain/d4ac68b668d3970a/out/real_keyboard_e2e-d4ac68b668d3970a)
+
+running 1 test
+test real_keyboard_layouts_focus_and_hotplug ... kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.16s
+
+     Running tests/repeat_e2e.rs (target/release/build/brain/718ef219e56c5b8f/out/repeat_e2e-718ef219e56c5b8f)
+
+running 1 test
+test held_keys_match_what_kate_received ... hold   ms   model  brain-log  kate-file  reconstructed
+a      80       1          1          1              1
+b     300       1          1          1              1
+c     620       2          2          3              2
+d    1020      12         12         12             12
+e    2020      37         37         36             37
+f    4020      87         87         86             87
+g    1000      12         12         11             12  (boundary)
+h    1001      12         12         12             12  (boundary)
+i     999      11         11         12             11  (boundary)
+j     640       3          3          2              3  (boundary)
+k    2020      37         37         25             25
+⌫    1020      12         12
+kate file:     "abcccddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffggggggggggghhhhhhhhhhhhiiiiiiiiiiiijjkkkkkkkkkkkkkkkkkkkkkkkkk\n"
+reconstructed: "abccddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeefffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffgggggggggggghhhhhhhhhhhhiiiiiiiiiiijjjkkkkkkkkkkkkkkkkkkkkkkkkk"
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.45s</bash-stdout><bash-stderr></bash-stderr>
+
+## Assistant  <sub>2026-11-17T16:40:29.836Z</sub>
+
+Both Kate tests pass, so every test suite has now passed on the final code.
+
+- **`real_keyboard_e2e`:** brain's sessions match what Kate saved, one per window. That covers the Hebrew typed after an Alt+Shift layout switch, focus moving to window B and back to A, and the keyboard unplugged while Shift was held and replaced by a new one.
+- **`repeat_e2e`:**
+  - **Log vs. model:** for every held key, brain's log has exactly the repeat count KDE's schedule produces.
+  - **Kate vs. brain:** Kate itself differs by at most one character per hold, in both directions (rows c, e, f, g, i, j). That's the documented Qt repeat-timer jitter, not a brain bug.
+  - **Backspace hold:** holding Backspace on the long `k` run deletes 12 characters in both Kate and brain's reconstruction, leaving 25.
+
+Nothing else is needed before you send it.
+
+## User  <sub>2026-11-18T09:09:32.468Z</sub>
+
+let's add a sanity test that runs 2 instances of brain binaries on different folders. design it first, what can go wrong?
+
+## Assistant  <sub>2026-11-18T09:09:51.298Z</sub>
+
+Before designing, I'll check what the two instances could share: names on D-Bus, the KWin script, and the VS Code sandbox.
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'loadScript\\|unloadScript\\|isScriptLoaded\\|plugin_name\\|script_name\\|SCRIPT\\|shadowassistant\\|stale\\|leftover' src/capture/desktop.rs | head -30; grep -n 'systemd-run\\|--unit\\|scope\\|instance.json' src/reconstruct/vscode/mod.rs | head -15; grep -rn '\"/tmp\\|temp_dir\\|XDG_RUNTIME\\|/run/user' src | grep -v test | head",
+  "description": "Find shared resources: KWin script, D-Bus names, scopes, temp paths"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+27:const OBJECT_PATH: &str = "/org/shadowassistant/Brain";
+28:const FOCUS_IFACE: &str = "org.shadowassistant.Brain.Focus";
+30:const SCRIPT_TEMPLATE: &str = include_str!("kwin_focus.js");
+56:#[zbus::interface(name = "org.shadowassistant.Brain.Focus")]
+91:        let service = format!("org.shadowassistant.Brain.p{}", std::process::id());
+104:        let script = SCRIPT_TEMPLATE
+114:        if let Ok(stale) = std::fs::read_to_string(&marker) {
+115:            let _ = unload_script(&conn, stale.trim());
+154:                "loadScript",
+210:        "unloadScript",
+409:/// file descriptors can go stale across suspend).
+544:            assert!(SCRIPT_TEMPLATE.contains(p), "{p}");
+21://! - **Resource caps.** A transient systemd user scope with `CPUQuota=50%`
+23://!   `systemd-run --user` is unavailable it runs without the cgroup (warned
+63://! dead owner is found through `instance.json` and killed before a new one
+164:    /// The transient scope's cgroup directory, once known.
+174:            // cgroup v2: kills every process in the scope, including any that
+211:    /// Whether `systemd-run --user --scope` works here (probed once).
+294:        let _ = std::fs::remove_file(self.work_dir.join("instance.json"));
+374:            let ok = Command::new("systemd-run")
+375:                .args(["--user", "--scope", "-q", "--collect", "--", "true"])
+383:                    "brain: warning: systemd-run --user is unavailable; \
+398:            let mut c = Command::new("systemd-run");
+401:                "--scope",
+408:                "--unit",
+498:            self.work_dir.join("instance.json"),
+514:        // systemd-run moves itself into the scope before exec'ing the
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 86,160p src/capture/desktop.rs; sed -n 396,415p src/reconstruct/vscode/mod.rs",
+  "description": "Read KWin script naming/cleanup and the scope unit name"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+}
+
+impl KwinFocus {
+    /// Exposes the focus service on the session bus and loads the KWin script.
+    pub fn start(recorder: Arc<Recorder>, kwin_dir: &Path) -> Result<Self> {
+        let service = format!("org.shadowassistant.Brain.p{}", std::process::id());
+        let kwin_owner = Arc::new(Mutex::new(None));
+        let iface = FocusIface {
+            recorder,
+            kwin_owner: kwin_owner.clone(),
+        };
+        let conn = zbus::blocking::connection::Builder::session()?
+            .name(service.as_str())?
+            .serve_at(OBJECT_PATH, iface)?
+            .method_timeout(Duration::from_secs(5))
+            .build()
+            .context("connecting to the session bus")?;
+
+        let script = SCRIPT_TEMPLATE
+            .replace("@SERVICE@", &service)
+            .replace("@PATH@", OBJECT_PATH)
+            .replace("@IFACE@", FOCUS_IFACE);
+        let script_path = kwin_dir.join("brain_focus.js");
+        std::fs::write(&script_path, script)
+            .with_context(|| format!("writing {}", script_path.display()))?;
+
+        // A previous `brain run` killed with -9 could not unload its script.
+        let marker = kwin_dir.join("loaded_plugin");
+        if let Ok(stale) = std::fs::read_to_string(&marker) {
+            let _ = unload_script(&conn, stale.trim());
+        }
+        let plugin = format!("brain_focus_{}", std::process::id());
+        std::fs::write(&marker, &plugin)?;
+
+        let me = Self {
+            conn,
+            plugin,
+            script_path,
+            kwin_owner,
+        };
+        // KWin may not be up yet (brain started as a service early in the
+        // session). Keep the connection: `watch_kwin_restarts` loads the
+        // script as soon as KWin's name appears on the bus.
+        if let Err(e) = me.load() {
+            eprintln!(
+                "brain: KWin is not reachable yet ({e:#}); focus tracking starts when it appears"
+            );
+        }
+        Ok(me)
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// (Re)loads the script into the currently running KWin.
+    pub fn load(&self) -> Result<()> {
+        let owner =
+            name_owner(&self.conn, KWIN).context("KWin is not running on the session bus")?;
+        *self.kwin_owner.lock().unwrap_or_else(|p| p.into_inner()) = Some(owner);
+        let _ = unload_script(&self.conn, &self.plugin);
+        let path = self.script_path.to_string_lossy().into_owned();
+        let id: i32 = self
+            .conn
+            .call_method(
+                Some(KWIN),
+                "/Scripting",
+                Some("org.kde.kwin.Scripting"),
+                "loadScript",
+                &(path.as_str(), self.plugin.as_str()),
+            )?
+            .body()
+            .deserialize()?;
+        if id < 0 {
+            bail!("KWin refused to load {}", self.script_path.display());
+        );
+        let mut cmd = if self.systemd == Some(true) {
+            let mut c = Command::new("systemd-run");
+       
+… [410 more characters in the raw transcript]
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'let unit' -A3 src/reconstruct/vscode/mod.rs; grep -n 'fn unload_script' -A12 src/capture/desktop.rs | head -16",
+  "description": "Check the scope unit name and script unload"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+389:        let unit = format!(
+390-            "brain-vscode-{}-{}",
+391-            std::process::id(),
+392-            SystemTime::now()
+205:fn unload_script(conn: &Connection, plugin: &str) -> Result<()> {
+206-    conn.call_method(
+207-        Some(KWIN),
+208-        "/Scripting",
+209-        Some("org.kde.kwin.Scripting"),
+210-        "unloadScript",
+211-        &(plugin,),
+212-    )?;
+213-    Ok(())
+214-}
+215-
+216-fn name_owner(conn: &Connection, name: &str) -> Result<String> {
+217-    let owner: String = conn
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:10:38.268Z</sub>
+
+Here's the design. Nothing is written yet.
+
+## What the two instances share
+Everything brain writes is inside its data folder, and every name it registers outside it includes its process id:
+
+| Shared resource | How it's kept apart today | Risk |
+|---|---|---|
+| Data folder | `run.lock`, taken **before** the log is opened | only if both use the same folder |
+| D-Bus name | `org.shadowassistant.Brain.p<pid>` | none |
+| KWin focus script | each loads its own, named `brain_focus_<pid>`, from its own folder | stopping one could unload the other's script (see below) |
+| Keyboards (`/dev/input`) | each opens its own read-only handle; the kernel gives every reader every event, and the event filter is per handle | none expected, untested |
+| Lock, sleep and layout signals, Klipper | each subscribes on its own | none expected, untested |
+| VS Code sandbox (`--vscode-replay`) | per-folder work folder, scope `brain-vscode-<pid>-<time>` | two sandboxes would need ~1.2 GB each; nothing breaks |
+
+## What can go wrong
+1. **The same folder twice**, which includes two `brain run`s from one directory using the default `./brain-data`. The second must exit with an error and must not touch the first's files, for example by "repairing" its log while the first is writing. The lock is taken before the log is opened, so this should hold, but no test checks it.
+2. **Each instance's log and database must only contain its own events.** Neither may write into the other's log or database.
+3. **One instance dying or stopping must not affect the other.** That covers both `kill -9` and a clean stop.
+4. **The KWin script.** On a clean stop, brain unloads its script by its own name, which is safe. After a `kill -9`, the next start unloads the old script by the name saved in its folder (`brain_focus_<old pid>`). **A real, if rare, bug:** if the other instance has since been started with that same reused process id, the restart would unload the *other* instance's live script, and that instance would silently stop getting focus events. The fix is small: put the start time in the script name (`brain_focus_<pid>_<time>`), so a saved name can never match a live script.
+5. **Focus and keys must reach both.** Each instance should log the same focus changes and keys, and reconstruct the same text.
+
+## Proposed tests
+**A. `tests/two_instances.rs`, default.** Synthetic input, so no hardware or desktop:
+- Start `brain run --synthetic` on folders `a` and `b` together, with the test guard.
+- While both run, query each folder and check both logs keep growing.
+- **Same folder:** a third `brain run` on `a` exits non-zero with a "locked" message on stderr, and `a`'s log keeps growing undisturbed.
+- **Kill one:** `kill -9` A; B's log keeps growing. Restart A; it resumes.
+- **Isolation:** stop both cleanly, then check:
+  - A's log has 2 `start` and 1 `stop` markers, B's has 1 and 1, so nothing crossed logs;
+  - each database's ingest offset equals its own log's size;
+  - each database matches a fresh rebuild of its own log, as in `crash_safety`;
+  - no files appear outside the two folders.
+- End with `assert_no_brain_on` for both folders.
+
+**B. The same file, an `#[ignore]` test on the real desktop.** It needs KDE, the `input` group and `/dev/uinput`, like the Kate tests:
+- Start two real `brain run`s and type `hello` into a Kate window. Both logs show the focus and the keys, and both sessions read `hello`.
+- Stop A cleanly. Focus a second Kate window; B still logs the focus change, so A's shutdown didn't unload B's script.
+- `kill -9` B and restart it. It still gets focus events. KWin is left with no brain scripts once both have stopped.
+
+**Plus the fix in item 4**, with a unit test that a restart's saved script name can't match a script from another live instance.
+
+Test A runs in about 10 s. Test B takes about 15 s and types on your screen, like the other Kate tests. Should I go ahead with A, B and the script-name fix?
+
+## User  <sub>2026-11-18T09:13:12.390Z</sub>
+
+do we support or do we want to support running 2 instances of it?
+
+## Assistant  <sub>2026-11-18T09:13:30.323Z</sub>
+
+It's not a stated feature: the README only says "Only one `brain run` can use a data directory at a time", and the assignment doesn't ask for more. It works by construction, though, and you've been relying on it. Your test run in `/tmp/brain-manual4` ran alongside your `brain run` on `~/brain-data`, and both recorded the same untitled-file sessions (session 9 in one, 235 in the other).
+
+**Reasons to support it (separate folders only):**
+- **Testing next to your normal capture:** a manual or test run doesn't require stopping the service, which is exactly what you did.
+- **The test suite:** `cargo test` starts `brain run` processes while the service may be running. Forbidding a second instance would break the tests on a machine that runs brain.
+- **It costs almost nothing:** everything is already per folder or per process id. The one gap is the rare KWin script-name collision after a `kill -9`, which is a one-line fix.
+
+**Reasons not to:**
+- **Two copies of everything typed:** each instance records all keystrokes in full, so a forgotten second instance is a second full copy of your typing. That's a privacy cost, not a correctness one.
+- **Double resources:** CPU and memory are each still well within the budget. With `--vscode-replay` on both, there are two VS Code sandboxes of about 1.2 GB each.
+- **Not supporting it means more code:** a user-wide lock (one `brain run` per user) would prevent the duplicate copy. But the tests would then need to skip it, and you couldn't test next to the service any more.
+
+**My recommendation:** support it, limited to separate folders. That means:
+- one README line saying separate folders can run side by side and each records everything;
+- the script-name fix;
+- test A (synthetic, default) to keep it working.
+
+Test B, on the real desktop, is optional. The script-name fix and test A cover what's most likely to break.
+
+Do you want to support it, or should brain refuse a second instance per user?
+
+## User  <sub>2026-11-18T09:15:27.808Z</sub>
+
+ok let's suppurt it but implement only test code don't change logic code
+
+## Assistant  <sub>2026-11-18T09:15:43.630Z</sub>
+
+Understood: I won't touch brain's own code, only tests and docs. That means the rare KWin script-name collision after a `kill -9` stays unfixed, so I'll document it as a limitation. First, the pieces of the existing tests I can reuse:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub fn spawn_brain' -B2 -A25 tests/common/mod.rs; sed -n 86,140p tests/crash_safety.rs; grep -rn 'locked\\|already running\\|another .brain run' src/datadir.rs | head",
+  "description": "Read spawn_brain, crash_safety's rebuild, and the lock error"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+172-
+173-/// Starts `brain` with `args` (output discarded), guarded by [`Kill`].
+174:pub fn spawn_brain(args: &[&str], data: &Path) -> Kill {
+175-    Kill(
+176-        Command::new(env!("CARGO_BIN_EXE_brain"))
+177-            .args(args)
+178-            .arg("--data-dir")
+179-            .arg(data)
+180-            .stdout(Stdio::null())
+181-            .stderr(Stdio::null())
+182-            .spawn()
+183-            .unwrap(),
+184-    )
+185-}
+186-
+187-/// Panics if any process still runs `brain` on the data directory `data`.
+188-pub fn assert_no_brain_on(data: &Path) {
+189-    let needle = data.to_string_lossy().into_owned();
+190-    let left: Vec<String> = std::fs::read_dir("/proc")
+191-        .into_iter()
+192-        .flatten()
+193-        .flatten()
+194-        .filter(|e| {
+195-            e.file_name()
+196-                .to_str()
+197-                .is_some_and(|n| n.parse::<u32>().is_ok())
+198-        })
+199-        .filter_map(|e| std::fs::read(e.path().join("cmdline")).ok())
+    // Every line in the log is a complete, valid event.
+    let mut reader = LogReader::open(&log, 0).unwrap();
+    let mut events = Vec::new();
+    while let Some(line) = reader.next_line().unwrap() {
+        let ev = line
+            .event
+            .unwrap_or_else(|| panic!("invalid line at offset {}", line.offset));
+        events.push((line.offset, ev));
+    }
+    let log_len = std::fs::metadata(&log).unwrap().len();
+    assert_eq!(reader.offset(), log_len, "no torn tail after a clean stop");
+    assert!(
+        events.len() > 1000,
+        "expected plenty of events, got {}",
+        events.len()
+    );
+
+    // Ingest covered the whole log...
+    let c = Connection::open(&db).unwrap();
+    let off: i64 = c
+        .query_row("SELECT log_offset FROM ingest_state", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(off as u64, log_len);
+
+    // ...and its checkpoints are exactly what one uninterrupted pass over the
+    // log produces: across 25 kills, nothing was skipped or applied twice.
+    let mut expected: Vec<(String, i64)> = Vec::new();
+    let mut last: Option<i64> = None;
+    for (offset, ev) in &events {
+        if last.is_none_or(|prev| (ev.ts - prev).abs() >= CHECKPOINT_INTERVAL_MS) {
+            let ts = brain::timefmt::format_ms(ev.ts);
+            // PRIMARY KEY (ts): a same-millisecond duplicate is ignored.
+            if !expected.iter().any(|(t, _)| *t == ts) {
+                expected.push((ts, *offset as i64));
+            }
+            last = Some(ev.ts);
+        }
+    }
+    let mut stmt = c
+        .prepare("SELECT ts, byte_offset FROM log_checkpoints ORDER BY byte_offset")
+        .unwrap();
+    let actual: Vec<(String, i64)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(actual, expected);
+
+    // Sessions and documents are a pure function of the log: rebuilding the
+    // index from the log alone gives exactly the rows the crashin
+… [363 more characters in the raw transcript]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+A clean rebuild is the library's `Ingester` run over the log, and `crash_safety` holds the row comparison. I'm moving that comparison into `tests/common` so both tests can share it.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "head -30 tests/common/mod.rs; sed -n 1,30p tests/crash_safety.rs; sed -n 136,150p tests/crash_safety.rs",
+  "description": "Read the common module header and crash_safety imports"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! Shared helpers for the tests that drive a real KDE session: a uinput
+//! virtual keyboard, process cleanup, and checks of what `brain` saw focused.
+//! Each test binary uses a subset, hence the `dead_code` allowance.
+#![allow(dead_code)]
+
+use brain::capture::synthetic::us_keycode;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::fd::AsRawFd;
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+pub const KEY_BACKSPACE: u16 = 14;
+pub const KEY_LEFTCTRL: u16 = 29;
+pub const KEY_LEFTSHIFT: u16 = 42;
+pub const KEY_LEFTALT: u16 = 56;
+pub const KEY_S: u16 = 31;
+const EV_SYN: u16 = 0;
+const EV_KEY: u16 = 1;
+
+/// A uinput virtual keyboard, destroyed on drop.
+pub struct VirtualKeyboard {
+    file: std::fs::File,
+}
+
+impl VirtualKeyboard {
+    pub fn new() -> Self {
+        const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
+        const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
+//! `kill -9` at random moments, then restart: no corruption, no gaps, no duplicates.
+//!
+//! Drives the real `brain` binary with its synthetic input source (the evdev
+//! read is the only part replaced), so it runs unattended and without root.
+
+mod common;
+
+use brain::eventlog::LogReader;
+use brain::ingest::CHECKPOINT_INTERVAL_MS;
+use common::{assert_no_brain_on, spawn_brain};
+use rusqlite::Connection;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+/// xorshift64*: deterministic, dependency-free randomness for kill timing.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+    fn range_ms(&mut self, lo: u64, hi: u64) -> u64 {
+        lo + self.next() % (hi - lo)
+    }
+}
+
+fn wait_for_file(p: &Path) {
+    let t = Instant::now();
+    let fresh = tmp.path().join("rebuild.db");
+    let mut ing =
+        brain::ingest::Ingester::new(brain::store::open_writer(&fresh).unwrap(), &log).unwrap();
+    while ing.step().unwrap().lines > 0 {}
+    let rebuilt = Connection::open(&fresh).unwrap();
+    let live_sessions = session_rows(&c);
+    assert_eq!(live_sessions, session_rows(&rebuilt));
+    assert_eq!(context_rows(&c), context_rows(&rebuilt));
+    // The synthetic source types continuously, so each run is one session,
+    // closed by the next run's start (after a kill) or by the final stop.
+    assert!(
+        live_sessions.len() >= 20,
+        "got {} sessions",
+        live_sessions.len()
+    );
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'let log\\b\\|let log =\\|let db =\\|let dir =' tests/crash_safety.rs | head; grep -n '^type SessionRow' tests/crash_safety.rs; grep -n '^fn context_rows' -A10 tests/crash_safety.rs | tail -3; wc -l tests/crash_safety.rs",
+  "description": "Locate crash_safety variables and helper ranges"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+44:    let dir = tmp.path().join("data");
+45:    let log = dir.join("events.jsonl");
+46:    let db = dir.join("brain.db");
+164:type SessionRow = (
+207-        .collect::<Result<_, _>>()
+208-        .unwrap()
+209-}
+209 tests/crash_safety.rs
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/crash_safety.rs'; s=open(p).read()\ni=s.index(\"type SessionRow = (\")\nhelpers=s[i:].rstrip()+\"\\n\"\ns=s[:i].rstrip()+\"\\n\"\nold=\"\"\"    let fresh = tmp.path().join(\"rebuild.db\");\n    let mut ing =\n        brain::ingest::Ingester::new(brain::store::open_writer(&fresh).unwrap(), &log).unwrap();\n    while ing.step().unwrap().lines > 0 {}\n    let rebuilt = Connection::open(&fresh).unwrap();\n    let live_sessions = session_rows(&c);\n    assert_eq!(live_sessions, session_rows(&rebuilt));\n    assert_eq!(context_rows(&c), context_rows(&rebuilt));\"\"\"\nnew=\"\"\"    let live_sessions = assert_matches_rebuild(&dir, &tmp.path().join(\"rebuild.db\"));\"\"\"\nassert s.count(old)==1; s=s.replace(old,new)\ns=s.replace(\"use common::{assert_no_brain_on, spawn_brain};\",\"use common::{assert_matches_rebuild, assert_no_brain_on, spawn_brain};\")\nopen(p,'w').write(s)\n\np='tests/common/mod.rs'; c=open(p).read()\nc=c.replace(\"\"\"//! Shared helpers for the tests that drive a real KDE session: a uinput\n//! virtual keyboard, process cleanup, and checks of what `brain` saw focused.\n//! Each test binary uses a subset, hence the `dead_code` allowance.\"\"\",\"\"\"//! Shared helpers for the integration tests: a guard for every `brain run`\n//! they start, a check of the index against a rebuild from the log, and for\n//! the tests that drive a real KDE session, a uinput virtual keyboard and\n//! checks of what `brain` saw focused. Each test binary uses a subset, hence\n//! the `dead_code` allowance.\"\"\")\nc=c.rstrip()+\"\"\"\n\n/// Rebuilds the index of the data directory `data` from its log alone, into\n/// a new database at `scratch`, and asserts that the live index has exactly\n/// the same sessions and documents. Returns the live sessions.\npub fn assert_matches_rebuild(data: &Path, scratch: &Path) -> Vec<SessionRow> {\n    let log = data.join(\"events.jsonl\");\n    let mut ing =\n        brain::ingest::Ingester::new(brain::store::open_writer(scratch).unwrap(), &log).unwrap();\n    while ing.step().unwrap().lines > 0 {}\n    let live = rusqlite::Connection::open(data.join(\"brain.db\")).unwrap();\n    let rebuilt = rusqlite::Connection::open(scratch).unwrap();\n    let sessions = session_rows(&live);\n    assert_eq!(sessions, session_rows(&rebuilt), \"sessions differ from a rebuild\");\n    assert_eq!(context_rows(&live), context_rows(&rebuilt), \"documents differ from a rebuild\");\n    sessions\n}\n\n/// A session row: id, app, window, started_at, status, end_reason, text,\n/// start_offset, end_offset.\npub \"\"\"+helpers.replace(\"fn session_rows(c: &Connection)\",\"pub fn session_rows(c: &rusqlite::Connection)\").replace(\"fn context_rows(c: &Connection)\",\"pub fn context_rows(c: &rusqlite::Connection)\")+\"\\n\"\nopen(p,'w').write(c)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20",
+  "description": "Move the rebuild comparison into tests/common"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+[This command modified 2 files you've previously read: tests/common/mod.rs, tests/crash_safety.rs. Call Read before editing.]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:16:40.340Z</sub>
+
+Clean. Before writing the real-desktop test, I'll check the Kate helpers it needs:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "grep -n 'pub fn \\|pub struct\\|impl Drop' tests/common/mod.rs; grep -n 'pub struct RestoreLayout' -A15 tests/common/mod.rs; grep -n 'derive' src/event.rs | head",
+  "description": "List common helpers and SystemState derives"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+25:pub struct VirtualKeyboard {
+30:    pub fn new() -> Self {
+97:    pub fn key(&mut self, code: u16, down: bool) {
+102:    pub fn hold(&mut self, code: u16, ms: u64) {
+109:    pub fn type_str(&mut self, s: &str) {
+125:    pub fn ctrl(&mut self, code: u16) {
+133:impl Drop for VirtualKeyboard {
+145:pub struct Kill(pub Child);
+151:    pub fn stop(&mut self) -> std::process::ExitStatus {
+169:impl Drop for Kill {
+176:pub fn spawn_brain(args: &[&str], data: &Path) -> Kill {
+190:pub fn assert_no_brain_on(data: &Path) {
+210:pub struct KillMatching(pub String);
+211:impl Drop for KillMatching {
+238:pub fn focused(log: &Path) -> Option<(String, String)> {
+251:pub fn kate_focused(log: &Path, file_name: &str) -> bool {
+256:pub fn start_brain(data: &Path) -> Kill {
+261:pub fn open_kate(file: &Path) -> KillMatching {
+274:pub fn wait_kate_focused(log: &Path, file_name: &str) {
+288:pub fn assert_kate_focused(log: &Path, file_name: &str) {
+305:pub fn activate_window(needle: &str) {
+338:pub fn layout_index() -> u32 {
+349:pub struct RestoreLayout(pub u32);
+350:impl Drop for RestoreLayout {
+366:pub fn assert_matches_rebuild(data: &Path, scratch: &Path) -> Vec<SessionRow> {
+401:pub fn session_rows(c: &rusqlite::Connection) -> Vec<SessionRow> {
+426:pub fn context_rows(c: &rusqlite::Connection) -> Vec<(String, String, String, i64)> {
+349:pub struct RestoreLayout(pub u32);
+350-impl Drop for RestoreLayout {
+351-    fn drop(&mut self) {
+352-        if layout_index() != self.0 {
+353-            qdbus(&[
+354-                "org.kde.keyboard",
+355-                "/Layouts",
+356-                "org.kde.KeyboardLayouts.setLayout",
+357-                &self.0.to_string(),
+358-            ]);
+359-        }
+360-    }
+361-}
+362-
+363-/// Rebuilds the index of the data directory `data` from its log alone, into
+364-/// a new database at `scratch`, and asserts that the live index has exactly
+19:#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+28:#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+60:#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+70:#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+```
+
+</details>
+
+## Assistant  <sub>2026-11-18T09:16:46.851Z</sub>
+
+I have everything I need. Writing `tests/two_instances.rs`, plus a small layout helper in `tests/common` that the real-desktop test shares with `real_keyboard_e2e`:
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/common/mod.rs'; c=open(p).read()\nold=\"\"\"/// Rebuilds the index of the data directory `data` from its log alone, into\"\"\"\nnew=\"\"\"/// Switches to the first keyboard layout (us) for the test, if needed; the\n/// returned guard restores the layout that was active.\npub fn use_first_layout() -> RestoreLayout {\n    let restore = RestoreLayout(layout_index());\n    if restore.0 != 0 {\n        qdbus(&[\n            \"org.kde.keyboard\",\n            \"/Layouts\",\n            \"org.kde.KeyboardLayouts.setLayout\",\n            \"0\",\n        ]);\n        let t = Instant::now();\n        while layout_index() != 0 {\n            assert!(t.elapsed() < Duration::from_secs(2), \"layout did not switch to #0\");\n            std::thread::sleep(Duration::from_millis(100));\n        }\n    }\n    restore\n}\n\n/// Rebuilds the index of the data directory `data` from its log alone, into\"\"\"\nassert c.count(old)==1; c=c.replace(old,new); open(p,'w').write(c)\n\np='tests/real_keyboard_e2e.rs'; s=open(p).read()\nold=\"\"\"    let restore = RestoreLayout(layout_index());\n    if layout_index() != 0 {\n        // Start on the first layout (us); the guard restores the original.\n        let _ = std::process::Command::new(\"qdbus6\")\n            .args([\n                \"org.kde.keyboard\",\n                \"/Layouts\",\n                \"org.kde.KeyboardLayouts.setLayout\",\n                \"0\",\n            ])\n            .status();\n        wait_for_layout(0);\n    }\"\"\"\nnew=\"\"\"    // Start on the first layout (us); the guard restores the original.\n    let restore = use_first_layout();\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ngrep -n '^fn qdbus\\|^pub fn qdbus' tests/common/mod.rs",
+  "description": "Add a shared layout helper; use it in real_keyboard_e2e"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+296:fn qdbus(args: &[&str]) -> String {
+```
+
+</details>
+
+**Tool call: `Write`**
+
+```
+{
+  "file_path": "/home/juan/Documents/shadow-assistant/tests/two_instances.rs",
+  "content": "//! Two `brain run`s side by side, each on its own data directory: each keeps\n//! to its own folder, a second run on the same folder is refused, and one\n//! dying or stopping does not disturb the other.\n//!\n//! The synthetic test runs by default. The desktop test (`#[ignore]`) runs\n//! two real captures against Kate windows: both see the same focus and keys,\n//! and one stopping or being killed never unloads the other's KWin script.\n//! It needs what `real_keyboard_e2e` needs:\n//!\n//!   cargo test --release --test two_instances -- --ignored --nocapture\n\nmod common;\n\nuse brain::event::EventKind;\nuse brain::eventlog::LogReader;\nuse common::*;\nuse rusqlite::Connection;\nuse std::io::Read;\nuse std::path::Path;\nuse std::process::{Command, Stdio};\nuse std::time::{Duration, Instant};\n\nfn log_len(data: &Path) -> u64 {\n    std::fs::metadata(data.join(\"events.jsonl\")).map_or(0, |m| m.len())\n}\n\n/// Waits until the log of `data` grows past `than` bytes.\nfn wait_growing(data: &Path, than: u64) {\n    let t = Instant::now();\n    while log_len(data) <= than {\n        assert!(\n            t.elapsed() < Duration::from_secs(10),\n            \"{} is not being written\",\n            data.display()\n        );\n        std::thread::sleep(Duration::from_millis(50));\n    }\n}\n\n/// The lifecycle markers (`start`, `stop`, ...) in the log of `data`, in order.\nfn markers(data: &Path) -> Vec<String> {\n    let mut reader = LogReader::open(&data.join(\"events.jsonl\"), 0).unwrap();\n    let mut out = Vec::new();\n    while let Some(line) = reader.next_line().unwrap() {\n        if let Some(EventKind::System { state }) = line.event.map(|e| e.kind) {\n            out.push(format!(\"{state:?}\").to_lowercase());\n        }\n    }\n    out\n}\n\n/// How the sessions in `data`'s index ended, in order.\nfn end_reasons(data: &Path) -> Vec<String> {\n    let c = Connection::open(data.join(\"brain.db\")).unwrap();\n    let mut st = c\n        .prepare(\"SELECT end_reason FROM sessions ORDER BY id\")\n        .unwrap();\n    st.query_map([], |r| r.get(0))\n        .unwrap()\n        .collect::<Result<_, _>>()\n        .unwrap()\n}\n\n/// Waits until `brain query search` on `data` finds a session.\nfn wait_searchable(data: &Path) {\n    let t = Instant::now();\n    loop {\n        let out = Command::new(env!(\"CARGO_BIN_EXE_brain\"))\n            .args([\"query\", \"search\", \"migration\", \"--data-dir\"])\n            .arg(data)\n            .output()\n            .unwrap();\n        assert!(out.status.success(), \"{}\", String::from_utf8_lossy(&out.stderr));\n        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();\n        if !json[\"results\"].as_array().unwrap().is_empty() {\n            return;\n        }\n        assert!(\n            t.elapsed() < Duration::from_secs(10),\n            \"nothing searchable in {}\",\n            data.display()\n        );\n        std::thread::sleep(Duration::from_millis(200));\n    }\n}\n\n/// Runs `brain` with `args` on `data`, expecting it to exit by itself within\n/// 10 s (the guard kills it otherwise); returns its status and stderr.\nfn run_to_exit(args: &[&str], data: &Path) -> (std::process::ExitStatus, String) {\n    let mut guard = Kill(\n        Command::new(env!(\"CARGO_BIN_EXE_brain\"))\n            .args(args)\n            .arg(\"--data-dir\")\n            .arg(data)\n            .stdout(Stdio::null())\n            .stderr(Stdio::piped())\n            .spawn()\n            .unwrap(),\n    );\n    let t = Instant::now();\n    let status = loop {\n        if let Some(status) = guard.0.try_wait().unwrap() {\n            break status;\n        }\n        assert!(t.elapsed() < Duration::from_secs(10), \"it did not exit\");\n        std::thread::sleep(Duration::from_millis(50));\n    };\n    let mut stderr = String::new();\n    guard\n        .0\n        .stderr
+… [6038 more characters in the raw transcript]
+```
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "cargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -30; cargo test --release --test two_instances --test crash_safety 2>&1 | grep -E '^test |test result|panicked|left|right|assertion'",
+  "description": "Lint and run the new test plus crash_safety",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+File created successfully at: /home/juan/Documents/shadow-assistant/tests/two_instances.rs (file state is current in your context — no need to Read it back)
+```
+
+</details>
+
+<details><summary>Tool result</summary>
+
+```
+test kill_dash_nine_never_corrupts ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+test two_real_captures_share_the_desktop ... ignored
+test two_runs_on_separate_folders_stay_apart ... FAILED
+thread 'two_runs_on_separate_folders_stay_apart' (797336) panicked at tests/two_instances.rs:171:5:
+assertion `left == right` failed
+  left: ["restart", "commit", "commit", "commit", "stop"]
+ right: ["restart", "stop"]
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.38s
+[This command modified 2 files you've previously read: tests/two_instances.rs, tests/common/mod.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+My assumption was off: the synthetic input also runs commands, so each run has several sessions. The isolation check still passes, and I'm now updating the session check to count A's single restart-closed session and B's none.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/two_instances.rs'; s=open(p).read()\nold=\"\"\"    assert_eq!(end_reasons(&a), [\"restart\", \"stop\"]);\n    assert_eq!(end_reasons(&b), [\"stop\"]);\"\"\"\nnew=\"\"\"    let restarts = |data: &Path| end_reasons(data).iter().filter(|r| *r == \"restart\").count();\n    assert_eq!(restarts(&a), 1, \"A's session open at the kill\");\n    assert_eq!(restarts(&b), 0);\n    for data in [&a, &b] {\n        assert_eq!(end_reasons(data).last().map(String::as_str), Some(\"stop\"));\n    }\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; for i in 1 2 3; do cargo test --release --test two_instances 2>&1 | grep -E 'test result|panicked|left|right'; done",
+  "description": "Fix the session check; run the test three times",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+thread 'two_runs_on_separate_folders_stay_apart' (797596) panicked at tests/two_instances.rs:175:9:
+assertion `left == right` failed
+  left: Some("commit")
+ right: Some("stop")
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.38s
+thread 'two_runs_on_separate_folders_stay_apart' (797627) panicked at tests/two_instances.rs:175:9:
+assertion `left == right` failed
+  left: Some("commit")
+ right: Some("stop")
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.38s
+thread 'two_runs_on_separate_folders_stay_apart' (797658) panicked at tests/two_instances.rs:175:9:
+assertion `left == right` failed
+  left: Some("commit")
+ right: Some("stop")
+test result: FAILED. 0 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+[This command modified 1 file you've previously read: tests/two_instances.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+Ordering by id won't produce the closing order, since long-lived sessions can open before short ones that submit sooner. I'm checking what the synthetic source actually types before picking a sound check.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "sed -n 1,60p src/capture/synthetic.rs | grep -v '^use'",
+  "description": "Read the synthetic input pattern"
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+//! A synthetic input source for tests and benchmarks (`brain run --synthetic RATE`).
+//!
+//! It types a fixed corpus as raw evdev key transitions, at `RATE` key presses
+//! per second, through the same [`KeyProcessor`] → [`Recorder`] → log → ingest
+//! path as real input. After every sentence it switches to a terminal, runs a
+//! shell command (Enter commits that session) and switches back (the editor
+//! session resumes), so sessions open, commit and resume all the time. Only the evdev device read is replaced. Crash-safety,
+//! consistency and resource tests can therefore run unattended, without root
+//! access to `/dev/uinput`.
+
+
+pub const SYNTHETIC_APP: &str = "synthetic";
+pub const SYNTHETIC_WINDOW: &str = "corpus.txt";
+pub const SYNTHETIC_TERMINAL: &str = "org.kde.konsole";
+const COMMANDS: [&str; 3] = ["git status", "cargo test", "ls -la"];
+
+const CORPUS: &str = "the migration is blocked on the schema change. \
+    Dana asked whether we can ship search on Friday; I said yes if the index rebuild \
+    finishes overnight. Next: run the backfill on prod and check the error rate.\n";
+
+const KEY_LEFTSHIFT: u16 = 42;
+const KEY_BACKSPACE: u16 = 14;
+const KEY_ENTER: u16 = 28;
+
+/// evdev keycode and whether Shift is needed, for the US layout.
+pub fn us_keycode(c: char) -> Option<(u16, bool)> {
+    const LETTERS: [u16; 26] = [
+        30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17,
+        45, 21, 44,
+    ];
+    Some(match c {
+        'a'..='z' => (LETTERS[(c as u8 - b'a') as usize], false),
+        'A'..='Z' => (LETTERS[(c as u8 - b'A') as usize], true),
+        '1'..='9' => (2 + (c as u8 - b'1') as u16, false),
+        '0' => (11, false),
+        ' ' => (57, false),
+        '\n' => (28, false),
+        '.' => (52, false),
+        ',' => (51, false),
+        ';' => (39, false),
+        ':' => (39, true),
+        '?' => (53, true),
+        '-' => (12, false),
+        '\'' => (40, false),
+        _ => return None,
+    })
+}
+
+enum Step {
+    Key(u16, bool),
+    Focus(&'static str, &'static str),
+}
+
+/// Types the corpus until `stop` is set. Every 50th word gets a typo that is
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The synthetic source types into a single editor window and runs a terminal command after each sentence, so the editor session stays open throughout. I'm checking the editor's sessions next: in A, one closed by the restart after the kill and one by the final stop; in B, one closed by the stop.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='tests/two_instances.rs'; s=open(p).read()\nold_fn=s[s.index(\"/// How the sessions in `data`'s index ended, in order.\"):s.index(\"/// Waits until `brain query search` on `data` finds a session.\")]\nnew_fn='''/// How the sessions of the synthetic editor window in `data`'s index ended,\n/// in order. The synthetic source keeps typing into that window (between\n/// commands in a terminal), so its session is open for the whole run.\nfn editor_end_reasons(data: &Path) -> Vec<String> {\n    let c = Connection::open(data.join(\"brain.db\")).unwrap();\n    let mut st = c\n        .prepare(\"SELECT end_reason FROM sessions WHERE app = 'synthetic' ORDER BY id\")\n        .unwrap();\n    st.query_map([], |r| r.get(0))\n        .unwrap()\n        .collect::<Result<_, _>>()\n        .unwrap()\n}\n\n'''\ns=s.replace(old_fn,new_fn)\ni=s.index(\"    let restarts = |data: &Path|\")\nj=s.index(\"    for data in [&a, &b] {\\n        let offset\")\ns=s[:i]+\"\"\"    assert_eq!(editor_end_reasons(&a), [\"restart\", \"stop\"]);\n    assert_eq!(editor_end_reasons(&b), [\"stop\"]);\n\"\"\"+s[j:]\nopen(p,'w').write(s)\nEOF\ncargo fmt && cargo clippy --all-targets 2>&1 | grep -E '^(warning|error)' -A8 | head -20; for i in 1 2 3 4 5; do cargo test --release --test two_instances 2>&1 | grep -E 'test result|panicked|left|right'; done",
+  "description": "Check the editor window's sessions; run five times",
+  "timeout": 400000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.38s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+[This command modified 1 file you've previously read: tests/two_instances.rs. Call Read before editing.]
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The test passes 5 of 5 in 1.4 s. I'll check the screen before running the real-desktop test, which types into two Kate windows for about 15 s, while your `brain run` service stays up alongside it.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "L=$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive); echo \"locked: $L\"; if [ \"$L\" = \"false\" ]; then cargo test --release --test two_instances -- --ignored --nocapture --test-threads=1 2>&1 | grep -E '^a: |test result|panicked|left|right|assertion|stale|still'; fi; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"; for n in $(seq 0 9); do :; done",
+  "description": "Run the real-desktop two-instance test if unlocked",
+  "timeout": 240000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+locked: false
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 8.22s
+leftover: brain=0 kate=0 layout=0
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+The desktop test passed in 8 seconds, with no leftover Kate windows, processes or layout changes. I'm updating the README's support and known-gap notes and the test lists next.
+
+</details>
+
+**Tool call: `Bash`**
+
+````
+{
+  "command": "python3 - <<'EOF'\ndef edit(p, pairs):\n    s=open(p).read()\n    for old,new in pairs:\n        assert s.count(old)==1,(p,old[:80],s.count(old)); s=s.replace(old,new)\n    open(p,'w').write(s)\nedit('README.md',[\n(\"\"\"Only one `brain run` can use a data directory at a time. The service runs\"\"\",\"\"\"Only one `brain run` can use a data directory at a time; runs on separate\ndirectories work side by side (a test run next to the service, say), and\neach records everything you type. The service runs\"\"\"),\n(\"\"\"                          #   tier2_e2e     VS Code saved-file diffs and shortcut-only\n                          #                 sessions (no VS Code needed)\n```\"\"\",\"\"\"                          #   tier2_e2e     VS Code saved-file diffs and shortcut-only\n                          #                 sessions (no VS Code needed)\n                          #   two_instances two runs on separate folders stay apart;\n                          #                 a second run on the same folder is refused\n```\"\"\"),\n(\"\"\"cargo test --release --test repeat_e2e --test real_keyboard_e2e -- --ignored --nocapture --test-threads=1\"\"\",\"\"\"cargo test --release --test repeat_e2e --test real_keyboard_e2e --test two_instances -- --ignored --nocapture --test-threads=1\"\"\"),\n(\"\"\"**Running**\n* **Service as you, not root**: a systemd user service, because desktop\n  integration needs your session's D-Bus, and a root keylogger is the\n  worst case if it is ever compromised.\"\"\",\"\"\"**Running**\n* **Service as you, not root**: a systemd user service, because desktop\n  integration needs your session's D-Bus, and a root keylogger is the\n  worst case if it is ever compromised.\n* **Several runs on separate data directories are supported**, each\n  capturing everything. One rare gap: after a `kill -9`, the next start\n  unloads the KWin script the killed run left behind, by its name\n  `brain_focus_<pid>`; if another run has meanwhile started with that same,\n  reused process id, its script is unloaded instead and it stops seeing\n  focus changes until it restarts.\"\"\"),\n])\nedit('PLAN.md',[\n(\"\"\"  `real_keyboard_e2e` type through a uinput keyboard into real Kate windows\n  and compare Kate's saved files with brain (held-key repeats, Hebrew via\n  Alt+Shift, focus moving between windows, keyboard unplug/replug);\"\"\",\"\"\"  `real_keyboard_e2e` type through a uinput keyboard into real Kate windows\n  and compare Kate's saved files with brain (held-key repeats, Hebrew via\n  Alt+Shift, focus moving between windows, keyboard unplug/replug);\n  `two_instances`' desktop test runs two real captures side by side (same\n  focus and keys in both; a stop or `kill -9` of one never unloads the\n  other's KWin script);\"\"\"),\n(\"\"\"  `tier2_e2e`'s saved-file tests (diffs, shortcut-only sessions, the copy\n  taken on focus; no VS Code needed).\"\"\",\"\"\"  `tier2_e2e`'s saved-file tests (diffs, shortcut-only sessions, the copy\n  taken on focus; no VS Code needed), and `two_instances` (two synthetic\n  runs on separate folders: each keeps to its folder and matches a rebuild\n  of its own log, a second run on the same folder is refused, a `kill -9`\n  of one leaves the other running).\"\"\"),\n(\"\"\"- **Desktop scope**: focus tracking needs KWin.\"\"\",\"\"\"- **Several runs side by side** (separate data directories) are supported.\n  After a `kill -9`, the next start unloads the leftover KWin script by its\n  `brain_focus_<pid>` name; if another run reused that process id in the\n  meantime, its script is unloaded instead (rare; a start-time suffix in\n  the name would close it).\n- **Desktop scope**: focus tracking needs KWin.\"\"\"),\n])\nedit('CLAUDE.md',[\n(\"\"\"- `tests/repeat_e2e.rs` and `tests/real_keyboard_e2e.rs` (`#[ignore]`) type\"\"\",\"\"\"- `brain run`s on separate data directories are supported side by side\n  (`tests/two_instances.rs`); one data directory allows one run.\n- `te
+… [276 more characters in the raw transcript]
+````
+
+<details><summary>Tool result</summary>
+
+```
+120:- `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test
+121-  in `tests/two_instances.rs` (`#[ignore]`) type
+122-  into real Kate windows through /dev/uinput: they need an unlocked KDE
+123-  session, `scripts/setup-test-permissions.sh`, and nobody touching the
+124-  keyboard or mouse while they run. They only type while brain's log shows
+125-  the intended window focused.
+126-- The input loop must deliver key transitions before emitting the repeats
+```
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "python3 - <<'EOF'\np='CLAUDE.md'; s=open(p).read()\nold=\"\"\"- `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test\n  in `tests/two_instances.rs` (`#[ignore]`) type\n  into real Kate windows through /dev/uinput: they need an unlocked KDE\n  session, `scripts/setup-test-permissions.sh`, and nobody touching the\n  keyboard or mouse while they run. They only type while brain's log shows\n  the intended window focused.\"\"\"\nnew=\"\"\"- `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test\n  in `tests/two_instances.rs` (`#[ignore]`) type into real Kate windows\n  through /dev/uinput: they need an unlocked KDE session,\n  `scripts/setup-test-permissions.sh`, and nobody touching the keyboard or\n  mouse while they run. They only type while brain's log shows the\n  intended window focused.\"\"\"\nassert s.count(old)==1; s=s.replace(old,new); open(p,'w').write(s)\nEOF\ngit diff --stat; git diff --stat -- src | tail -1; cargo fmt --check && echo fmt-ok; cargo clippy --all-targets 2>&1 | grep -cE '^(warning|error)'; cargo test --release 2>&1 | grep -E 'Running|test result|panicked|FAILED' | sed 's/(target.*//'",
+  "description": "Confirm no src changes; lint and run the full suite",
+  "timeout": 600000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+ CLAUDE.md                  |  13 +++---
+ PLAN.md                    |  13 +++++-
+ README.md                  |  14 +++++-
+ tests/common/mod.rs        | 104 +++++++++++++++++++++++++++++++++++++++++++--
+ tests/crash_safety.rs      |  58 +------------------------
+ tests/real_keyboard_e2e.rs |  15 +------
+ 6 files changed, 137 insertions(+), 80 deletions(-)
+fmt-ok
+0
+     Running unittests src/lib.rs 
+test result: ok. 130 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+     Running unittests src/main.rs 
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/crash_safety.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.86s
+     Running tests/perf_budget.rs 
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.15s
+     Running tests/query_cli.rs 
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.55s
+     Running tests/real_keyboard_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/repeat_e2e.rs 
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/tier2_e2e.rs 
+test result: ok. 5 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.34s
+     Running tests/two_instances.rs 
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 1.39s
+     Running tests/vscode_replay.rs 
+test result: ok. 0 passed; 0 failed; 12 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+</details>
+
+<details><summary>Assistant thinking</summary>
+
+No file under `src/` has changed, since the new test file is untracked and so doesn't appear in the diff. I'm rerunning `real_keyboard_e2e` to confirm it still passes after moving its layout setup into the shared helper.
+
+</details>
+
+**Tool call: `Bash`**
+
+```
+{
+  "command": "[ \"$(qdbus6 org.freedesktop.ScreenSaver /ScreenSaver GetActive)\" = \"false\" ] && cargo test --release --test real_keyboard_e2e -- --ignored --nocapture 2>&1 | grep -E 'kate [AB]|test result|panicked'; echo \"leftover: brain=$(ps -eo args | grep -c '[b]rain run --data-dir /tmp/.tmp') kate=$(ps -eo args | grep -c '[k]ate -n /tmp') layout=$(qdbus6 org.kde.keyboard /Layouts getLayout)\"",
+  "description": "Rerun real_keyboard_e2e after the layout helper refactor",
+  "timeout": 240000
+}
+```
+
+<details><summary>Tool result</summary>
+
+```
+kate A: "hello שלום world againx\n"  brain: ["hello שלום world againx"]
+kate B: "beta\n"  brain: ["beta"]
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.11s
+leftover: brain=0 kate=0 layout=0
+```
+
+</details>
+
