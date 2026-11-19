@@ -32,7 +32,8 @@ flowchart TB
             DB[("<b>brain.db</b><br/>sessions · full-text index")]
         end
         T2 <-->|"jobs · results"| ING
-        ING -->|"tails the log · creates & updates sessions"| LD
+        ING -->|"tails new lines"| LOG
+        ING -->|"creates & updates sessions"| DB
     end
 
     subgraph L4["🔎  READERS · ASSISTANT"]
@@ -70,8 +71,8 @@ flowchart TB
     style LD fill:#fffbeb,stroke:#fde68a,color:#b45309
     style L4 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 0,2,3,6 stroke:#6366f1,stroke-width:2.2px
-    linkStyle 10 stroke:#94a3b8,stroke-width:2.5px
+    linkStyle 0,3,4,7 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 11 stroke:#94a3b8,stroke-width:2.5px
 ```
 
 | Layer | Role |
