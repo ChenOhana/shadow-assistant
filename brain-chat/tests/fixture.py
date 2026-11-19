@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-BRAIN = os.environ.get("BRAIN_BIN", str(REPO / "target/release/brain"))
+BRAIN = os.environ.get("BRAIN_BIN", str(REPO / "brain/target/release/brain"))
 KONSOLE = "org.kde.konsole"
 LOCAL = "~ : bash — Konsole"
 PROD = "juan@prod-db: ~ — Konsole"

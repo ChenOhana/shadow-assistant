@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export the Claude Code transcripts of this project into ai-logs/.
+"""Export the Claude Code transcripts of this project into docs/ai-logs/.
 
 For every session transcript (and each subagent transcript under it):
   ai-logs/raw/<name>.jsonl   the complete raw JSONL, redacted
@@ -12,9 +12,9 @@ an Anthropic API key or token (`sk-ant-...`) and every 10-character piece
 of such a key found anywhere (a session may quote part of it), so a key
 pasted into a session never reaches the repository.
 
-Usage (from the repository root):
-  python3 -I scripts/export-ai-logs.py --redact you@example.com \
-      [--src ~/.claude/projects/<project>] [--out ai-logs]
+Usage (from anywhere; the defaults come from this file's location):
+  python3 -I docs/ai-logs/export-ai-logs.py --redact you@example.com \
+      [--src ~/.claude/projects/<project>] [--out docs/ai-logs]
 """
 
 import argparse
@@ -127,11 +127,14 @@ def render(path, title):
 
 def main():
     ap = argparse.ArgumentParser()
-    # Claude Code keeps a project's transcripts under a folder named after
-    # the project's path, with "/" replaced by "-".
-    default_src = Path.home() / ".claude/projects" / str(Path.cwd()).replace("/", "-")
+    # This file lives in docs/ai-logs/ of the repository. Claude Code keeps
+    # a project's transcripts under a folder named after the project's path,
+    # with "/" replaced by "-".
+    here = Path(__file__).resolve().parent
+    repo = here.parents[1]
+    default_src = Path.home() / ".claude/projects" / str(repo).replace("/", "-")
     ap.add_argument("--src", default=str(default_src))
-    ap.add_argument("--out", default="ai-logs")
+    ap.add_argument("--out", default=str(here))
     ap.add_argument("--redact", action="append", default=[])
     args = ap.parse_args()
     src, out = Path(args.src), Path(args.out)

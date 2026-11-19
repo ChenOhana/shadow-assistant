@@ -31,7 +31,7 @@ brain-chat
 
 ```sh
 sudo apt install python3-venv     # Ubuntu, once
-make chat-setup                   # brain-chat/.venv with the Anthropic SDK
+make -C brain chat-setup          # brain-chat/.venv with the Anthropic SDK
 export ANTHROPIC_API_KEY=...      # your key
 brain-chat/brain-chat --data-dir ~/brain-data
 ```
@@ -110,7 +110,7 @@ Anthropic's side by brain-chat; nothing is written to disk.
 ## Tests
 
 ```sh
-make chat-test                 # offline: 34 tests, no API calls
+make -C brain chat-test        # offline: 34 tests, no API calls
 brain-chat/.venv/bin/python brain-chat/live_check.py   # live: 3 questions, costs a little
 ```
 
@@ -120,7 +120,7 @@ directory (a made-up day with an ssh session, a sudo password and a token,
 ingested by brain itself), the question loop with a scripted model
 (rounds, the cap, parallel calls, errors, refusals, interruption), and the
 request and streamed reply through the real SDK with the network replaced.
-The SDK tests run once `make chat-setup` has installed it.
+The SDK tests run once `make -C brain chat-setup` has installed it.
 
 Last live check (2026-11-18, `claude-opus-5-5`, effort `low`): 3/3. The
 prod-db commands came back in order from one `sessions` call, with the sudo

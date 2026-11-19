@@ -21,14 +21,14 @@ files are complete. Both are redacted the same way. The owner's email
 address becomes `<redacted>`. So does anything shaped like an Anthropic API
 key (`sk-ant-…`), and so does every 10-character piece of such a key found
 anywhere in the transcripts (a session may quote part of a key). Regenerate
-from the repository root with:
+with:
 
 ```sh
-python3 -I scripts/export-ai-logs.py --redact <email> --redact <email-local-part>
+python3 -I docs/ai-logs/export-ai-logs.py --redact <email> --redact <email-local-part>
 ```
 
 It reads Claude Code's transcripts of this project
 (`~/.claude/projects/<project path with / as ->/`). It numbers the session
 files from oldest to newest, takes each subagent's newest copy (a subagent
 resumed later has a copy under each session), and rewrites everything in
-`ai-logs/` except this README and `design-doc.md`.
+`ai-logs/` except this README, `design-doc.md` and the exporter itself.

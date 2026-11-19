@@ -1,8 +1,8 @@
 #!/bin/sh
-# Runs brain-chat with its own virtual environment (`make chat-setup`).
+# Runs brain-chat with its own virtual environment (`make -C brain chat-setup`).
 here=$(dirname "$(readlink -f "$0")")
 if [ ! -x "$here/.venv/bin/python" ]; then
-    echo "brain-chat: run \`make chat-setup\` first (it needs the python3-venv package)" >&2
+    echo "brain-chat: run \`make -C brain chat-setup\` first (it needs the python3-venv package)" >&2
     exit 1
 fi
 exec "$here/.venv/bin/python" "$here/brain_chat.py" "$@"

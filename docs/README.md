@@ -11,19 +11,18 @@ brain-chat/brain-chat          # ask Claude about it in plain language
 ```
 
 > **Status: complete.** Research and architecture are in
-> [docs/PLAN.md](docs/PLAN.md), diagrams in [docs/diagrams/](docs/diagrams/DIAGRAMS.md),
+> [PLAN.md](PLAN.md), diagrams in [diagrams/](diagrams/DIAGRAMS.md),
 > and the AI transcripts in [ai-logs/](ai-logs/).
 
 ## Repository layout
 
 | Path | What |
 |---|---|
-| [`brain/`](brain/) | The `brain` crate (Rust): `src/`, `tests/`, `packaging/` (GNOME Shell extension, systemd unit) and `scripts/` |
-| [`brain-chat/`](brain-chat/README.md) | brain-chat (Python): ask Claude about your data in plain language |
-| [`docs/`](docs/) | [`PLAN.md`](docs/PLAN.md), the research and architecture write-up; [`diagrams/`](docs/diagrams/DIAGRAMS.md), architecture and stage diagrams (Markdown, PNG, PDF) |
-| [`ai-logs/`](ai-logs/) | The AI transcripts and the original design doc |
-| `scripts/` | `export-ai-logs.py`, which regenerates `ai-logs/` |
-| `Cargo.toml`, `Makefile` | The Cargo workspace and the build, install and test targets; run them from here |
+| [`brain/`](../brain/) | The `brain` crate (Rust): `Cargo.toml`, the `Makefile`, `src/`, `tests/`, `packaging/` (GNOME Shell extension, systemd unit) and `scripts/`; it builds into `brain/target/` |
+| [`brain-chat/`](../brain-chat/README.md) | brain-chat (Python): ask Claude about your data in plain language |
+| [`docs/`](./) | This README; [`PLAN.md`](PLAN.md), the research and architecture write-up; [`diagrams/`](diagrams/DIAGRAMS.md), architecture and stage diagrams (Markdown, PNG, PDF); [`ai-logs/`](ai-logs/), the AI transcripts, the original design doc and their exporter; `CLAUDE.md`, the instructions for coding agents |
+
+Commands below run from the repository root.
 
 ## Supported OS
 
@@ -32,7 +31,7 @@ Ubuntu (tested on 26.04), on Wayland, with either desktop:
 | Desktop | Focus tracking | Paste text | Screen lock | Layouts |
 |---|---|---|---|---|
 | **KDE Plasma 6** (Kubuntu, or Ubuntu with Plasma) | KWin script, loaded by brain itself | Klipper | `org.freedesktop.ScreenSaver` | kxkbrc, Alt+Shift and tray switches |
-| **GNOME** (stock Ubuntu) | brain's GNOME Shell extension (`make install`, then log out and in once) | the extension | `org.gnome.ScreenSaver` | GNOME's input sources, Super+Space switches |
+| **GNOME** (stock Ubuntu) | brain's GNOME Shell extension (`make -C brain install`, then log out and in once) | the extension | `org.gnome.ScreenSaver` | GNOME's input sources, Super+Space switches |
 
 Key capture itself works on any Linux. On another desktop, `brain run`
 warns and still captures keys, attributed to the app `unknown`, without
@@ -46,13 +45,14 @@ Code tier 2 (below) works on both desktops.
 
 ```sh
 # Rust toolchain (https://rustup.rs), then:
-cargo build --release
-# binary: target/release/brain
-# (make build does the same; make build-debug builds target/debug/brain)
+cd brain && cargo build --release
+# binary: brain/target/release/brain
+# (make -C brain build does the same; make -C brain build-debug builds
+#  brain/target/debug/brain)
 
 # or build and install to /usr/bin/brain (asks for sudo for the copy only),
 # plus brain's GNOME Shell extension for your user when GNOME is installed:
-make
+make -C brain
 ```
 
 SQLite is bundled. libxkbcommon is loaded from the runtime library
@@ -75,8 +75,8 @@ display-server-independent capture (see docs/PLAN.md for the alternatives).
 **On GNOME**, brain also needs its GNOME Shell extension: Wayland gives
 programs no way to see the focused window, and on KDE brain loads a KWin
 script for that by itself, but GNOME only loads extensions at login.
-`make install` installs and enables it for your user when GNOME is
-installed (or `make install-gnome-extension` alone); log out and back in
+`make -C brain install` installs and enables it for your user when GNOME is
+installed (or `make -C brain install-gnome-extension` alone); log out and back in
 once. Until then brain warns and files keys under `unknown`. The extension
 answers brain's clipboard reads at a paste, and any program in your session
 could ask it the same, as with KDE's Klipper.
@@ -84,7 +84,7 @@ could ask it the same, as with KDE's Klipper.
 ## Run
 
 ```sh
-target/release/brain run --data-dir ~/brain-data
+brain/target/release/brain run --data-dir ~/brain-data
 ```
 
 `run` stops cleanly on Ctrl+C or SIGTERM. A `kill -9` is also safe. The next
@@ -102,18 +102,18 @@ root: it needs your desktop session for focus tracking, and a keylogger
 running as root would be the worst case if it were ever compromised:
 
 ```sh
-make install-service                 # installs /usr/bin/brain + the unit, enables it
-journalctl --user -u brain -f        # its messages
-systemctl --user stop brain          # pause capture
+make -C brain install-service                 # installs /usr/bin/brain + the unit, enables it
+journalctl --user -u brain -f                 # its messages
+systemctl --user stop brain                   # pause capture
 brain query search "words" --data-dir ~/.local/state/brain
-make uninstall-service               # remove the service AND its captured data
-make uninstall-service KEEP_DATA=1   # remove the service, keep the data
+make -C brain uninstall-service               # remove the service AND its captured data
+make -C brain uninstall-service KEEP_DATA=1   # remove the service, keep the data
 ```
 
 The service keeps its data in its systemd **state directory**,
 `~/.local/state/brain` (`$XDG_STATE_HOME/brain`), which systemd creates
 private to you (mode 0700) before starting it. Pass that directory to
-`brain query`. `make uninstall-service` deletes it with
+`brain query`. `make -C brain uninstall-service` deletes it with
 `systemctl --user clean --what=state brain`, unless `KEEP_DATA=1` is given.
 Only one `brain run` can use a data directory at a time; runs on separate
 directories work side by side (a test run next to the service, say), and
@@ -268,13 +268,13 @@ With `--from 10:02` instead, `notes.md` starts empty and the result is
 
 ## Ask in plain language: brain-chat
 
-[`brain-chat/`](brain-chat/README.md) wraps the query commands with Claude, so you can
+[`brain-chat/`](../brain-chat/README.md) wraps the query commands with Claude, so you can
 ask "which commands did I run yesterday on prod-db?" or "what did I tell
 Dana about the migration?" and get an answer that cites the times, apps and
 windows it comes from:
 
 ```sh
-sudo apt install python3-venv && make chat-setup   # once
+sudo apt install python3-venv && make -C brain chat-setup   # once
 export ANTHROPIC_API_KEY=...
 brain-chat/brain-chat --data-dir ~/.local/state/brain   # a chat; or pass a question
 ```
@@ -461,6 +461,7 @@ What is not covered above: choices with a cost, and known limits.
 ## Tests
 
 ```sh
+cd brain
 cargo test --release      # unit tests (~130) and the default integration tests:
                           #   crash_safety  25 random kill -9s under load; sessions,
                           #                 documents and checkpoints must equal a
@@ -474,7 +475,7 @@ cargo test --release      # unit tests (~130) and the default integration tests:
                           #                 a second run on the same folder is refused
 ```
 
-brain-chat has its own tests (`make chat-test`, offline: redaction, the
+brain-chat has its own tests (`make -C brain chat-test`, offline: redaction, the
 tools against a real data directory, the question loop with a scripted
 model, the request through the real SDK with the network replaced) and a
 live check against the API (`brain-chat/.venv/bin/python brain-chat/live_check.py`,
@@ -486,12 +487,13 @@ scope, so the desktop you use is not touched (it needs `gnome-shell`,
 `gjs` and `python3-gi`; nothing is typed):
 
 ```sh
-cargo test --release --test gnome_e2e -- --ignored --nocapture
+cd brain && cargo test --release --test gnome_e2e -- --ignored --nocapture
 ```
 
 Tests against real software are opt-in (`-- --ignored`):
 
 ```sh
+cd brain
 # Type through a virtual keyboard into real Kate windows; hands off the
 # keyboard and mouse while they run, and the screen must be unlocked:
 cargo test --release --test repeat_e2e --test real_keyboard_e2e --test two_instances -- --ignored --nocapture --test-threads=1

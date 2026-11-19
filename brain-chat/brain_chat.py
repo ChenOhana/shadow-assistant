@@ -229,7 +229,7 @@ def main() -> int:
         try:
             import bidi  # noqa: F401
         except ImportError:
-            rtl_on, rtl_why = False, "python-bidi is not installed (make chat-setup)"
+            rtl_on, rtl_why = False, "python-bidi is not installed (make -C brain chat-setup)"
     print(
         dim(banner(args.model, args.effort, not args.no_fallback, args.data_dir, args.brain, (rtl_on, rtl_why))),
         file=sys.stderr,

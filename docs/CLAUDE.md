@@ -1,12 +1,12 @@
 # CLAUDE.md — instructions for coding agents working on `brain`
 
 `brain` is a Rust CLI for the Endpoint "Shadow Assistant" home assignment
-(`Endpoint Home Assignment.pdf`, not committed). One binary, two commands:
+(`docs/Endpoint Home Assignment.pdf`, not committed). One binary, two commands:
 `brain run` captures keystrokes + focus and stores them; `brain query`
 (`search`, `text`) answers questions while `run` keeps going.
 
 Original design doc: https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9
-(copy in `ai-logs/design-doc.md`). `docs/PLAN.md` is the in-repo research and
+(copy in `docs/ai-logs/design-doc.md`). `docs/PLAN.md` is the in-repo research and
 architecture write-up of the code as built, marks where it differs from the
 design, and must stay consistent with the code.
 
@@ -19,7 +19,8 @@ Ubuntu), behind the platform layer (`src/capture/platform.rs`,
 libxkbcommon (`libxkbcommon.so.0`, linked by file name, so no `-dev`
 package is needed). Focus comes from inside the compositor: a KWin script
 brain loads on KDE, brain's GNOME Shell extension
-(`brain/packaging/gnome-extension/`, installed by `make install`) on GNOME.
+(`brain/packaging/gnome-extension/`, installed by `make -C brain install`) on
+GNOME.
 
 Tests that run by default must not need hardware, a desktop or privileges:
 use `brain run --synthetic RATE` (hidden flag) to drive the real pipeline.
@@ -80,16 +81,22 @@ GNOME Shell.
 
 ## Repository layout
 
+The repository root holds only three folders. Paths in this file are
+relative to it, except `src/…` and `tests/…`, which are in `brain/`. Run
+`cargo` in `brain/`; run `make` there too, or `make -C brain <target>` from
+the root.
+
 ```
-Cargo.toml               workspace (members: brain); one Cargo.lock and target/ here
-Makefile                 build, install, service, brain-chat setup and tests
-brain/                   the Rust crate: src/, tests/, packaging/ (GNOME extension,
-                         systemd unit), scripts/ (extension install, test permissions)
+brain/                   the Rust crate: Cargo.toml, Cargo.lock, Makefile (build,
+                         install, service, brain-chat setup and tests), src/,
+                         tests/, packaging/ (GNOME extension, systemd unit),
+                         scripts/ (extension install, test permissions); builds
+                         into brain/target/
 brain-chat/              brain-chat (Python): Claude over `brain query` tools,
-                         redaction, the question loop; `make chat-test`
-docs/                    PLAN.md, diagrams/ (shareable diagrams: PNGs, PDF)
-scripts/                 export-ai-logs.py
-ai-logs/                 the AI transcripts and the design doc
+                         redaction, the question loop; `make -C brain chat-test`
+docs/                    README.md, this file, PLAN.md, the assignment PDF (not
+                         committed), diagrams/ (shareable diagrams: PNGs, PDF),
+                         ai-logs/ (transcripts, design doc, export-ai-logs.py)
 ```
 
 ## Code map
@@ -164,7 +171,7 @@ tests/                   integration tests that drive the real binary;
   touch the real session's lock state. Run it after changing gnome.rs or
   the extension.
 - brain-chat (`brain-chat/`) only reads through `brain query`; it never touches
-  the data directory itself. Its offline tests (`make chat-test`) must not
+  the data directory itself. Its offline tests (`make -C brain chat-test`) must not
   call the API; `brain-chat/live_check.py` does, costs money, and runs only with
   the owner's OK. Keep the redaction in front of every tool result.
 - `brain run`s on separate data directories are supported side by side

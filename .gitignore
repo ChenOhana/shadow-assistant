@@ -1,6 +1,0 @@
-/target
-/brain-data
-*.pdf
-/.claude
-/brain-chat/.venv
-__pycache__/
