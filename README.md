@@ -26,9 +26,9 @@ Key capture itself works on any Linux. On another desktop, `brain run`
 warns and still captures keys, attributed to the app `unknown`, without
 paste text, and detects the lock screen only if the desktop implements
 `org.freedesktop.ScreenSaver`, so **an unlock password may be recorded
-there**. The optional VS Code tier 2 (`--vscode-replay`) works on both
-desktops; it replays into VS Code when a file was not saved, which needs
-VS Code installed (`/usr/bin/code`, or the snap).
+there**. Desktop support sits behind a platform layer, so another desktop
+is a new backend, not a change to the rest (PLAN.md 2.4). The optional VS
+Code tier 2 (below) works on both desktops.
 
 ## Build
 
@@ -79,15 +79,15 @@ target/release/brain run --data-dir ~/brain-data
 start repairs a torn last line, if there is one, and resumes ingest exactly
 where it stopped.
 
-Add `--vscode-replay` to reconstruct VS Code sessions with the real editor
-(tier 2, below): a diff of the file when you saved it, otherwise a replay in
-a sandboxed, invisible copy of VS Code. It is off by default.
+Add `--vscode-replay` to turn on VS Code tier 2 (below); it is off by
+default.
 
 ### As a service
 
 `brain` can run as a **systemd user service**: it starts with your desktop
-session, restarts if it crashes, stops at logout, and runs as you (no
-root; it needs your desktop session for focus tracking):
+session, restarts if it crashes, stops at logout, and runs as you, not
+root: it needs your desktop session for focus tracking, and a keylogger
+running as root would be the worst case if it were ever compromised:
 
 ```sh
 make install-service                 # installs /usr/bin/brain + the unit, enables it
@@ -149,9 +149,12 @@ brain query apps [--from T] [--to T] [--at T]
 ```
 
 * **`search`**: sessions whose text contains *every* word, anywhere inside
-  a word, in any case (`run` finds "rerun", `בית` finds "בבית"), newest
-  first (default limit 20). Open sessions are included with what has been
-  typed so far (`ended_at: null`).
+  a word, ignoring case and accents (`run` finds "rerun", `בית` finds
+  "בבית", `cafe` finds "Café"), newest first (default limit 20). Open
+  sessions are included with what has been typed so far (`ended_at: null`).
+  The index is SQLite FTS5's trigram tokenizer, chosen over the design's
+  English-only stemming; words shorter than 3 characters are matched with
+  a slower scan.
 * **`text`**: what was typed into the app during the time range,
   **reconstructed**: the keys and pastes of the range, split per app window
   (window title), run through the app's tier 0/1 rules (Backspace,
@@ -284,26 +287,37 @@ Ingest (inside `brain run`, about once a second) turns the log into
   When the title changes *because of the typing* (VS Code names a new file
   after its first line, a mail window after its subject), the session
   continues: a change of the *same* window's title (the KWin script and
-  the GNOME extension tell a title change from a window activation) within 1 s of a keystroke in it, with no
-  shortcut in between, is treated as a rename.
+  the GNOME extension tell a title change from a window activation)
+  within 1 s of a keystroke in it, with no shortcut in between, is treated
+  as a rename. Another window being activated never is, but switching
+  *tabs* of the same window with the mouse (invisible to brain) within 1 s
+  of a keystroke would wrongly count as one.
 * A session closes after **30 s without typing in that window**, or right
   away when a single-line field is submitted (Enter at a shell prompt, in a
   chat box, a browser's address bar or a launcher such as KRunner),
   cancelled (Ctrl+C at a prompt), or left for another field of the same
-  window (Tab, Ctrl+L in a browser). Switching to another app and back
-  within 30 s continues the same session. Stopping or restarting
+  window (Tab, Ctrl+L in a browser). Elsewhere Enter is a newline, and so
+  is Shift+Enter in browsers and chat apps. Switching to another app and
+  back within 30 s continues the same session. Stopping or restarting
   `brain run` closes all sessions.
+* Sessions that changed nothing (cursor movement only, a typo typed and
+  deleted, whitespace) leave no row.
 * While a session is open, its text so far is already in the index, so a
   search finds what you are typing right now.
 * **Tier 0**: keys are replayed into a virtual text field with a cursor,
   selection, word-wise movement and deletion, and undo/redo. Only keyboard
-  cursor movement is followed (see "Decisions and edge cases").
+  cursor movement is followed (see "Decisions and edge cases"). Where the
+  cursor is unknown (after `brain run` restarts) it is assumed at the end
+  of the text.
 * **Tier 1**: a small table of app classes decides what keys mean. In
   terminals: readline shortcuts (Ctrl+A/E/U/K/W) and Up/Down history recall
-  from the commands `brain` saw you run. In browsers: Tab and Ctrl+L/K/T/W
-  move to another field. Enter submits single-line fields and inserts a
-  newline elsewhere. Editors and unknown apps keep their document across
-  sessions. Single-line fields start empty each time.
+  from the commands `brain` saw you run (history from before, tab
+  completion and zsh autosuggestions are invisible, so a recalled line can
+  be wrong). In browsers: Tab and Ctrl+L/K/T/W move to another field.
+  Enter submits single-line fields and inserts a newline elsewhere.
+  Editors and unknown apps keep their document across sessions.
+  Single-line fields start empty each time: their titles are reused by
+  unrelated fields ("New tab", "~"), so carrying text over would mix them.
 * **Tier 2** (`--vscode-replay`): when a VS Code session opens, the
   edited file's initial content is saved. When the session closes:
   1. if the file was saved after your last keystroke (autosave, or Ctrl+S
@@ -311,12 +325,17 @@ Ingest (inside `brain run`, about once a second) turns the log into
      content to the saved file (`--- a/test.cpp`, `+++ b/test.cpp`, `@@`
      hunks with 3 lines of context, `-` removed and `+` added lines): what
      you did to the file in that session, autocomplete and auto-indent
-     included; VS Code is not started;
+     included; VS Code is not started. In very repetitive text an
+     ambiguous line may be placed differently than `git diff` would place
+     it. Search also matches the diff's removed and context lines;
   2. otherwise the keystrokes are replayed into a headless VS Code with
      your settings, in a network-less sandbox with capped CPU and memory, as
      a best effort: the cursor is assumed at the end of the file, your
-     extensions are not loaded (so their autocomplete is not reproduced),
-     and nothing checks the result.
+     extensions are not loaded when they exceed 300 MB (so their
+     autocomplete is not reproduced), and nothing checks the result. This
+     needs VS Code installed (`/usr/bin/code`, or the snap); the first
+     replay takes about 25 s, and VS Code uses about 1.2 GB while it runs
+     (capped, outside brain's budget).
 
   The replay stores the lines it changed; tier 0/1 text stays if neither
   works.
@@ -368,147 +387,64 @@ database read-only and reopen it to see the current state.
 
 ## Decisions and edge cases
 
-**Platform and capture**
-* **Linux, KDE Plasma 6 and GNOME on Wayland.** Wayland gives applications
-  no way to observe other apps' keystrokes, so `brain` reads the kernel's
-  input devices (evdev) passively: read-only, never grabbed, so it cannot
-  add input lag. Focus (app + window title) comes from inside the
-  compositor: a small KWin script on KDE, a GNOME Shell extension on GNOME,
-  both reporting over D-Bus, and brain trusts only reports sent from the
-  compositor's own bus connection. PLAN.md compares the alternatives.
-* **GNOME is verified against a real GNOME Shell, run headless** by
-  `tests/gnome_e2e.rs`: focus, renames, layout switches, the clipboard,
-  and the extension being disabled and re-enabled, as GNOME does around
-  the lock screen. Its lock screen is checked only through a stand-in for
-  GNOME's lock service, and a real stock-Ubuntu login has not been tried
-  yet.
-* **Platform layer.** Capture sits behind interfaces
-  (`src/capture/platform.rs`): keys from evdev work on any Linux desktop;
-  focus, clipboard, lock and keyboard settings come from a backend per
-  desktop, picked from `XDG_CURRENT_DESKTOP`. Another desktop, or another
-  OS, is a new module, not a change to the rest (PLAN.md 2.4).
+What is not covered above: choices with a cost, and known limits.
+
+**Capture**
 * **Keys are resolved at capture time** with libxkbcommon and your real
   layouts (us/il; Alt+Shift and tray switches on KDE, Super+Space on
   GNOME), so the log holds the characters the app received (`"ש"`, `"H"`),
   as in the assignment's example event. Key repeat is regenerated on the
   desktop's schedule (KDE's kcminputrc, GNOME's keyboard settings).
 * **Held keys** are logged with the repeats the desktop's schedule produces
-  (KDE: 600 ms delay, then 25 Hz; GNOME: 500 ms, then every 30 ms), exactly. The app may still have received one
-  more or one fewer character per hold: on Wayland each app runs its own
-  repeat timer, and Qt apps use timers that may fire up to 5% early or late
-  (a 600 ms delay fires anywhere in ~570–630 ms). Measured against Kate, the
-  same 620 ms hold gave 1, 2 or 3 characters across runs; brain's
-  reconstruction stays within one character per hold (two for holds over
-  2 s). `tests/repeat_e2e.rs` measures this against a real Kate window.
+  (KDE: 600 ms delay, then 25 Hz; GNOME: 500 ms, then every 30 ms). The app
+  may still have received one character more or fewer per hold: on Wayland
+  each app runs its own repeat timer, and Qt's may fire up to 5% early or
+  late. Measured against Kate (`tests/repeat_e2e.rs`), brain stays within
+  one character per hold (two for holds over 2 s).
 * **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
   way applications match them; this also makes paste detection work in
   Hebrew.
 * **Paste** (Ctrl+V, Ctrl+Shift+V, Shift+Insert): the clipboard text is
-  read at that moment (from Klipper on KDE, from the extension on GNOME)
-  and logged, up to 64 KiB.
+  read at that moment and logged, up to 64 KiB. Copying alone is never
+  recorded.
 * **Screen lock pauses capture**, so the unlock password is never logged.
-* **Sleep/wake**: on resume (logind's PrepareForSleep signal) all
-  keyboards are reopened. Tested with a real suspend.
-* **The mouse is not captured.** `brain` reads keyboards only. A mouse
-  click can move the text cursor, but its position on screen tells `brain`
-  nothing about where in the text the cursor went, so reconstruction cannot
-  use it. Tiers 0/1 (and tier 2) therefore **do not support text edited
-  after the cursor was moved with the mouse** (clicking into the middle of a
-  line to fix a typo, selecting with the mouse, drag and drop): typing
-  continues from where the *keyboard* last left the cursor. Cursor moves
-  with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
+  Other password prompts (sudo in a terminal, web logins) look like any
+  other typing and are captured.
+* **Focus reports are trusted only from the compositor's own D-Bus
+  connection**, so no other program can fake them. On resume from sleep,
+  all keyboards are reopened.
+* **The mouse is not captured.** A mouse click can move the text cursor,
+  but its position on screen tells `brain` nothing about where in the text
+  the cursor went. Tiers 0/1 (and tier 2) therefore **do not support text
+  edited after the cursor was moved with the mouse** (clicking into the
+  middle of a line to fix a typo, selecting with the mouse, drag and drop):
+  typing continues from where the *keyboard* last left the cursor. Cursor
+  moves with the keyboard (arrows, Home/End, Ctrl+arrows, Shift+selection,
   Ctrl+A) are followed.
 
 **Storage**
 * **The JSONL log is the ground truth; SQLite is derived.** Capture only
-  appends one line per event (never blocks on SQLite). Ingest builds the
+  appends one line per event and never blocks on SQLite. Ingest builds the
   index from the log once a second, in one transaction together with the
   log offset, so a crash never duplicates or skips anything. Deleting
-  `brain.db` rebuilds it from the log. Raw keystrokes are not copied into
-  SQLite.
+  `brain.db` rebuilds it from the log (except VS Code tier 2 text, which
+  depends on files on disk).
 * **No backward compatibility yet.** This is the first version: a database
   with another schema version is refused (delete it to rebuild).
 
-**Sessions and reconstruction**
-* **Session key `(app, window title)`**, with markers that change while
-  typing removed from the title (unsaved-file dots, terminal spinners), and
-  titles renamed by the typing itself followed as the same session. Another
-  window being activated is never a rename; but switching *tabs* of the
-  same window with the mouse (invisible to brain) within 1 s of the last
-  keystroke would wrongly count as one.
-* **30 s idle per window; focus loss alone never ends a session.** Enter
-  ends a session only in single-line fields (shell prompts, chat boxes,
-  browser address/search bars, launchers such as KRunner, by app class);
-  elsewhere it is a newline. In browsers and chat apps, Shift+Enter is a
-  newline.
-* **Single-line fields start each session empty**; editors keep their
-  document across sessions. Window titles of single-line fields are
-  reused by unrelated fields ("New tab", "~"), so carrying text over would
-  mix them.
-* **Reconstruction is incremental**: each key is applied once to the open
-  session's in-memory buffer, and open sessions' text is refreshed in the
-  index every second, so search sees what is being typed now. (The design
-  reconstructed at close and rebuilt open sessions at query time; the
-  result is the same, the cost is not.) VS Code tier 2 runs at close.
-* **Unknown cursor = end of the text**: after `brain run` restarts, and at
-  the start of a VS Code replay.
-* **Shell history recall** (Up) uses only the commands `brain` saw being
-  run in that terminal app; history from before, tab completion and shell
-  autosuggestions (zsh) are not visible, so those lines can be wrong.
-* **Sessions that changed nothing leave no row** (cursor movement only, a
-  typo typed and deleted, whitespace). With VS Code tier 2, the saved file
-  decides: a session whose diff is empty is removed once the worker has
-  checked it.
-* **VS Code tier 2 is opt-in** (`--vscode-replay`). It needs the file's
-  content from before the session, so it is skipped for unsaved new files
-  (`Untitled-1`), for files with unsaved changes when the session started,
-  and for files brain could not identify, or copy before they were saved,
-  within 2 minutes of the session start.
-* **A saved file gives an exact diff.** Its format matches `git diff -U3`;
-  in very repetitive text an ambiguous line may be placed differently than
-  git's heuristics would. Search also matches words on the diff's removed
-  (`-`) and context lines.
-* **A replay is a best effort**: ~25 s for the first one and ~1.2 GB while
-  VS Code runs (capped, outside brain's budget), the cursor assumed at the
-  end of the file, and no extensions when yours exceed 300 MB, so
-  autocomplete from extensions is not reproduced.
-
-**Queries**
-* **`query text` reconstructs "stupidly", per app window.** It takes the
-  keys typed in the time range and runs them through the same tier 0/1
-  adapters the sessions use, per app and window title, from an empty text:
-  no session boundaries, no text from before the range. (An earlier version
-  returned the raw keys with `<Backspace>` etc.; the owner asked for
-  reconstruction.)
-* **Search matches substrings.** The index uses SQLite FTS5's trigram
-  tokenizer: a query word matches anywhere inside a word, ignoring case and
-  accents (`run` finds "running" and "rerun", `בית` finds "בבית", `cafe`
-  finds "Café"). This replaces the design's English-only porter stemmer,
-  which cannot find Hebrew words with attached prefixes. Query words
-  shorter than 3 characters cannot use the trigram index and are matched
-  with a slower scan.
-* **Times in, times out are local.** `--from`, `--to` and `--at` accept
-  relative times (`-2h`), local dates and times, and RFC 3339; output times
-  are local with their offset. The log and the database store UTC.
-* **`--app` takes part of the id.** `search` keeps every matching app;
-  `text` must resolve to exactly one app and reports its full id, so two
-  apps' keystrokes are never mixed into one stream.
-* **`query text` assumes the log is in time order.** It starts reading at
-  the last checkpoint before its window and stops 60 s of log after it. If
-  the system clock is stepped backwards while capturing (an NTP correction,
-  a manual change), keys typed after the step whose times fall in a queried
-  window can be missed. PLAN.md (section 10) describes an exact bound.
-
-**Running**
-* **Service as you, not root**: a systemd user service, because desktop
-  integration needs your session's D-Bus, and a root keylogger is the
-  worst case if it is ever compromised.
-* **Several runs on separate data directories are supported**, each
-  capturing everything. One rare gap: after a `kill -9`, the next start
-  unloads the KWin script the killed run left behind, by its name
+**Limits**
+* **`query text` assumes the log is in time order.** If the system clock is
+  stepped backwards while capturing (an NTP correction, a manual change),
+  keys typed after the step whose times fall in a queried window can be
+  missed. PLAN.md (section 10) describes an exact bound.
+* **Several runs side by side**: after a `kill -9`, the next start unloads
+  the KWin script the killed run left behind, by its name
   `brain_focus_<pid>`; if another run has meanwhile started with that same,
   reused process id, its script is unloaded instead and it stops seeing
   focus changes until it restarts.
+* **GNOME is verified against a real but headless GNOME Shell** (Tests),
+  its lock screen only through a stand-in for GNOME's lock service; a real
+  stock-Ubuntu login has not been tried yet.
 
 ## Tests
 

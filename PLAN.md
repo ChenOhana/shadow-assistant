@@ -24,9 +24,10 @@ build deliberately differs from it are called out ("Differs from the design").
 
 * **Capture** reads keyboards directly from the kernel (evdev), passively, and
   resolves each key to the character the app receives with libxkbcommon and
-  the user's real layouts. Focus (app id and window title) comes from a KWin
-  script calling back over D-Bus. Every event is one JSON line appended to
-  `events.jsonl`.
+  the user's real layouts. Focus (app id and window title) comes from
+  inside the compositor over D-Bus: a KWin script brain loads on KDE,
+  brain's GNOME Shell extension on GNOME. Every event is one JSON line
+  appended to `events.jsonl`.
 * **Ingest** (a thread in the same process) tails the log about once a
   second. In one SQLite transaction per batch it writes log checkpoints,
   opens, updates and closes writing sessions, reconstructs their text, and
@@ -750,13 +751,9 @@ a subprocess with an argument list.
 - **Other password prompts** are captured. AT-SPI's `password text` role
   would allow skipping them in apps that expose it.
 - **VS Code tier 2** is the one part of `brain.db` a rebuild from the log
-  does not reproduce: it depends on files on disk (the snapshot, taken
-  within 2 minutes of the session starting and before the file is saved,
-  and the saved file). Its replay, used only when the file was not saved
-  after the session, assumes the cursor starts at the end of the file,
-  replays faster than a human (so accepting a suggestion may not replay the
-  same) and runs without extensions when they exceed 300 MB. Unsaved new
-  files are not supported.
+  does not reproduce: it depends on files on disk (the snapshot and the
+  saved file). Besides the limits in 4.4, its replay types faster than a
+  human, so accepting a suggestion may not replay the same.
 - **Several runs side by side** (separate data directories) are supported.
   After a `kill -9`, the next start unloads the leftover KWin script by its
   `brain_focus_<pid>` name; if another run reused that process id in the
@@ -766,9 +763,9 @@ a subprocess with an argument list.
   (GNOME, active after a login). On wlroots compositors the equivalent would
   be `wlr-foreign-toplevel`; that is a new `Desktop` backend. Keys are
   captured on any Linux, attributed to `unknown` without a backend.
-- **GNOME is tested headless**: the extension and brain run against a real
-  GNOME Shell, but a headless one, and its lock screen only through a
-  stand-in; a check on a real stock-Ubuntu login is the remaining step.
+- **GNOME on a real login**: tests run against a real but headless GNOME
+  Shell (section 9); a check on a real stock-Ubuntu login is the remaining
+  step.
 - **Future work**: AT-SPI as a second source for GTK/Qt apps; the
   sandboxed-replay approach of tier 2 for terminals (a pty with the user's
   shell) and Chrome (CDP with a companion extension); retention and
