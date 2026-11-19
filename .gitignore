@@ -1,0 +1,5 @@
+/brain/target
+brain-data/
+/.claude
+/brain-chat/.venv
+__pycache__/
