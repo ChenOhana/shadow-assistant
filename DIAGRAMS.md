@@ -56,12 +56,12 @@ flowchart TB
     DSK -->|"append focus · paste · lock"| LOG
     LOG -->|"tails new lines"| ING
     ING -->|"creates & updates sessions"| DB
-    ING <-->|"jobs · results"| T2
+    T2 <-->|"jobs · results"| ING
     T2 <-->|"replays keys"| VSC
     DB -->|"search · list"| Q
     LOG -.->|"query text"| Q
     Q <-->|"JSON"| CHAT
-    API <-->|"tool calls"| CHAT
+    CHAT <-->|"tool calls"| API
 
     classDef src fill:#ffffff,stroke:#0ea5e9,stroke-width:1.5px,color:#0f172a
     classDef proc fill:#ffffff,stroke:#6366f1,stroke-width:1.5px,color:#0f172a
