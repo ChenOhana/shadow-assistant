@@ -31,9 +31,8 @@ flowchart TB
             LOG[("<b>events.jsonl</b><br/>append-only event log")]
             DB[("<b>brain.db</b><br/>sessions · full-text index")]
         end
-        T2 <-->|"jobs · results"| ING
-        ING -->|"tails new lines"| LOG
-        ING -->|"creates & updates sessions"| DB
+        LT <-->|"jobs · results"| ING
+        ING -->|"tails the log · creates & updates sessions"| LD
     end
 
     subgraph L4["🔎  READERS · ASSISTANT"]
@@ -49,8 +48,7 @@ flowchart TB
     FOC -->|"focus changes"| DSK
     CLIP <-->|"read on paste"| DSK
     SCR -->|"pause · resume"| DSK
-    INP -->|"append keys"| L3
-    DSK -->|"append focus · paste · lock"| L3
+    L2 ==>|"append keys · focus · paste · lock"| L3
     L3 ==>|"read-only: search · query text"| L4
 
     classDef src fill:#ffffff,stroke:#0ea5e9,stroke-width:1.5px,color:#0f172a
@@ -71,8 +69,8 @@ flowchart TB
     style LD fill:#fffbeb,stroke:#fde68a,color:#b45309
     style L4 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 0,3,4,7 stroke:#6366f1,stroke-width:2.2px
-    linkStyle 11 stroke:#94a3b8,stroke-width:2.5px
+    linkStyle 0,2,3,6 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 8,9 stroke:#94a3b8,stroke-width:2.5px
 ```
 
 | Layer | Role |
