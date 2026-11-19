@@ -87,7 +87,8 @@ impl Desktop for Gnome {
                     "brain: warning: brain's GNOME Shell extension (brain@shadowassistant) is \
                      not active (yet): until it is, keys are attributed to 'unknown', pastes \
                      are not resolved and layout switches are not followed. If it is not \
-                     installed, run `make install` and log out and back in once; brain picks \
+                     installed, run `make -C brain install` from the repository root and log \
+                     out and back in once; brain picks \
                      it up as soon as it runs."
                 );
                 false

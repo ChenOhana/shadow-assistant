@@ -81,7 +81,8 @@ GNOME Shell.
 
 ## Repository layout
 
-The repository root holds only three folders. Paths in this file are
+The repository root holds three folders and a short README.md pointing
+into them. Paths in this file are
 relative to it, except `src/…` and `tests/…`, which are in `brain/`. Run
 `cargo` in `brain/`; run `make` there too, or `make -C brain <target>` from
 the root.
