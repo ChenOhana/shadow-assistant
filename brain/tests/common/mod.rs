@@ -44,7 +44,7 @@ impl VirtualKeyboard {
         let file = OpenOptions::new()
             .write(true)
             .open("/dev/uinput")
-            .expect("open /dev/uinput (run scripts/setup-test-permissions.sh)");
+            .expect("open /dev/uinput (run brain/scripts/setup-test-permissions.sh)");
         let fd = file.as_raw_fd();
         let mut name = [0u8; 80];
         name[..21].copy_from_slice(b"brain-test-keyboard\0\0");

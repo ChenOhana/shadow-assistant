@@ -4,7 +4,7 @@ fixture (a made-up day: an ssh session to prod-db with a sudo password, a
 token in a command, a note). Not part of the unit tests: it needs an API key
 and costs a little (a few requests to claude-opus-5-5 at effort low).
 
-    chat/.venv/bin/python chat/live_check.py
+    brain-chat/.venv/bin/python brain-chat/live_check.py
 
 Prints each question, the tools Claude called and its answer, and checks
 the facts each answer must contain or must not contain.

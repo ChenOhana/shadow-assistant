@@ -1,8 +1,8 @@
 #!/bin/sh
 # Grants the one narrow permission brain's virtual keyboard tests need.
 # Run once:
-#   sudo sh scripts/setup-test-permissions.sh          # install
-#   sudo sh scripts/setup-test-permissions.sh --undo   # remove
+#   sudo sh brain/scripts/setup-test-permissions.sh          # install
+#   sudo sh brain/scripts/setup-test-permissions.sh --undo   # remove
 #
 # It gives the user logged in at the local seat (systemd "uaccess")
 # read/write access to /dev/uinput, so tests can type through a real kernel

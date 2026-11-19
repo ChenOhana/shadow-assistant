@@ -6,6 +6,8 @@ sessions are defined and their text reconstructed, how everything is stored
 and indexed, and how queries read it. It describes the code as built; the
 original design doc is in `ai-logs/design-doc.md`, and the places where the
 build deliberately differs from it are called out ("Differs from the design").
+Code paths such as `src/…`, `tests/…` and `packaging/…` are relative to
+the crate in `brain/`.
 
 ## 1. Summary
 
@@ -592,7 +594,7 @@ window has to be read anyway. Clock steps backwards are discussed in section
 
 ### 6.1 brain-chat: questions in plain language
 
-`chat/` is a Python program on top of `brain query`, the "future assistant"
+`brain-chat/` is a Python program on top of `brain query`, the "future assistant"
 of the assignment's diagram: Claude (`claude-opus-5-5`, adaptive thinking,
 effort `low`, streamed) answers questions by calling four read-only tools
 (`list_apps`, `sessions`, `search`, `text`), each running `brain query` as
@@ -682,7 +684,7 @@ a subprocess with an argument list.
 - **Queries**: search words are quoted for FTS5 and all SQL uses bound
   parameters.
 - **Hardware checks that need privileges** get exactly one narrow one
-  (`scripts/setup-test-permissions.sh`): `/dev/uinput` for the user at the
+  (`brain/scripts/setup-test-permissions.sh`): `/dev/uinput` for the user at the
   local seat (the Kate tests). The manual sleep/wake check sets its wake
   alarm with an ordinary `sudo rtcwake`.
 

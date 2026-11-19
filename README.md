@@ -7,11 +7,23 @@ lets you search it later.
 brain run                      # capture keystrokes + focus changes, store them
 brain query search "<words>"   # full-text search over writing sessions
 brain query text --app A       # what was typed into an app, reconstructed
-chat/brain-chat                # ask Claude about it in plain language
+brain-chat/brain-chat          # ask Claude about it in plain language
 ```
 
-> **Status: complete.** Research and architecture are in [PLAN.md](PLAN.md);
-> the AI transcripts are in [ai-logs/](ai-logs/).
+> **Status: complete.** Research and architecture are in
+> [docs/PLAN.md](docs/PLAN.md), diagrams in [docs/diagrams/](docs/diagrams/DIAGRAMS.md),
+> and the AI transcripts in [ai-logs/](ai-logs/).
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| [`brain/`](brain/) | The `brain` crate (Rust): `src/`, `tests/`, `packaging/` (GNOME Shell extension, systemd unit) and `scripts/` |
+| [`brain-chat/`](brain-chat/README.md) | brain-chat (Python): ask Claude about your data in plain language |
+| [`docs/`](docs/) | [`PLAN.md`](docs/PLAN.md), the research and architecture write-up; [`diagrams/`](docs/diagrams/DIAGRAMS.md), architecture and stage diagrams (Markdown, PNG, PDF) |
+| [`ai-logs/`](ai-logs/) | The AI transcripts and the original design doc |
+| `scripts/` | `export-ai-logs.py`, which regenerates `ai-logs/` |
+| `Cargo.toml`, `Makefile` | The Cargo workspace and the build, install and test targets; run them from here |
 
 ## Supported OS
 
@@ -27,7 +39,7 @@ warns and still captures keys, attributed to the app `unknown`, without
 paste text, and detects the lock screen only if the desktop implements
 `org.freedesktop.ScreenSaver`, so **an unlock password may be recorded
 there**. Desktop support sits behind a platform layer, so another desktop
-is a new backend, not a change to the rest (PLAN.md 2.4). The optional VS
+is a new backend, not a change to the rest (docs/PLAN.md 2.4). The optional VS
 Code tier 2 (below) works on both desktops.
 
 ## Build
@@ -58,7 +70,7 @@ sudo usermod -aG input "$USER"   # then log out and back in
 ```
 
 Note that the `input` group can read every input device. That is the price of
-display-server-independent capture (see PLAN.md for the alternatives).
+display-server-independent capture (see docs/PLAN.md for the alternatives).
 
 **On GNOME**, brain also needs its GNOME Shell extension: Wayland gives
 programs no way to see the focused window, and on KDE brain loads a KWin
@@ -241,7 +253,7 @@ database store UTC.
 }
 ```
 
-That is the output for this typing (`tests/query_cli.rs` replays it):
+That is the output for this typing (`brain/tests/query_cli.rs` replays it):
 
 | When | Window | Keys |
 |---|---|---|
@@ -256,7 +268,7 @@ With `--from 10:02` instead, `notes.md` starts empty and the result is
 
 ## Ask in plain language: brain-chat
 
-[`chat/`](chat/README.md) wraps the query commands with Claude, so you can
+[`brain-chat/`](brain-chat/README.md) wraps the query commands with Claude, so you can
 ask "which commands did I run yesterday on prod-db?" or "what did I tell
 Dana about the migration?" and get an answer that cites the times, apps and
 windows it comes from:
@@ -264,7 +276,7 @@ windows it comes from:
 ```sh
 sudo apt install python3-venv && make chat-setup   # once
 export ANTHROPIC_API_KEY=...
-chat/brain-chat --data-dir ~/.local/state/brain    # a chat; or pass a question
+brain-chat/brain-chat --data-dir ~/.local/state/brain   # a chat; or pass a question
 ```
 
 Claude answers by calling read-only tools (`list_apps`, `sessions`,
@@ -399,7 +411,7 @@ What is not covered above: choices with a cost, and known limits.
   (KDE: 600 ms delay, then 25 Hz; GNOME: 500 ms, then every 30 ms). The app
   may still have received one character more or fewer per hold: on Wayland
   each app runs its own repeat timer, and Qt's may fire up to 5% early or
-  late. Measured against Kate (`tests/repeat_e2e.rs`), brain stays within
+  late. Measured against Kate (`brain/tests/repeat_e2e.rs`), brain stays within
   one character per hold (two for holds over 2 s).
 * **Shortcuts are logged on the Latin layout** (Ctrl+A, not Ctrl+ש), the
   way applications match them; this also makes paste detection work in
@@ -436,7 +448,7 @@ What is not covered above: choices with a cost, and known limits.
 * **`query text` assumes the log is in time order.** If the system clock is
   stepped backwards while capturing (an NTP correction, a manual change),
   keys typed after the step whose times fall in a queried window can be
-  missed. PLAN.md (section 10) describes an exact bound.
+  missed. docs/PLAN.md (section 10) describes an exact bound.
 * **Several runs side by side**: after a `kill -9`, the next start unloads
   the KWin script the killed run left behind, by its name
   `brain_focus_<pid>`; if another run has meanwhile started with that same,
@@ -465,7 +477,7 @@ cargo test --release      # unit tests (~130) and the default integration tests:
 brain-chat has its own tests (`make chat-test`, offline: redaction, the
 tools against a real data directory, the question loop with a scripted
 model, the request through the real SDK with the network replaced) and a
-live check against the API (`chat/.venv/bin/python chat/live_check.py`,
+live check against the API (`brain-chat/.venv/bin/python brain-chat/live_check.py`,
 which costs a little).
 
 GNOME is tested against a real GNOME Shell: a private, headless one that
@@ -491,7 +503,7 @@ cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-t
 BRAIN_VSCODE_VISIBLE=1 cargo test --release --test vscode_replay --test tier2_e2e -- --ignored --test-threads=1
 ```
 
-`sudo sh scripts/setup-test-permissions.sh` (undo with `--undo`) grants one
+`sudo sh brain/scripts/setup-test-permissions.sh` (undo with `--undo`) grants one
 narrow permission once: access to `/dev/uinput` for the user at the local
 seat, which the Kate tests need.
 

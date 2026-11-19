@@ -16,7 +16,7 @@
 //!   app produced is not knowable from the keyboard.
 //!
 //! Needs a KDE Plasma session, Kate, and write access to /dev/uinput
-//! (`sudo sh scripts/setup-test-permissions.sh`). It types into the focused
+//! (`sudo sh brain/scripts/setup-test-permissions.sh`). It types into the focused
 //! window, so it only types while `brain`'s own log shows Kate focused, and
 //! stops otherwise. Do not touch the keyboard or mouse while it runs.
 //!

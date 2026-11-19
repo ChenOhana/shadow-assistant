@@ -6,7 +6,7 @@
 (`search`, `text`) answers questions while `run` keeps going.
 
 Original design doc: https://claude.ai/artifact/UTxCHmXHeSBaQASSNNiSP9
-(copy in `ai-logs/design-doc.md`). `PLAN.md` is the in-repo research and
+(copy in `ai-logs/design-doc.md`). `docs/PLAN.md` is the in-repo research and
 architecture write-up of the code as built, marks where it differs from the
 design, and must stay consistent with the code.
 
@@ -19,7 +19,7 @@ Ubuntu), behind the platform layer (`src/capture/platform.rs`,
 libxkbcommon (`libxkbcommon.so.0`, linked by file name, so no `-dev`
 package is needed). Focus comes from inside the compositor: a KWin script
 brain loads on KDE, brain's GNOME Shell extension
-(`packaging/gnome-extension/`, installed by `make install`) on GNOME.
+(`brain/packaging/gnome-extension/`, installed by `make install`) on GNOME.
 
 Tests that run by default must not need hardware, a desktop or privileges:
 use `brain run --synthetic RATE` (hidden flag) to drive the real pipeline.
@@ -78,7 +78,23 @@ GNOME Shell.
   new work: build, run, test it yourself, report, then **stop and wait for
   explicit approval** before starting the next piece.
 
+## Repository layout
+
+```
+Cargo.toml               workspace (members: brain); one Cargo.lock and target/ here
+Makefile                 build, install, service, brain-chat setup and tests
+brain/                   the Rust crate: src/, tests/, packaging/ (GNOME extension,
+                         systemd unit), scripts/ (extension install, test permissions)
+brain-chat/              brain-chat (Python): Claude over `brain query` tools,
+                         redaction, the question loop; `make chat-test`
+docs/                    PLAN.md, diagrams/ (shareable diagrams: PNGs, PDF)
+scripts/                 export-ai-logs.py
+ai-logs/                 the AI transcripts and the design doc
+```
+
 ## Code map
+
+Paths below are relative to `brain/`.
 
 ```
 src/main.rs              dispatches the commands, error → stderr + exit 1
@@ -107,8 +123,6 @@ src/query.rs             `query search|sessions|apps|text`, time windows, JSON o
 src/reconstruct/         buffer.rs tier 0 · apps.rs + editor.rs tier 1 ·
                          tier2.rs + vscode/ tier 2 (VS Code diff / replay)
 src/event.rs, timefmt.rs event format, timestamp parsing/formatting
-chat/                    brain-chat (Python): Claude over `brain query` tools,
-                         redaction, the question loop; `make chat-test`
 tests/                   integration tests that drive the real binary;
                          tests/common: `brain run` guard, uinput keyboard,
                          KDE helpers
@@ -149,16 +163,16 @@ tests/                   integration tests that drive the real binary;
   desktop); its private shell must not get a login session, so it cannot
   touch the real session's lock state. Run it after changing gnome.rs or
   the extension.
-- brain-chat (`chat/`) only reads through `brain query`; it never touches
+- brain-chat (`brain-chat/`) only reads through `brain query`; it never touches
   the data directory itself. Its offline tests (`make chat-test`) must not
-  call the API; `chat/live_check.py` does, costs money, and runs only with
+  call the API; `brain-chat/live_check.py` does, costs money, and runs only with
   the owner's OK. Keep the redaction in front of every tool result.
 - `brain run`s on separate data directories are supported side by side
   (`tests/two_instances.rs`); one data directory allows one run.
 - `tests/repeat_e2e.rs`, `tests/real_keyboard_e2e.rs` and the desktop test
   in `tests/two_instances.rs` (`#[ignore]`) type into real Kate windows
   through /dev/uinput: they need an unlocked KDE session,
-  `scripts/setup-test-permissions.sh`, and nobody touching the keyboard or
+  `brain/scripts/setup-test-permissions.sh`, and nobody touching the keyboard or
   mouse while they run. They only type while brain's log shows the
   intended window focused.
 - The input loop must deliver key transitions before emitting the repeats

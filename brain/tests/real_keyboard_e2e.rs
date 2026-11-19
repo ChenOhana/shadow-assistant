@@ -9,7 +9,7 @@
 //! on a newly plugged keyboard (no stuck modifier, hotplug picked up).
 //!
 //! Needs a KDE Plasma session with layouts us,il and Alt+Shift switching,
-//! Kate, and /dev/uinput access (`scripts/setup-test-permissions.sh`). It
+//! Kate, and /dev/uinput access (`brain/scripts/setup-test-permissions.sh`). It
 //! types only while brain's log shows the intended Kate window focused, and
 //! restores the keyboard layout when done. Do not touch the keyboard or
 //! mouse while it runs.

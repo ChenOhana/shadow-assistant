@@ -2,5 +2,5 @@
 /brain-data
 *.pdf
 /.claude
-/chat/.venv
+/brain-chat/.venv
 __pycache__/

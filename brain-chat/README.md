@@ -4,7 +4,7 @@ Ask questions about what you typed, in plain language, answered by Claude
 from brain's data while `brain run` keeps capturing:
 
 ```
-$ chat/brain-chat --data-dir ~/.local/state/brain "which commands did I run yesterday on prod-db?"
+$ brain-chat/brain-chat --data-dir ~/.local/state/brain "which commands did I run yesterday on prod-db?"
   → list_apps from=2026-11-17 to=2026-11-18
   → sessions app=org.kde.konsole window=prod-db from=2026-11-17 to=2026-11-18
 Yesterday on prod-db (Konsole, window "juan@prod-db: ~"):
@@ -31,9 +31,9 @@ brain-chat
 
 ```sh
 sudo apt install python3-venv     # Ubuntu, once
-make chat-setup                   # chat/.venv with the Anthropic SDK
+make chat-setup                   # brain-chat/.venv with the Anthropic SDK
 export ANTHROPIC_API_KEY=...      # your key
-chat/brain-chat --data-dir ~/brain-data
+brain-chat/brain-chat --data-dir ~/brain-data
 ```
 
 `--data-dir` is brain's data directory (`$BRAIN_DATA_DIR`, default
@@ -111,7 +111,7 @@ Anthropic's side by brain-chat; nothing is written to disk.
 
 ```sh
 make chat-test                 # offline: 34 tests, no API calls
-chat/.venv/bin/python chat/live_check.py   # live: 3 questions, costs a little
+brain-chat/.venv/bin/python brain-chat/live_check.py   # live: 3 questions, costs a little
 ```
 
 The offline tests cover the redaction, right-to-left rendering, the tools

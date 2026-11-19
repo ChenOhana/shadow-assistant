@@ -1,0 +1,24 @@
+[package]
+name = "brain"
+version = "0.1.0"
+edition = "2024"
+description = "Shadow assistant: captures what you type and makes it searchable"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"
+rusqlite = { version = "0.43", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Capture on Linux: input devices and the desktop's D-Bus services
+# (src/capture/linux/). Another platform brings its own.
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13"
+zbus = "5"
+
+[dev-dependencies]
+tempfile = "3"

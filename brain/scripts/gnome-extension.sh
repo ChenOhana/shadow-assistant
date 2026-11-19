@@ -3,8 +3,8 @@
 # (no root). brain needs it on GNOME for focus tracking, pastes and layout
 # switches: Wayland gives other programs no way to see the focused window.
 #
-#   sh scripts/gnome-extension.sh install     # copy + enable
-#   sh scripts/gnome-extension.sh uninstall   # disable + remove
+#   sh brain/scripts/gnome-extension.sh install     # copy + enable
+#   sh brain/scripts/gnome-extension.sh uninstall   # disable + remove
 #
 # GNOME on Wayland loads a newly installed extension only after you log out
 # and back in once; brain picks it up as soon as it runs.
