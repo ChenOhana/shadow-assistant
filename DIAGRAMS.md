@@ -3,22 +3,36 @@
 ## Architecture
 
 Layers run top to bottom, in the order data flows through them. Capture
-appends every event to `events.jsonl`; ingest turns it into sessions in
-`brain.db`; the readers only read both. Indigo arrows are two-way.
+appends every event to `events.jsonl`; ingest reads the new lines and
+creates and updates sessions in `brain.db`; `brain query` searches
+`brain.db` and reads `events.jsonl` for `query text`. Indigo arrows are
+two-way; the dotted arrow is `query text`.
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 40, "rankSpacing": 60, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 40, "rankSpacing": 60}}}%%
 flowchart TB
     subgraph L1["🖥️  DESKTOP SESSION"]
+        direction LR
         KB(["Keyboard"])
-        FOC(["Focused window"])
         CLIP(["Clipboard"])
+        FOC(["Focused window"])
         SCR(["Screen lock"])
+        KB ~~~ CLIP ~~~ FOC ~~~ SCR
     end
 
     subgraph L2["⚙️  BRAIN RUN · CAPTURE"]
+        direction LR
         INP("<b>Input thread</b><br/>evdev · xkbcommon")
         DSK("<b>Desktop listener</b><br/>KWin script · GNOME extension")
+        INP ~~~ DSK
+    end
+
+    subgraph FLOG["💾  DATA · LOG"]
+        LOG[("<b>events.jsonl</b><br/>append-only event log")]
+    end
+
+    subgraph FDB["💾  DATA · INDEX"]
+        DB[("<b>brain.db</b><br/>sessions · full-text index")]
     end
 
     subgraph L3["⚙️  BRAIN RUN · INGEST"]
@@ -27,12 +41,7 @@ flowchart TB
             T2("<b>VS Code tier 2</b><br/>diff · sandboxed replay")
         end
         ING("<b>Ingest</b> · every ~1 s<br/>sessions · text reconstruction")
-        subgraph LD["💾  DATA DIRECTORY"]
-            LOG[("<b>events.jsonl</b><br/>append-only event log")]
-            DB[("<b>brain.db</b><br/>sessions · full-text index")]
-        end
         LT <-->|"jobs · results"| ING
-        ING -->|"tails the log · creates & updates sessions"| LD
     end
 
     subgraph L4["🔎  READERS · ASSISTANT"]
@@ -44,12 +53,13 @@ flowchart TB
         CHAT <-->|"tool calls"| API
     end
 
-    KB -->|"key events"| INP
-    FOC -->|"focus changes"| DSK
-    CLIP <-->|"read on paste"| DSK
-    SCR -->|"pause · resume"| DSK
-    L2 ==>|"append keys · focus · paste · lock"| L3
-    L3 ==>|"read-only: search · query text"| L4
+    L1 ==>|"keys · focus changes · clipboard on paste · screen lock"| L2
+    L2 ==>|"append every event"| FLOG
+    FLOG ==>|"new lines"| L3
+    FDB <==>|"creates & updates sessions"| L3
+    L3 ~~~ L4
+    FDB ==>|"search"| L4
+    FLOG -.->|"query text"| L4
 
     classDef src fill:#ffffff,stroke:#0ea5e9,stroke-width:1.5px,color:#0f172a
     classDef proc fill:#ffffff,stroke:#6366f1,stroke-width:1.5px,color:#0f172a
@@ -64,22 +74,24 @@ flowchart TB
 
     style L1 fill:#f0f9ff,stroke:#bae6fd,color:#0369a1
     style L2 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
+    style FLOG fill:#fffbeb,stroke:#fde68a,color:#b45309
+    style FDB fill:#fffbeb,stroke:#fde68a,color:#b45309
     style L3 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
     style LT fill:#f5f3ff,stroke:#ddd6fe,color:#6d28d9
-    style LD fill:#fffbeb,stroke:#fde68a,color:#b45309
     style L4 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 0,2,3,6 stroke:#6366f1,stroke-width:2.2px
-    linkStyle 8,9 stroke:#94a3b8,stroke-width:2.5px
+    linkStyle 4,5,6,10 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 7,8,9,12 stroke:#94a3b8,stroke-width:2.5px
+    linkStyle 13 stroke:#94a3b8,stroke-width:1.8px
 ```
 
 | Layer | Role |
 |---|---|
 | Desktop session | What brain listens to: the keyboard, the focused window, the clipboard at a paste, the screen lock. |
 | brain run · capture | Reads keys passively (never delaying them) and gets focus from inside the compositor. |
+| Data · log / index | `events.jsonl`, the ground truth, appended once and never rewritten; `brain.db`, sessions and their full-text index, rebuildable from the log. |
 | brain run · ingest | Every second, turns new log lines into sessions and reconstructs their text. |
 | Tier 2 · optional | VS Code sessions from the real editor: a diff of the saved file, or a sandboxed replay. |
-| Data directory | `events.jsonl`, the ground truth, appended once and never rewritten; `brain.db`, sessions and their full-text index, rebuildable from the log. |
 | Readers · assistant | `brain query` answers while `brain run` keeps writing; brain-chat lets Claude call it to answer plain-language questions. |
 
 ## Stages
