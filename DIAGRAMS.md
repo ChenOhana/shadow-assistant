@@ -1,112 +1,146 @@
 # brain — diagrams
 
-## Components
+## Architecture
 
-Four layers, top to bottom: what brain listens to, `brain run` in the
-background, the data it keeps, and the readers that only read it. Pink
-arrows are two-way.
+Layers run top to bottom, in the order data flows through them. Indigo
+arrows are two-way; the dotted arrow is `brain query text` reading the
+log directly.
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "edgeLabelBackground": "#ffffff"}, "flowchart": {"curve": "basis", "padding": 20, "nodeSpacing": 40, "rankSpacing": 55}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 36, "rankSpacing": 54}}}%%
 flowchart TB
-    subgraph L1["🖥️ Your desktop"]
-        direction LR
-        KB(["⌨️ Keyboard"])
-        FOC(["🪟 Focused window"])
-        CLIP(["📋 Clipboard"])
-        SCR(["🔒 Screen lock"])
-        KB ~~~ FOC ~~~ CLIP ~~~ SCR
+    subgraph L1["🖥️  DESKTOP SESSION"]
+        KB(["Keyboard"])
+        FOC(["Focused window"])
+        CLIP(["Clipboard"])
+        SCR(["Screen lock"])
     end
 
-    subgraph L2["⚙️ brain run"]
-        direction LR
-        CAP(["🎙️ Capture"])
-        ING(["🔄 Ingest · every ~1 s"])
-        T2(["🧩 VS Code tier 2 · optional"])
-        CAP ~~~ ING
-        ING <--> T2
+    subgraph L2["⚙️  BRAIN RUN · CAPTURE"]
+        INP("<b>Input thread</b><br/>evdev · xkbcommon")
+        DSK("<b>Desktop listener</b><br/>KWin script · GNOME extension")
     end
 
-    subgraph L3["💾 Data directory"]
-        direction LR
-        LOG[("📜 Event log")]
-        DB[("🗂️ Search index")]
-        LOG ~~~ DB
+    subgraph L3["💾  DATA · GROUND TRUTH"]
+        LOG[("<b>events.jsonl</b><br/>append-only event log")]
     end
 
-    subgraph L4["🔎 Readers · never write"]
-        direction LR
-        Q(["🔍 brain query"])
-        CHAT(["💬 brain-chat"])
-        API{{"🤖 Claude API"}}
-        Q <--> CHAT <--> API
+    subgraph L4["⚙️  BRAIN RUN · INGEST"]
+        ING("<b>Ingest</b> · every ~1 s<br/>sessions · text reconstruction")
     end
 
-    L1 ==>|"keys · focus · clipboard · lock"| L2
-    L2 <==>|"append · tail · write"| L3
-    L3 ==>|"read-only"| L4
+    subgraph L5["💾  DATA · DERIVED"]
+        DB[("<b>brain.db</b><br/>sessions · full-text index")]
+    end
 
-    classDef src fill:#e0f2fe,stroke:#0284c7,stroke-width:1.5px,color:#0c4a6e
-    classDef proc fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#3b0764
-    classDef store fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
-    classDef read fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
-    classDef ext fill:#f1f5f9,stroke:#475569,stroke-width:1.5px,color:#0f172a
+    subgraph L6["🔎  READERS"]
+        Q("<b>brain query</b><br/>search · sessions · apps · text")
+    end
+
+    subgraph LT["🧩  TIER 2 · OPTIONAL"]
+        T2("<b>Tier 2 worker</b><br/>saved-file diff or replay")
+        VSC("<b>Headless VS Code</b><br/>sandboxed · offline")
+    end
+
+    subgraph L7["🤖  ASSISTANT"]
+        CHAT("<b>brain-chat</b><br/>questions in plain language")
+    end
+
+    API{{"<b>Claude API</b>"}}
+
+    KB -->|"key events"| INP
+    FOC -->|"focus changes"| DSK
+    CLIP <-->|"read on paste"| DSK
+    SCR -->|"pause · resume"| DSK
+    INP -->|"append keys"| LOG
+    DSK -->|"append focus · paste · lock"| LOG
+    LOG -->|"tails new lines"| ING
+    ING -->|"creates & updates sessions"| DB
+    ING <-->|"jobs · results"| T2
+    T2 <-->|"replays keys"| VSC
+    DB -->|"search · list"| Q
+    LOG -.->|"query text"| Q
+    Q <-->|"JSON"| CHAT
+    API <-->|"tool calls"| CHAT
+
+    classDef src fill:#ffffff,stroke:#0ea5e9,stroke-width:1.5px,color:#0f172a
+    classDef proc fill:#ffffff,stroke:#6366f1,stroke-width:1.5px,color:#0f172a
+    classDef store fill:#fffbeb,stroke:#f59e0b,stroke-width:1.5px,color:#0f172a
+    classDef read fill:#ffffff,stroke:#10b981,stroke-width:1.5px,color:#0f172a
+    classDef ext fill:#0f172a,stroke:#0f172a,stroke-width:1.5px,color:#ffffff
     class KB,FOC,CLIP,SCR src
-    class CAP,ING,T2 proc
+    class INP,DSK,ING,T2,VSC proc
     class LOG,DB store
     class Q,CHAT read
     class API ext
 
-    style L1 fill:#f0f9ff,stroke:#7dd3fc,stroke-width:1.5px,color:#0369a1
-    style L2 fill:#f5f3ff,stroke:#c4b5fd,stroke-width:1.5px,color:#6d28d9
-    style L3 fill:#fffbeb,stroke:#fcd34d,stroke-width:1.5px,color:#b45309
-    style L4 fill:#f0fdf4,stroke:#86efac,stroke-width:1.5px,color:#15803d
+    style L1 fill:#f0f9ff,stroke:#bae6fd,color:#0369a1
+    style L2 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
+    style L3 fill:#fffbeb,stroke:#fde68a,color:#b45309
+    style L4 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
+    style L5 fill:#fffbeb,stroke:#fde68a,color:#b45309
+    style L6 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
+    style LT fill:#f5f3ff,stroke:#ddd6fe,color:#6d28d9
+    style L7 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 4,6,7,9 stroke:#db2777,stroke-width:3px
-    linkStyle 8,10 stroke:#64748b,stroke-width:3px
+    linkStyle 2,8,9,12,13 stroke:#6366f1,stroke-width:2.2px
 ```
+
+| Layer | Role |
+|---|---|
+| Desktop session | What brain listens to: the keyboard, the focused window, the clipboard at a paste, the screen lock. |
+| brain run · capture | Reads keys passively (never delaying them) and gets focus from inside the compositor. |
+| Data · ground truth | `events.jsonl`: every event, appended once, never rewritten. |
+| brain run · ingest | Every second, turns new log lines into sessions and reconstructs their text. |
+| Data · derived | `brain.db`: sessions and their full-text index, rebuildable from the log. |
+| Tier 2 · optional | VS Code sessions from the real editor: a diff of the saved file, or a sandboxed replay. |
+| Readers | `brain query` answers while `brain run` keeps writing. |
+| Assistant | brain-chat lets Claude call `brain query` to answer plain-language questions. |
 
 ## Stages
 
-What happens to what you type, from the keyboard to an answer. Dashed
-pink arrows are loops.
+What happens to what you type, from the keyboard to an answer. Dotted
+arrows are loops.
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "15px", "lineColor": "#64748b", "edgeLabelBackground": "#ffffff"}, "flowchart": {"curve": "basis", "padding": 20, "nodeSpacing": 40, "rankSpacing": 55}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 36, "rankSpacing": 54}}}%%
 flowchart TB
-    subgraph RUN["⚙️ brain run"]
+    subgraph RUN["⚙️  BRAIN RUN"]
         direction LR
-        S1(["⌨️ 1 · Capture<br/>keys + focused window"])
-        S2[("📜 2 · Log<br/>one line per event")]
-        S3(["🧵 3 · Sessions<br/>by app + window"])
-        S4(["✍️ 4 · Reconstruct<br/>keys → text"])
-        S5[("🗂️ 5 · Index<br/>full-text search")]
-        S1 --> S2 --> S3 --> S4 --> S5
+        S1(["<b>1 · Capture</b><br/>key + focused window"])
+        S2[("<b>2 · Log</b><br/>one JSON line per event")]
+        S3(["<b>3 · Sessions</b><br/>per app + window"])
+        S4(["<b>4 · Reconstruct</b><br/>keys → text"])
+        S5[("<b>5 · Index</b><br/>full-text search")]
+        S1 -->|"event"| S2
+        S2 -->|"new lines"| S3
+        S3 -->|"session keys"| S4
+        S4 -->|"session text"| S5
         S5 -.->|"↻ every ~1 s"| S3
     end
 
-    subgraph USE["🔎 Readers"]
+    subgraph USE["🔎  READERS · ON DEMAND"]
         direction LR
-        S6(["🔍 6 · Query<br/>JSON answers"])
-        S7(["💬 7 · Ask<br/>brain-chat + Claude"])
-        S6 --> S7
+        S6(["<b>6 · Query</b><br/>JSON answers"])
+        S7(["<b>7 · Ask</b><br/>brain-chat + Claude"])
+        S6 -->|"results"| S7
         S7 -.->|"↻ up to 10 rounds"| S6
     end
 
     RUN ==>|"search · rebuild a time range"| USE
 
-    classDef proc fill:#ede9fe,stroke:#7c3aed,stroke-width:1.5px,color:#3b0764
-    classDef store fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
-    classDef read fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+    classDef proc fill:#ffffff,stroke:#6366f1,stroke-width:1.5px,color:#0f172a
+    classDef store fill:#fffbeb,stroke:#f59e0b,stroke-width:1.5px,color:#0f172a
+    classDef read fill:#ffffff,stroke:#10b981,stroke-width:1.5px,color:#0f172a
     class S1,S3,S4 proc
     class S2,S5 store
     class S6,S7 read
 
-    style RUN fill:#f5f3ff,stroke:#c4b5fd,stroke-width:1.5px,color:#6d28d9
-    style USE fill:#f0fdf4,stroke:#86efac,stroke-width:1.5px,color:#15803d
+    style RUN fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
+    style USE fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 4,6 stroke:#db2777,stroke-width:2.5px
-    linkStyle 7 stroke:#64748b,stroke-width:3px
+    linkStyle 4,6 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 7 stroke:#94a3b8,stroke-width:2.5px
 ```
 
 | Stage | What it does |
