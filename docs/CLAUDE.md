@@ -1,7 +1,7 @@
 # CLAUDE.md — instructions for coding agents working on `brain`
 
 `brain` is a Rust CLI for the Endpoint "Shadow Assistant" home assignment
-(`docs/Endpoint Home Assignment.pdf`, not committed). One binary, two commands:
+(`docs/Endpoint Home Assignment.pdf`). One binary, two commands:
 `brain run` captures keystrokes + focus and stores them; `brain query`
 (`search`, `text`) answers questions while `run` keeps going.
 
@@ -94,8 +94,8 @@ brain/                   the Rust crate: Cargo.toml, Cargo.lock, Makefile (build
                          into brain/target/
 brain-chat/              brain-chat (Python): Claude over `brain query` tools,
                          redaction, the question loop; `make -C brain chat-test`
-docs/                    README.md, this file, PLAN.md, the assignment PDF (not
-                         committed), diagrams/ (shareable diagrams: PNGs, PDF),
+docs/                    README.md, this file, PLAN.md, the assignment PDF,
+                         diagrams/ (shareable diagrams: PNGs, PDF),
                          ai-logs/ (transcripts, design doc, export-ai-logs.py)
 ```
 
