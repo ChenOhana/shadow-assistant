@@ -2,12 +2,12 @@
 
 ## Architecture
 
-Layers run top to bottom, in the order data flows through them. Indigo
-arrows are two-way; the dotted arrow is `brain query text` reading the
-log directly.
+Layers run top to bottom, in the order data flows through them. Capture
+appends every event to `events.jsonl`; ingest turns it into sessions in
+`brain.db`; the readers only read both. Indigo arrows are two-way.
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 36, "rankSpacing": 54}}}%%
+%%{init: {"theme": "base", "themeVariables": {"fontSize": "14px", "lineColor": "#94a3b8", "edgeLabelBackground": "#ffffff", "textColor": "#334155"}, "flowchart": {"curve": "basis", "padding": 22, "nodeSpacing": 40, "rankSpacing": 60, "subGraphTitleMargin": {"top": 4, "bottom": 12}}}}%%
 flowchart TB
     subgraph L1["🖥️  DESKTOP SESSION"]
         KB(["Keyboard"])
@@ -21,47 +21,37 @@ flowchart TB
         DSK("<b>Desktop listener</b><br/>KWin script · GNOME extension")
     end
 
-    subgraph L3["💾  DATA · GROUND TRUTH"]
-        LOG[("<b>events.jsonl</b><br/>append-only event log")]
-    end
-
-    subgraph L4["⚙️  BRAIN RUN · INGEST"]
+    subgraph L3["⚙️  BRAIN RUN · INGEST"]
+        direction LR
+        subgraph LT["🧩  TIER 2 · OPTIONAL"]
+            T2("<b>VS Code tier 2</b><br/>diff · sandboxed replay")
+        end
         ING("<b>Ingest</b> · every ~1 s<br/>sessions · text reconstruction")
+        subgraph LD["💾  DATA DIRECTORY"]
+            LOG[("<b>events.jsonl</b><br/>append-only event log")]
+            DB[("<b>brain.db</b><br/>sessions · full-text index")]
+        end
+        T2 <-->|"jobs · results"| ING
+        ING -->|"tails new lines"| LOG
+        ING -->|"creates & updates sessions"| DB
     end
 
-    subgraph L5["💾  DATA · DERIVED"]
-        DB[("<b>brain.db</b><br/>sessions · full-text index")]
-    end
-
-    subgraph L6["🔎  READERS"]
+    subgraph L4["🔎  READERS · ASSISTANT"]
+        direction LR
         Q("<b>brain query</b><br/>search · sessions · apps · text")
-    end
-
-    subgraph LT["🧩  TIER 2 · OPTIONAL"]
-        T2("<b>Tier 2 worker</b><br/>saved-file diff or replay")
-        VSC("<b>Headless VS Code</b><br/>sandboxed · offline")
-    end
-
-    subgraph L7["🤖  ASSISTANT"]
         CHAT("<b>brain-chat</b><br/>questions in plain language")
+        API{{"<b>Claude API</b>"}}
+        Q <-->|"JSON"| CHAT
+        CHAT <-->|"tool calls"| API
     end
-
-    API{{"<b>Claude API</b>"}}
 
     KB -->|"key events"| INP
     FOC -->|"focus changes"| DSK
     CLIP <-->|"read on paste"| DSK
     SCR -->|"pause · resume"| DSK
-    INP -->|"append keys"| LOG
-    DSK -->|"append focus · paste · lock"| LOG
-    LOG -->|"tails new lines"| ING
-    ING -->|"creates & updates sessions"| DB
-    T2 <-->|"jobs · results"| ING
-    T2 <-->|"replays keys"| VSC
-    DB -->|"search · list"| Q
-    LOG -.->|"query text"| Q
-    Q <-->|"JSON"| CHAT
-    CHAT <-->|"tool calls"| API
+    INP -->|"append keys"| L3
+    DSK -->|"append focus · paste · lock"| L3
+    L3 ==>|"read-only: search · query text"| L4
 
     classDef src fill:#ffffff,stroke:#0ea5e9,stroke-width:1.5px,color:#0f172a
     classDef proc fill:#ffffff,stroke:#6366f1,stroke-width:1.5px,color:#0f172a
@@ -69,33 +59,30 @@ flowchart TB
     classDef read fill:#ffffff,stroke:#10b981,stroke-width:1.5px,color:#0f172a
     classDef ext fill:#0f172a,stroke:#0f172a,stroke-width:1.5px,color:#ffffff
     class KB,FOC,CLIP,SCR src
-    class INP,DSK,ING,T2,VSC proc
+    class INP,DSK,ING,T2 proc
     class LOG,DB store
     class Q,CHAT read
     class API ext
 
     style L1 fill:#f0f9ff,stroke:#bae6fd,color:#0369a1
     style L2 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
-    style L3 fill:#fffbeb,stroke:#fde68a,color:#b45309
-    style L4 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
-    style L5 fill:#fffbeb,stroke:#fde68a,color:#b45309
-    style L6 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
+    style L3 fill:#eef2ff,stroke:#c7d2fe,color:#4338ca
     style LT fill:#f5f3ff,stroke:#ddd6fe,color:#6d28d9
-    style L7 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
+    style LD fill:#fffbeb,stroke:#fde68a,color:#b45309
+    style L4 fill:#ecfdf5,stroke:#a7f3d0,color:#047857
 
-    linkStyle 2,8,9,12,13 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 0,3,4,7 stroke:#6366f1,stroke-width:2.2px
+    linkStyle 11 stroke:#94a3b8,stroke-width:2.5px
 ```
 
 | Layer | Role |
 |---|---|
 | Desktop session | What brain listens to: the keyboard, the focused window, the clipboard at a paste, the screen lock. |
 | brain run · capture | Reads keys passively (never delaying them) and gets focus from inside the compositor. |
-| Data · ground truth | `events.jsonl`: every event, appended once, never rewritten. |
 | brain run · ingest | Every second, turns new log lines into sessions and reconstructs their text. |
-| Data · derived | `brain.db`: sessions and their full-text index, rebuildable from the log. |
 | Tier 2 · optional | VS Code sessions from the real editor: a diff of the saved file, or a sandboxed replay. |
-| Readers | `brain query` answers while `brain run` keeps writing. |
-| Assistant | brain-chat lets Claude call `brain query` to answer plain-language questions. |
+| Data directory | `events.jsonl`, the ground truth, appended once and never rewritten; `brain.db`, sessions and their full-text index, rebuildable from the log. |
+| Readers · assistant | `brain query` answers while `brain run` keeps writing; brain-chat lets Claude call it to answer plain-language questions. |
 
 ## Stages
 
